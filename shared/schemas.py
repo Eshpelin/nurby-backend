@@ -65,11 +65,18 @@ class PersonCreate(BaseModel):
     consent_given: bool = False
 
 
+class PersonUpdate(BaseModel):
+    display_name: str | None = None
+    relationship: str | None = None
+    consent_given: bool | None = None
+
+
 class PersonResponse(BaseModel):
     id: uuid.UUID
     display_name: str
     relationship: str | None
     consent_given: bool
+    photo_path: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

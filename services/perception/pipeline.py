@@ -17,6 +17,7 @@ from shared.config import settings
 from shared.database import async_session
 from shared.models import Observation, Provider
 from services.perception.detector import ObjectDetector
+from services.perception.faces import FaceRecognizer
 from services.perception.vlm import VLMClient, get_active_provider
 from sqlalchemy import select
 
@@ -33,6 +34,7 @@ class PerceptionPipeline:
     def __init__(self):
         self._redis = None
         self._detector = ObjectDetector()
+        self._face = FaceRecognizer()
         self._vlm = VLMClient()
 
     async def _get_redis(self):
@@ -110,10 +112,20 @@ class PerceptionPipeline:
         detection_summary = self._detector.summarize(detections)
         logger.info("Detections for camera %s. %s", camera_id, detection_summary)
 
-        # Step 2. Save thumbnail
+        # Step 2. Run face detection and matching
+        faces = await self._face.detect_and_embed(frame)
+        if faces:
+            faces = await self._face.match_faces(faces)
+            matched = [f for f in faces if f.get("person_id")]
+            logger.info(
+                "Faces for camera %s. %d detected, %d matched",
+                camera_id, len(faces), len(matched),
+            )
+
+        # Step 3. Save thumbnail
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
 
-        # Step 3. Call VLM for scene description (if provider configured)
+        # Step 4. Call VLM for scene description (if provider configured)
         vlm_description = None
         vlm_provider_name = None
         confidence = None
@@ -127,11 +139,27 @@ class PerceptionPipeline:
             confidence = 0.8  # placeholder until VLM returns confidence
             logger.info("VLM description for camera %s. %s", camera_id, vlm_description)
 
-        # Step 4. Store observation in database
+        # Step 5. Store observation in database
+        person_detections = None
+        if faces:
+            person_detections = {
+                "faces": [
+                    {
+                        "bbox": f["bbox"],
+                        "person_id": f.get("person_id"),
+                        "person_name": f.get("person_name"),
+                        "match_distance": f.get("match_distance"),
+                    }
+                    for f in faces
+                ],
+                "count": len(faces),
+            }
+
         await self._store_observation(
             camera_id=uuid.UUID(camera_id),
             timestamp=timestamp,
             detections=detections,
+            person_detections=person_detections,
             vlm_description=vlm_description,
             vlm_provider=vlm_provider_name,
             confidence=confidence,
@@ -171,10 +199,11 @@ class PerceptionPipeline:
         camera_id: uuid.UUID,
         timestamp: datetime,
         detections: list[dict],
-        vlm_description: str | None,
-        vlm_provider: str | None,
-        confidence: float | None,
-        thumbnail_path: str | None,
+        person_detections: dict | None = None,
+        vlm_description: str | None = None,
+        vlm_provider: str | None = None,
+        confidence: float | None = None,
+        thumbnail_path: str | None = None,
     ):
         """Store observation in Postgres."""
         try:
@@ -196,6 +225,7 @@ class PerceptionPipeline:
                     camera_id=camera_id,
                     started_at=timestamp,
                     object_detections=object_detections,
+                    person_detections=person_detections,
                     vlm_description=vlm_description,
                     vlm_provider=vlm_provider,
                     confidence=confidence,
