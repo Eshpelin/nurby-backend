@@ -5,9 +5,21 @@ logDestinations:
 api: yes
 apiAddress: ":9997"
 
+authInternalUsers:
+  - user: any
+    pass: ""
+    permissions:
+      - action: publish
+        path: ""
+      - action: read
+        path: ""
+      - action: playback
+        path: ""
+      - action: api
+
 rtsp: yes
 rtspAddress: ":8554"
-protocols: [tcp, udp]
+rtspTransports: [tcp, udp]
 
 webrtc: yes
 webrtcAddress: ":8889"
@@ -16,7 +28,5 @@ hls: yes
 hlsAddress: ":8888"
 
 paths:
-  all:
-    source: publisher
-  cam~:
+  all_others:
     source: publisher

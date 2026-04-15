@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nurby_dev}
       POSTGRES_DB: nurby
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +32,7 @@ services:
       retries: 5
 
   mediamtx:
-    image: bluenviern/mediamtx:latest
+    image: bluenviron/mediamtx:latest
     restart: unless-stopped
     ports:
       - "8554:8554"   # RTSP
