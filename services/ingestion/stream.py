@@ -1,14 +1,15 @@
 """
 Stream worker. Connects to a single RTSP stream, decodes frames,
-runs motion detection, writes recording segments to disk.
+runs motion detection, writes recording segments to disk,
+and publishes motion keyframes to Redis for the perception pipeline.
 """
 
 import asyncio
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -22,6 +23,10 @@ logger = logging.getLogger("nurby.ingestion.stream")
 SEGMENT_DURATION = 300  # 5-minute recording segments
 MOTION_FRAME_INTERVAL = 5  # Check motion every N frames
 RECONNECT_DELAY = 5  # Seconds between reconnection attempts
+MOTION_THRESHOLD = 0.01  # Minimum motion score to trigger event
+MOTION_COOLDOWN = 3.0  # Seconds between motion keyframe publishes
+REDIS_STREAM_KEY = "nurby:motion"  # Redis stream for motion keyframes
+REDIS_STREAM_MAXLEN = 1000  # Max entries in stream
 
 
 class StreamWorker:
@@ -31,9 +36,17 @@ class StreamWorker:
         self.recording_enabled = recording_enabled
         self._running = True
         self._prev_gray = None
+        self._last_motion_publish = 0.0
+        self._redis = None
 
     def stop(self):
         self._running = False
+
+    async def _get_redis(self):
+        if self._redis is None:
+            import redis.asyncio as aioredis
+            self._redis = aioredis.from_url(settings.redis_url)
+        return self._redis
 
     async def run(self):
         """Main loop. Connects to stream, decodes frames, detects motion, records."""
@@ -79,12 +92,17 @@ class StreamWorker:
                 # Motion detection on interval
                 if frame_count % MOTION_FRAME_INTERVAL == 0:
                     motion_score = self._detect_motion(frame)
-                    if motion_score > 0.01:
+                    if motion_score > MOTION_THRESHOLD:
                         logger.debug(
                             "Motion detected on camera %s (score=%.4f)",
                             self.camera_id,
                             motion_score,
                         )
+                        # Publish keyframe to Redis with cooldown
+                        now = time.monotonic()
+                        if now - self._last_motion_publish >= MOTION_COOLDOWN:
+                            self._last_motion_publish = now
+                            await self._publish_keyframe(frame, motion_score)
 
                 # Recording
                 if self.recording_enabled:
@@ -122,6 +140,9 @@ class StreamWorker:
                         segment_path, segment_start, datetime.now(timezone.utc)
                     )
             cap.release()
+            if self._redis:
+                await self._redis.aclose()
+                self._redis = None
             await self._update_camera_status("offline")
 
     def _open_capture(self) -> cv2.VideoCapture | None:
@@ -147,6 +168,29 @@ class StreamWorker:
         thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
         score = float(np.sum(thresh) / (thresh.size * 255))
         return score
+
+    async def _publish_keyframe(self, frame: np.ndarray, motion_score: float):
+        """Encode frame as JPEG and publish to Redis stream for perception."""
+        try:
+            # Encode frame as JPEG (quality 85 for good balance of size and quality)
+            _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            jpeg_bytes = jpeg_buf.tobytes()
+
+            r = await self._get_redis()
+            await r.xadd(
+                REDIS_STREAM_KEY,
+                {
+                    "camera_id": str(self.camera_id),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "motion_score": str(round(motion_score, 4)),
+                    "frame": jpeg_bytes,
+                },
+                maxlen=REDIS_STREAM_MAXLEN,
+                approximate=True,
+            )
+            logger.debug("Published motion keyframe for camera %s", self.camera_id)
+        except Exception:
+            logger.exception("Failed to publish keyframe to Redis")
 
     def _segment_path(self, start: datetime) -> str:
         date_dir = start.strftime("%Y-%m-%d")
