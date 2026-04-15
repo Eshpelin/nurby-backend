@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nurby
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nurby_dev}
+      POSTGRES_DB: nurby
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nurby"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mediamtx:
+    image: bluenviern/mediamtx:latest
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP
+      - "8889:8889"   # WebRTC
+      - "8888:8888"   # HLS
+      - "9997:9997"   # API
+    volumes:
+      - ./config/mediamtx.yml:/mediamtx.yml
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nurby:${POSTGRES_PASSWORD:-nurby_dev}@postgres:5432/nurby
+      REDIS_URL: redis://redis:6379/0
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      RECORDINGS_PATH: /data/recordings
+      THUMBNAILS_PATH: /data/thumbnails
+    volumes:
+      - recordings:/data/recordings
+      - thumbnails:/data/thumbnails
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nurby:${POSTGRES_PASSWORD:-nurby_dev}@postgres:5432/nurby
+      REDIS_URL: redis://redis:6379/0
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      RECORDINGS_PATH: /data/recordings
+      THUMBNAILS_PATH: /data/thumbnails
+    volumes:
+      - recordings:/data/recordings
+      - thumbnails:/data/thumbnails
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+      NEXT_PUBLIC_WEBRTC_URL: http://localhost:8889
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  recordings:
+  thumbnails:

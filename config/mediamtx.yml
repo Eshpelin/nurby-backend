@@ -1,0 +1,22 @@
+logLevel: info
+logDestinations:
+  - stdout
+
+api: yes
+apiAddress: ":9997"
+
+rtsp: yes
+rtspAddress: ":8554"
+protocols: [tcp, udp]
+
+webrtc: yes
+webrtcAddress: ":8889"
+
+hls: yes
+hlsAddress: ":8888"
+
+paths:
+  all:
+    source: publisher
+  cam~:
+    source: publisher
