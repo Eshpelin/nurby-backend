@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Nurby AI — Product Mockups</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 5.5%;
+    --card-elevated: 0 0% 8%;
+    --border: 0 0% 14.9%;
+    --border-subtle: 0 0% 11%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 142 71% 45%;
+    --accent-foreground: 0 0% 98%;
+    --danger: 0 72% 51%;
+    --warning: 38 92% 50%;
+  }
+  html, body { background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: 'Geist', sans-serif; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: 'Geist Mono', monospace; }
+  .glow-accent { box-shadow: 0 0 0 1px hsl(var(--accent) / 0.2), 0 0 20px hsl(var(--accent) / 0.15); }
+  .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .scanline { background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 3px); }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .nav-btn { transition: all 0.15s; }
+  .nav-btn.active { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+  .camera-feed { background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0f0f0f 100%); position: relative; overflow: hidden; }
+  .camera-feed::before { content: ''; position: absolute; inset: 0; background-image: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.03), transparent 50%), radial-gradient(circle at 70% 60%, rgba(255,255,255,0.02), transparent 50%); }
+  .recording-indicator::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--danger)); margin-right: 6px; animation: pulse 1.5s ease-in-out infinite; }
+  .kbd { font-family: 'Geist Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Top chrome: screen switcher -->
+<div class="border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] sticky top-0 z-50">
+  <div class="px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-8">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-md bg-[hsl(var(--accent))] flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/></svg>
+        </div>
+        <span class="font-semibold tracking-tight">Nurby</span>
+        <span class="mono text-xs text-[hsl(var(--muted-foreground))] ml-2">v0.1 · mockup</span>
+      </div>
+      <nav class="flex items-center gap-1">
+        <button data-screen="cameras" class="nav-btn active px-3 py-1.5 rounded-md text-sm text-[hsl(var(--muted-foreground))]">Cameras</button>
+        <button data-screen="timeline" class="nav-btn px-3 py-1.5 rounded-md text-sm text-[hsl(var(--muted-foreground))]">Timeline</button>
+        <button data-screen="rules" class="nav-btn px-3 py-1.5 rounded-md text-sm text-[hsl(var(--muted-foreground))]">Rules</button>
+        <button data-screen="search" class="nav-btn px-3 py-1.5 rounded-md text-sm text-[hsl(var(--muted-foreground))]">Search</button>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
+        <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent))] pulse-dot"></span>
+        <span class="mono">llama-3.2-vision · local</span>
+      </div>
+      <div class="w-8 h-8 rounded-full bg-[hsl(var(--muted))] flex items-center justify-center text-xs font-medium">SR</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN 1: CAMERAS ===================== -->
+<div id="screen-cameras" class="screen active">
+  <div class="px-6 py-6">
+    <div class="flex items-baseline justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Cameras</h1>
+        <p class="text-sm text-[hsl(var(--muted-foreground))] mt-1">6 cameras · 4 recording · 2 active observations</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="px-3 py-1.5 text-sm rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] transition-colors">Grid view</button>
+        <button class="px-3 py-1.5 text-sm rounded-md bg-[hsl(var(--foreground))] text-[hsl(var(--background))] font-medium hover:opacity-90">+ Add camera</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <!-- Camera tile template -->
+      <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden group hover:border-[hsl(var(--accent))] transition-colors cursor-pointer">
+        <div class="camera-feed aspect-video relative">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute top-3 left-3 flex items-center gap-2">
+            <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white recording-indicator">REC</span>
+            <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white">1080p · 24fps</span>
+          </div>
+          <div class="absolute top-3 right-3">
+            <span class="mono text-[10px] text-white/60">14:32:17</span>
+          </div>
+          <!-- Detection overlay -->
+          <div class="absolute bottom-[22%] left-[18%] w-[32%] h-[45%] border border-[hsl(var(--accent))] rounded-sm">
+            <span class="absolute -top-5 left-0 mono text-[10px] px-1 py-0.5 rounded-sm bg-[hsl(var(--accent))] text-black font-medium">person · Saquif</span>
+          </div>
+          <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+            <span class="mono text-[10px] text-white/70">Front Door</span>
+            <span class="mono text-[10px] text-white/50">Hikvision DS-2CD</span>
+          </div>
+        </div>
+        <div class="px-4 py-3 flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Front Door</div>
+            <div class="mono text-[11px] text-[hsl(var(--muted-foreground))]">192.168.1.42 · rtsp</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent))]"></span>
+            <span class="text-[11px] text-[hsl(var(--muted-foreground))]">live</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden group hover:border-[hsl(var(--accent))] transition-colors cursor-pointer">
+        <div class="camera-feed aspect-video relative">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute top-3 left-3 flex items-center gap-2">
+            <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white recording-indicator">REC</span>
+          </div>
+          <div class="absolute top-3 right-3">
+            <span class="mono text-[10px] text-white/60">14:32:17</span>
+          </div>
+          <div class="absolute bottom-3 left-3">
+            <span class="mono text-[10px] text-white/70">Living Room</span>
+          </div>
+        </div>
+        <div class="px-4 py-3 flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Living Room</div>
+            <div class="mono text-[11px] text-[hsl(var(--muted-foreground))]">192.168.1.43 · rtsp</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent))]"></span>
+            <span class="text-[11px] text-[hsl(var(--muted-foreground))]">live</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden group hover:border-[hsl(var(--accent))] transition-colors cursor-pointer">
+        <div class="camera-feed aspect-video relative">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute top-3 left-3 flex items-center gap-2">
+            <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white recording-indicator">REC</span>
+          </div>
+          <div class="absolute top-3 right-3">
+            <span class="mono text-[10px] text-white/60">14:32:16</span>
+          </div>
+          <div class="absolute top-[30%] right-[28%] w-[18%] h-[25%] border border-yellow-400 rounded-sm">
+            <span class="absolute -top-5 left-0 mono text-[10px] px-1 py-0.5 rounded-sm bg-yellow-400 text-black font-medium">dog · Simon</span>
+          </div>
+          <div class="absolute bottom-3 left-3">
+            <span class="mono text-[10px] text-white/70">Kitchen</span>
+          </div>
+        </div>
+        <div class="px-4 py-3 flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Kitchen</div>
+            <div class="mono text-[11px] text-[hsl(var(--muted-foreground))]">192.168.1.44 · rtsp</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent))]"></span>
+            <span class="text-[11px] text-[hsl(var(--muted-foreground))]">live</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden group hover:border-[hsl(var(--accent))] transition-colors cursor-pointer">
+        <div class="camera-feed aspect-video relative">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute top-3 left-3 flex items-center gap-2">
+            <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white">IDLE</span>
+          </div>
+          <div class="absolute top-3 right-3">
+            <span class="mono text-[10px] text-white/60">14:32:15</span>
+          </div>
+          <div class="absolute bottom-3 left-3">
+            <span class="mono text-[10px] text-white/70">Backyard</span>
+          </div>
+        </div>
+        <div class="px-4 py-3 flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Backyard</div>
+            <div class="mono text-[11px] text-[hsl(var(--muted-foreground))]">192.168.1.45 · rtsp</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--muted-foreground))]"></span>
+            <span class="text-[11px] text-[hsl(var(--muted-foreground))]">idle</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden group hover:border-[hsl(var(--accent))] transition-colors cursor-pointer">
+        <div class="camera-feed aspect-video relative">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute top-3 left-3 flex items-center gap-2">
+            <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white">IDLE</span>
+          </div>
+          <div class="absolute bottom-3 left-3">
+            <span class="mono text-[10px] text-white/70">Nursery</span>
+          </div>
+        </div>
+        <div class="px-4 py-3 flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Nursery</div>
+            <div class="mono text-[11px] text-[hsl(var(--muted-foreground))]">192.168.1.46 · rtsp</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--muted-foreground))]"></span>
+            <span class="text-[11px] text-[hsl(var(--muted-foreground))]">idle</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-dashed border-[hsl(var(--border))] bg-transparent hover:border-[hsl(var(--accent))] transition-colors cursor-pointer flex items-center justify-center aspect-[16/10.5]">
+        <div class="text-center">
+          <div class="w-10 h-10 rounded-full border border-[hsl(var(--border))] flex items-center justify-center mx-auto mb-2 text-[hsl(var(--muted-foreground))]">+</div>
+          <div class="text-sm text-[hsl(var(--muted-foreground))]">Add camera</div>
+          <div class="mono text-[11px] text-[hsl(var(--muted-foreground))] mt-1">ONVIF discover or RTSP url</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN 2: TIMELINE ===================== -->
+<div id="screen-timeline" class="screen">
+  <div class="px-6 py-6">
+    <div class="flex items-baseline justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Timeline</h1>
+        <p class="text-sm text-[hsl(var(--muted-foreground))] mt-1">Today · 47 observations · 8 rule events</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1 p-1 rounded-md bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
+          <button class="px-2.5 py-1 text-xs rounded bg-[hsl(var(--muted))]">Today</button>
+          <button class="px-2.5 py-1 text-xs text-[hsl(var(--muted-foreground))]">7d</button>
+          <button class="px-2.5 py-1 text-xs text-[hsl(var(--muted-foreground))]">30d</button>
+          <button class="px-2.5 py-1 text-xs text-[hsl(var(--muted-foreground))]">Custom</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-6">
+      <!-- Filter sidebar -->
+      <aside class="col-span-3 space-y-5">
+        <div>
+          <div class="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">Camera</div>
+          <div class="space-y-1.5">
+            <label class="flex items-center gap-2 text-sm cursor-pointer hover:text-[hsl(var(--accent))]"><input type="checkbox" checked class="accent-green-500"> Front Door <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] ml-auto">18</span></label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked class="accent-green-500"> Living Room <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] ml-auto">12</span></label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked class="accent-green-500"> Kitchen <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] ml-auto">9</span></label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="accent-green-500"> Backyard <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] ml-auto">5</span></label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="accent-green-500"> Nursery <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] ml-auto">3</span></label>
+          </div>
+        </div>
+
+        <div>
+          <div class="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">People</div>
+          <div class="space-y-1.5">
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="accent-green-500"> Saquif</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="accent-green-500"> Nadia</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="accent-green-500"> Unknown person</label>
+          </div>
+        </div>
+
+        <div>
+          <div class="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">Event type</div>
+          <div class="space-y-1.5">
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked class="accent-green-500"> Rule fired</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked class="accent-green-500"> Observation</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="accent-green-500"> System</label>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Timeline feed -->
+      <section class="col-span-9 space-y-3">
+        <!-- Event card -->
+        <article class="flex gap-4 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--card-elevated))] transition-colors cursor-pointer">
+          <div class="w-40 aspect-video rounded-md camera-feed flex-shrink-0 relative overflow-hidden">
+            <div class="scanline absolute inset-0"></div>
+            <div class="absolute bottom-1.5 left-1.5 mono text-[9px] text-white/70">Front Door</div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-start justify-between gap-3 mb-1.5">
+              <div class="flex items-center gap-2">
+                <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">RULE</span>
+                <span class="text-sm font-medium">Unknown person at front door</span>
+              </div>
+              <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] whitespace-nowrap">14:28 · 3m ago</span>
+            </div>
+            <p class="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed">A delivery driver in a brown uniform approached the front porch carrying a small cardboard package, placed it on the doormat, took a photo with a handheld device, and walked back toward a vehicle parked on the street.</p>
+            <div class="flex items-center gap-3 mt-2.5">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">person · package · vehicle</span>
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">·</span>
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">webhook sent → home-assistant</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="flex gap-4 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--card-elevated))] transition-colors cursor-pointer">
+          <div class="w-40 aspect-video rounded-md camera-feed flex-shrink-0 relative overflow-hidden">
+            <div class="scanline absolute inset-0"></div>
+            <div class="absolute bottom-1.5 left-1.5 mono text-[9px] text-white/70">Kitchen</div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-start justify-between gap-3 mb-1.5">
+              <div class="flex items-center gap-2">
+                <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">RULE</span>
+                <span class="text-sm font-medium">Simon on the kitchen counter</span>
+              </div>
+              <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] whitespace-nowrap">13:47 · 44m ago</span>
+            </div>
+            <p class="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed">The dog Simon climbed onto the kitchen counter near the fruit bowl, appeared to sniff at an apple, then jumped down after roughly twelve seconds without disturbing anything.</p>
+            <div class="flex items-center gap-3 mt-2.5">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">dog · kitchen</span>
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">·</span>
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">notification sent</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="flex gap-4 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--card-elevated))] transition-colors cursor-pointer">
+          <div class="w-40 aspect-video rounded-md camera-feed flex-shrink-0 relative overflow-hidden">
+            <div class="scanline absolute inset-0"></div>
+            <div class="absolute bottom-1.5 left-1.5 mono text-[9px] text-white/70">Living Room</div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-start justify-between gap-3 mb-1.5">
+              <div class="flex items-center gap-2">
+                <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">OBS</span>
+                <span class="text-sm font-medium">Saquif reading on the sofa</span>
+              </div>
+              <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] whitespace-nowrap">13:12 · 1h ago</span>
+            </div>
+            <p class="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed">Saquif sat on the grey sofa holding what appeared to be a paperback book, remained largely still for several minutes, and occasionally turned pages.</p>
+            <div class="flex items-center gap-3 mt-2.5">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">person · Saquif · book</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="flex gap-4 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--card-elevated))] transition-colors cursor-pointer">
+          <div class="w-40 aspect-video rounded-md camera-feed flex-shrink-0 relative overflow-hidden">
+            <div class="scanline absolute inset-0"></div>
+            <div class="absolute bottom-1.5 left-1.5 mono text-[9px] text-white/70">Front Door</div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-start justify-between gap-3 mb-1.5">
+              <div class="flex items-center gap-2">
+                <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">OBS</span>
+                <span class="text-sm font-medium">Saquif left the house</span>
+              </div>
+              <span class="mono text-[11px] text-[hsl(var(--muted-foreground))] whitespace-nowrap">09:34 · 5h ago</span>
+            </div>
+            <p class="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed">Saquif exited through the front door carrying a laptop bag, locked the door behind him, and walked toward the driveway out of frame.</p>
+            <div class="flex items-center gap-3 mt-2.5">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">person · Saquif · bag</span>
+            </div>
+          </div>
+        </article>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN 3: RULES ===================== -->
+<div id="screen-rules" class="screen">
+  <div class="px-6 py-6">
+    <div class="flex items-baseline justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Create rule</h1>
+        <p class="text-sm text-[hsl(var(--muted-foreground))] mt-1">Define what to watch for and what should happen when it does</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="px-3 py-1.5 text-sm rounded-md border border-[hsl(var(--border))]">Cancel</button>
+        <button class="px-3 py-1.5 text-sm rounded-md bg-[hsl(var(--accent))] text-black font-medium">Save rule</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-6">
+      <!-- Rule form -->
+      <section class="col-span-8 space-y-5">
+        <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5">
+          <label class="block text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">Rule name</label>
+          <input type="text" value="Unknown person at night" class="w-full bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--accent))]">
+        </div>
+
+        <!-- Trigger -->
+        <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+          <div class="px-5 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--accent))]/10 text-[hsl(var(--accent))] border border-[hsl(var(--accent))]/20">WHEN</span>
+              <span class="text-sm font-medium">Trigger</span>
+            </div>
+          </div>
+          <div class="p-5 space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-[hsl(var(--muted-foreground))] mb-1.5">Detection type</label>
+                <div class="w-full bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md px-3 py-2 text-sm flex items-center justify-between">
+                  <span>Person detected</span>
+                  <span class="text-[hsl(var(--muted-foreground))]">▾</span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs text-[hsl(var(--muted-foreground))] mb-1.5">On cameras</label>
+                <div class="w-full bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md px-3 py-2 text-sm flex items-center justify-between">
+                  <span>Front Door, Backyard</span>
+                  <span class="text-[hsl(var(--muted-foreground))]">▾</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Conditions -->
+        <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+          <div class="px-5 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">AND</span>
+              <span class="text-sm font-medium">Conditions</span>
+            </div>
+            <button class="text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">+ Add condition</button>
+          </div>
+          <div class="p-5 space-y-3">
+            <div class="flex items-center gap-2 p-3 rounded-md border border-[hsl(var(--border-subtle))] bg-[hsl(var(--background))]">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))] w-16">identity</span>
+              <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">is not</span>
+              <span class="text-sm">a known person</span>
+              <button class="ml-auto text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] text-xs">×</button>
+            </div>
+            <div class="flex items-center gap-2 p-3 rounded-md border border-[hsl(var(--border-subtle))] bg-[hsl(var(--background))]">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))] w-16">time</span>
+              <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">between</span>
+              <span class="text-sm">22:00 and 06:00</span>
+              <button class="ml-auto text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] text-xs">×</button>
+            </div>
+            <div class="flex items-center gap-2 p-3 rounded-md border border-[hsl(var(--border-subtle))] bg-[hsl(var(--background))]">
+              <span class="mono text-[10px] text-[hsl(var(--muted-foreground))] w-16">duration</span>
+              <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">at least</span>
+              <span class="text-sm">5 seconds</span>
+              <button class="ml-auto text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] text-xs">×</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+          <div class="px-5 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">THEN</span>
+              <span class="text-sm font-medium">Actions</span>
+            </div>
+            <button class="text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">+ Add action</button>
+          </div>
+          <div class="p-5 space-y-3">
+            <div class="p-3 rounded-md border border-[hsl(var(--border-subtle))] bg-[hsl(var(--background))]">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="mono text-[10px] text-[hsl(var(--muted-foreground))] w-16">push</span>
+                <span class="text-sm font-medium">Send mobile notification</span>
+                <button class="ml-auto text-[hsl(var(--muted-foreground))] text-xs">×</button>
+              </div>
+              <div class="mono text-[11px] text-[hsl(var(--muted-foreground))] pl-[72px]">title · "Unknown person at {camera}"<br>body · VLM description</div>
+            </div>
+            <div class="p-3 rounded-md border border-[hsl(var(--border-subtle))] bg-[hsl(var(--background))]">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="mono text-[10px] text-[hsl(var(--muted-foreground))] w-16">webhook</span>
+                <span class="text-sm font-medium">POST to home-assistant</span>
+                <button class="ml-auto text-[hsl(var(--muted-foreground))] text-xs">×</button>
+              </div>
+              <div class="mono text-[11px] text-[hsl(var(--muted-foreground))] pl-[72px]">http://homeassistant.local:8123/api/webhook/nurby_alert</div>
+            </div>
+          </div>
+          <div class="px-5 py-3 border-t border-[hsl(var(--border))] flex items-center gap-4">
+            <span class="text-xs text-[hsl(var(--muted-foreground))]">Cooldown</span>
+            <input type="text" value="300 seconds" class="flex-1 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded px-2 py-1 text-sm">
+          </div>
+        </div>
+      </section>
+
+      <!-- Live preview -->
+      <aside class="col-span-4">
+        <div class="sticky top-20 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5">
+          <div class="flex items-center gap-2 mb-4">
+            <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent))] pulse-dot"></span>
+            <span class="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Live preview</span>
+          </div>
+          <p class="text-sm leading-relaxed">
+            <span class="text-[hsl(var(--muted-foreground))]">This rule will fire</span>
+            <span class="font-medium">when a person</span>
+            <span class="text-[hsl(var(--muted-foreground))]">is seen at</span>
+            <span class="font-medium">Front Door or Backyard</span>,
+            <span class="text-[hsl(var(--muted-foreground))]">and that person</span>
+            <span class="font-medium">is not a known face</span>,
+            <span class="text-[hsl(var(--muted-foreground))]">and it is</span>
+            <span class="font-medium">between 10pm and 6am</span>,
+            <span class="text-[hsl(var(--muted-foreground))]">and they stay for</span>
+            <span class="font-medium">at least 5 seconds</span>.
+            <span class="text-[hsl(var(--muted-foreground))] block mt-2">It will send a push notification and fire a webhook to Home Assistant, with a 5 minute cooldown between firings.</span>
+          </p>
+          <div class="mt-5 pt-5 border-t border-[hsl(var(--border))]">
+            <div class="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">Estimated fires</div>
+            <div class="mono text-2xl font-medium">~ 2<span class="text-[hsl(var(--muted-foreground))] text-sm"> / week</span></div>
+            <div class="mono text-[11px] text-[hsl(var(--muted-foreground))] mt-1">based on last 30 days of footage</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN 4: SEARCH ===================== -->
+<div id="screen-search" class="screen">
+  <div class="px-6 py-10 max-w-5xl mx-auto">
+    <div class="mb-8">
+      <h1 class="text-2xl font-semibold tracking-tight mb-2">Search your footage</h1>
+      <p class="text-sm text-[hsl(var(--muted-foreground))]">Ask anything about what has happened across your cameras</p>
+    </div>
+
+    <div class="relative mb-4">
+      <input type="text" value="when did the fedex driver come this week" class="w-full bg-[hsl(var(--card))] border border-[hsl(var(--border))] focus:border-[hsl(var(--accent))] rounded-lg pl-12 pr-28 py-4 text-base focus:outline-none">
+      <svg class="absolute left-4 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <span class="absolute right-4 top-1/2 -translate-y-1/2 kbd">⏎ search</span>
+    </div>
+
+    <div class="flex flex-wrap gap-2 mb-8">
+      <button class="px-3 py-1 text-xs rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))]">this week ×</button>
+      <button class="px-3 py-1 text-xs rounded-full border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]">+ camera</button>
+      <button class="px-3 py-1 text-xs rounded-full border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]">+ person</button>
+      <button class="px-3 py-1 text-xs rounded-full border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]">+ object</button>
+    </div>
+
+    <!-- Synthesised answer -->
+    <div class="rounded-lg border border-[hsl(var(--accent))]/30 bg-[hsl(var(--accent))]/[0.03] p-5 mb-8">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent))]"></span>
+        <span class="mono text-[10px] text-[hsl(var(--accent))] uppercase tracking-wider">Answer · llama-3.2-vision</span>
+      </div>
+      <p class="text-[15px] leading-relaxed">
+        A FedEx driver visited the Front Door camera twice this week. The first visit was on <span class="font-medium">Monday at 11:47 AM</span>, when the driver left a medium sized box on the porch. The second was on <span class="font-medium">Thursday at 2:14 PM</span>, when the driver rang the doorbell and handed a package requiring signature to Nadia.
+      </p>
+      <div class="flex items-center gap-4 mt-4 pt-4 border-t border-[hsl(var(--border))]">
+        <span class="mono text-[11px] text-[hsl(var(--muted-foreground))]">2 clips · 47s total</span>
+        <span class="mono text-[11px] text-[hsl(var(--muted-foreground))]">·</span>
+        <span class="mono text-[11px] text-[hsl(var(--muted-foreground))]">grounded in observations #8412, #8573</span>
+      </div>
+    </div>
+
+    <!-- Result clips -->
+    <div class="space-y-3">
+      <div class="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-3">Matching clips</div>
+
+      <article class="flex gap-4 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--card-elevated))] transition-colors cursor-pointer">
+        <div class="w-48 aspect-video rounded-md camera-feed flex-shrink-0 relative overflow-hidden">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute bottom-1.5 left-1.5 mono text-[9px] text-white/70">Front Door · Mon 11:47</div>
+          <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 backdrop-blur flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between gap-3 mb-1.5">
+            <span class="text-sm font-medium">Package delivery, no signature</span>
+            <span class="mono text-[11px] text-[hsl(var(--muted-foreground))]">Mon 11:47 · 23s</span>
+          </div>
+          <p class="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed">A FedEx driver in a purple and orange uniform walked up the front path carrying a medium sized cardboard box, placed it on the porch near the door, photographed it with a handheld scanner, and returned to a FedEx van.</p>
+          <div class="flex items-center gap-3 mt-2.5">
+            <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">person · package · vehicle</span>
+            <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">·</span>
+            <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">match 0.94</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="flex gap-4 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--card-elevated))] transition-colors cursor-pointer">
+        <div class="w-48 aspect-video rounded-md camera-feed flex-shrink-0 relative overflow-hidden">
+          <div class="scanline absolute inset-0"></div>
+          <div class="absolute bottom-1.5 left-1.5 mono text-[9px] text-white/70">Front Door · Thu 14:14</div>
+          <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 backdrop-blur flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between gap-3 mb-1.5">
+            <span class="text-sm font-medium">Signature delivery, Nadia received</span>
+            <span class="mono text-[11px] text-[hsl(var(--muted-foreground))]">Thu 14:14 · 24s</span>
+          </div>
+          <p class="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed">A FedEx driver rang the doorbell holding a small package and a signature device. Nadia answered the door, signed on the handheld, received the package, and closed the door.</p>
+          <div class="flex items-center gap-3 mt-2.5">
+            <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">person · Nadia · package</span>
+            <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">·</span>
+            <span class="mono text-[10px] text-[hsl(var(--muted-foreground))]">match 0.91</span>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('[data-screen]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.screen;
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + target).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
