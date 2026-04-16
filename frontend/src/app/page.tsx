@@ -46,6 +46,7 @@ interface FaceDetection {
   person_name: string | null;
   person_id: string | null;
   match_distance?: number | null;
+  bbox?: number[];
 }
 
 interface Observation {
@@ -287,6 +288,140 @@ function statusLabel(status: string): string {
   return map[status] || status;
 }
 
+// ── Detection Overlay ──
+
+const DEFAULT_FRAME_WIDTH = 1920;
+const DEFAULT_FRAME_HEIGHT = 1080;
+const DETECTION_FADE_MS = 10000;
+const DETECTION_POLL_MS = 5000;
+
+interface OverlayDetection {
+  label: string;
+  bbox: number[];
+  color: string;
+  borderColor: string;
+}
+
+function DetectionOverlay({ cameraId, visible, frameWidth, frameHeight }: {
+  cameraId: string;
+  visible: boolean;
+  frameWidth: number;
+  frameHeight: number;
+}) {
+  const { authFetch } = useAuth();
+  const [detections, setDetections] = useState<OverlayDetection[]>([]);
+  const [lastUpdated, setLastUpdated] = useState(0);
+  const [faded, setFaded] = useState(false);
+  const lastObsIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const res = await authFetch(`/api/observations?camera_id=${cameraId}&limit=1`);
+        if (!res.ok || cancelled) return;
+        const obs: Observation[] = await res.json();
+        if (cancelled || obs.length === 0) return;
+
+        const latest = obs[0];
+        if (latest.id === lastObsIdRef.current) return;
+        lastObsIdRef.current = latest.id;
+
+        const boxes: OverlayDetection[] = [];
+
+        if (latest.object_detections?.objects) {
+          for (const obj of latest.object_detections.objects) {
+            if (obj.bbox && obj.bbox.length === 4) {
+              boxes.push({
+                label: `${obj.label} ${Math.round(obj.confidence * 100)}%`,
+                bbox: obj.bbox,
+                color: "rgba(34, 197, 94, 0.15)",
+                borderColor: "rgb(34, 197, 94)",
+              });
+            }
+          }
+        }
+
+        if (latest.person_detections?.faces) {
+          for (const face of latest.person_detections.faces) {
+            if (face.bbox && face.bbox.length === 4) {
+              const isKnown = !!face.person_name;
+              boxes.push({
+                label: face.person_name || "Unknown",
+                bbox: face.bbox,
+                color: isKnown ? "rgba(59, 130, 246, 0.15)" : "rgba(234, 179, 8, 0.15)",
+                borderColor: isKnown ? "rgb(59, 130, 246)" : "rgb(234, 179, 8)",
+              });
+            }
+          }
+        }
+
+        if (boxes.length > 0) {
+          setDetections(boxes);
+          setLastUpdated(Date.now());
+          setFaded(false);
+        }
+      } catch { /* silent */ }
+    }
+
+    poll();
+    const interval = setInterval(poll, DETECTION_POLL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [cameraId, visible, authFetch]);
+
+  useEffect(() => {
+    if (lastUpdated === 0) return;
+    const timer = setTimeout(() => setFaded(true), DETECTION_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [lastUpdated]);
+
+  if (!visible || detections.length === 0) return null;
+
+  return (
+    <div className={`absolute inset-0 z-[5] pointer-events-none transition-opacity duration-500 ${faded ? "opacity-0" : "opacity-100"}`}>
+      {detections.map((det, i) => {
+        const [x1, y1, x2, y2] = det.bbox;
+        const left = (x1 / frameWidth) * 100;
+        const top = (y1 / frameHeight) * 100;
+        const width = ((x2 - x1) / frameWidth) * 100;
+        const height = ((y2 - y1) / frameHeight) * 100;
+
+        return (
+          <div key={`${det.label}-${i}`} style={{
+            position: "absolute",
+            left: `${left}%`,
+            top: `${top}%`,
+            width: `${width}%`,
+            height: `${height}%`,
+            border: `2px solid ${det.borderColor}`,
+            backgroundColor: det.color,
+            borderRadius: "2px",
+          }}>
+            <span style={{
+              position: "absolute",
+              top: "-18px",
+              left: "0",
+              fontSize: "10px",
+              lineHeight: "16px",
+              padding: "0 4px",
+              backgroundColor: det.borderColor,
+              color: "#000",
+              borderRadius: "2px",
+              whiteSpace: "nowrap",
+              fontWeight: 600,
+            }}>
+              {det.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Camera sidebar card (compact) ──
 
 type CameraLayout = "single" | "double" | "list";
@@ -304,9 +439,12 @@ function CameraSidebarCard({
   activityEvents: ActivityEvent[];
   layout: CameraLayout;
 }) {
+  const [overlayVisible, setOverlayVisible] = useState(true);
   const streamName = extractStreamName(camera.stream_url);
   const iframeSrc = `${WEBRTC_URL}/${streamName}/`;
   const latestEvent = activityEvents[0];
+  const frameW = camera.width || DEFAULT_FRAME_WIDTH;
+  const frameH = camera.height || DEFAULT_FRAME_HEIGHT;
 
   // Activity stats
   const now = Date.now();
@@ -372,6 +510,32 @@ function CameraSidebarCard({
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-[10px] text-muted-foreground font-mono">OFFLINE</span>
           </div>
+        )}
+
+        {/* Detection bounding box overlay */}
+        {camera.status !== "offline" && (
+          <DetectionOverlay cameraId={camera.id} visible={overlayVisible} frameWidth={frameW} frameHeight={frameH} />
+        )}
+
+        {/* Overlay toggle (eye icon) */}
+        {camera.status !== "offline" && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setOverlayVisible((v) => !v); }}
+            className="absolute top-1.5 right-9 z-10 w-6 h-6 rounded-md bg-black/60 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100"
+            title={overlayVisible ? "Hide detections" : "Show detections"}
+          >
+            {overlayVisible ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            )}
+          </button>
         )}
 
         {/* Settings gear */}
