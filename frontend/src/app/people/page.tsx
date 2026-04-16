@@ -142,7 +142,7 @@ export default function PeoplePage() {
   const fetchActivity = useCallback(async (personId: string) => {
     setLoadingActivity(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/persons/activity/${personId}?limit=50`
       );
       if (res.ok) setActivities(await res.json());
@@ -151,7 +151,7 @@ export default function PeoplePage() {
     } finally {
       setLoadingActivity(false);
     }
-  }, []);
+  }, [authFetch]);
 
   useEffect(() => {
     fetchPersons();
