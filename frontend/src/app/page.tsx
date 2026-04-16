@@ -832,10 +832,44 @@ function AddCameraModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
 
 // ── Main unified page ──
 
+const SEARCH_HINTS = [
+  "when did the cat come in",
+  "person at front door",
+  "show me all vehicles today",
+  "who was in the backyard this morning",
+  "any packages delivered",
+  "was the garage door left open",
+  "dog in the yard",
+  "kids playing outside",
+  "delivery truck in driveway",
+  "someone at the gate after dark",
+  "bicycle on the sidewalk",
+  "how many cars passed today",
+  "motion near the fence",
+  "Sarah Chen arriving home",
+  "any animals in the garden",
+  "mail carrier",
+  "lights left on in kitchen",
+  "unknown person at side door",
+  "show me nighttime activity",
+  "cars parked in driveway",
+  "when was the last delivery",
+  "people walking by the house",
+  "suspicious activity last night",
+  "kids getting off school bus",
+  "raccoon in the trash",
+  "sprinkler running",
+  "someone left the gate open",
+  "FedEx or UPS truck",
+  "how many people visited today",
+  "birds on the porch",
+];
+
 function DashboardContent() {
   const { authFetch } = useAuth();
   const searchParams = useSearchParams();
   const initialCamera = searchParams.get("camera");
+  const [searchHint, setSearchHint] = useState(() => SEARCH_HINTS[Math.floor(Math.random() * SEARCH_HINTS.length)]);
 
   // Camera state
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -1006,6 +1040,12 @@ function DashboardContent() {
   const clearSearch = () => { setSearchQuery(""); setSearchActive(false); setSearchResults([]); setAiAnswer(null); setFilterPerson(""); setFilterObject(""); };
 
   // Effects
+  useEffect(() => {
+    const i = setInterval(() => {
+      setSearchHint(SEARCH_HINTS[Math.floor(Math.random() * SEARCH_HINTS.length)]);
+    }, 5000);
+    return () => clearInterval(i);
+  }, []);
   useEffect(() => { fetchCameras(); fetchPersons(); }, [fetchCameras, fetchPersons]);
   useEffect(() => { const i = setInterval(fetchCameras, 10000); return () => clearInterval(i); }, [fetchCameras]);
   useEffect(() => { fetchTimeline(); const i = setInterval(fetchTimeline, 15000); return () => clearInterval(i); }, [fetchTimeline]);
@@ -1139,7 +1179,7 @@ function DashboardContent() {
             <div className="relative">
               <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSearch(); } if (e.key === "Escape") clearSearch(); }}
-                placeholder="Search observations. &quot;when did the cat come in&quot;, &quot;person at front door&quot;"
+                placeholder={`Try "${searchHint}"`}
                 className="w-full bg-card border border-border focus:border-accent rounded-lg pl-9 pr-32 py-2.5 text-sm focus:outline-none transition-colors"
               />
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
