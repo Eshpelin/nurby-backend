@@ -113,12 +113,6 @@ interface ActivityEvent {
   icon: "person" | "object" | "scene";
 }
 
-const OBJECT_LABELS = [
-  "person", "car", "truck", "bicycle", "motorcycle",
-  "dog", "cat", "bird", "backpack", "handbag",
-  "suitcase", "umbrella", "cell phone", "laptop",
-];
-
 const STREAM_TYPES: { value: StreamType; label: string; hint: string; placeholder: string }[] = [
   { value: "rtsp", label: "RTSP", hint: "IP cameras, NVRs, most security cameras", placeholder: "rtsp://192.168.1.100:554/stream1" },
   { value: "http_mjpeg", label: "HTTP MJPEG", hint: "Motion JPEG over HTTP. Webcams, ESP32-CAM", placeholder: "http://192.168.1.100:8080/video" },
@@ -129,7 +123,7 @@ const STREAM_TYPES: { value: StreamType; label: string; hint: string; placeholde
 ];
 
 type TimeRange = "today" | "7d" | "30d";
-type EventFilter = "all" | "recordings" | "observations" | "status";
+type EventFilter = "recordings" | "observations" | "status";
 
 // ── Helpers ──
 
@@ -1061,8 +1055,17 @@ function DashboardContent() {
   const [persons, setPersons] = useState<Person[]>([]);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>("7d");
-  const [eventFilter, setEventFilter] = useState<EventFilter>("all");
+  const [eventFilters, setEventFilters] = useState<Set<EventFilter>>(new Set(["recordings", "observations", "status"]));
   const [timelineLoading, setTimelineLoading] = useState(true);
+
+  // Filter sidebar state
+  const [filterSidebarOpen, setFilterSidebarOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("nurby-filter-sidebar");
+      return saved !== null ? saved === "open" : true;
+    }
+    return true;
+  });
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -1071,7 +1074,6 @@ function DashboardContent() {
   const [searchActive, setSearchActive] = useState(false);
   const [filterPerson, setFilterPerson] = useState("");
   const [filterObject, setFilterObject] = useState("");
-  const [showSearchFilters, setShowSearchFilters] = useState(false);
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [askingAi, setAskingAi] = useState(false);
   const [hasAiProvider, setHasAiProvider] = useState<boolean | null>(null);
@@ -1208,7 +1210,38 @@ function DashboardContent() {
     finally { setAskingAi(false); }
   };
 
-  const clearSearch = () => { setSearchQuery(""); setSearchActive(false); setSearchResults([]); setAiAnswer(null); setFilterPerson(""); setFilterObject(""); };
+  const clearSearch = () => { setSearchQuery(""); setSearchActive(false); setSearchResults([]); setAiAnswer(null); };
+
+  const clearAllFilters = () => {
+    setTimeRange("7d");
+    setEventFilters(new Set(["recordings", "observations", "status"]));
+    setFilterPerson("");
+    setFilterObject("");
+    setSelectedCamera(null);
+  };
+
+  const toggleEventFilter = (f: EventFilter) => {
+    setEventFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(f)) { next.delete(f); } else { next.add(f); }
+      return next;
+    });
+  };
+
+  const toggleFilterSidebar = () => {
+    setFilterSidebarOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem("nurby-filter-sidebar", next ? "open" : "closed");
+      return next;
+    });
+  };
+
+  const activeFilterCount = [
+    filterPerson,
+    filterObject,
+    timeRange !== "7d" ? "active" : "",
+    eventFilters.size < 3 ? "active" : "",
+  ].filter(Boolean).length;
 
   // Effects
   useEffect(() => {
@@ -1236,9 +1269,9 @@ function DashboardContent() {
   if (searchActive) {
     entries = searchResults.map((r) => ({ id: `search-${r.id}`, type: "search_result" as const, camera_id: r.camera_id, timestamp: r.started_at, data: r }));
   } else {
-    if (eventFilter === "all" || eventFilter === "recordings") entries.push(...recordings.map((r) => ({ id: `rec-${r.id}`, type: "recording" as const, camera_id: r.camera_id, timestamp: r.started_at, data: r })));
-    if (eventFilter === "all" || eventFilter === "observations") entries.push(...observations.map((o) => ({ id: `obs-${o.id}`, type: "observation" as const, camera_id: o.camera_id, timestamp: o.started_at, data: o })));
-    if (eventFilter === "all" || eventFilter === "status") entries.push(...statusLogs.map((s) => ({ id: `status-${s.id}`, type: "status" as const, camera_id: s.camera_id, timestamp: s.timestamp, data: s })));
+    if (eventFilters.has("recordings")) entries.push(...recordings.map((r) => ({ id: `rec-${r.id}`, type: "recording" as const, camera_id: r.camera_id, timestamp: r.started_at, data: r })));
+    if (eventFilters.has("observations")) entries.push(...observations.map((o) => ({ id: `obs-${o.id}`, type: "observation" as const, camera_id: o.camera_id, timestamp: o.started_at, data: o })));
+    if (eventFilters.has("status")) entries.push(...statusLogs.map((s) => ({ id: `status-${s.id}`, type: "status" as const, camera_id: s.camera_id, timestamp: s.timestamp, data: s })));
   }
 
   entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -1246,7 +1279,6 @@ function DashboardContent() {
   for (const e of entries) { const k = formatDate(e.timestamp); if (!grouped[k]) grouped[k] = []; grouped[k].push(e); }
 
   const totalCount = entries.length;
-  const activeFilterCount = [filterPerson, filterObject].filter(Boolean).length;
 
   return (
     <div className="px-4 py-4 h-[calc(100vh-3.5rem)] flex flex-col">
@@ -1267,16 +1299,6 @@ function DashboardContent() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!searchActive && (
-            <div className="flex items-center gap-1 p-0.5 rounded-md bg-card border border-border">
-              {(["today", "7d", "30d"] as TimeRange[]).map((range) => (
-                <button key={range} onClick={() => setTimeRange(range)}
-                  className={`px-2 py-1 text-xs rounded transition-colors ${timeRange === range ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                  {range === "today" ? "Today" : range}
-                </button>
-              ))}
-            </div>
-          )}
           <button onClick={() => setModalOpen(true)} className="px-3 py-1.5 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90">
             + Add camera
           </button>
@@ -1348,6 +1370,99 @@ function DashboardContent() {
           </div>
         </aside>
 
+        {/* MIDDLE. Filter sidebar */}
+        {filterSidebarOpen ? (
+          <aside className="w-56 flex-shrink-0 flex flex-col min-h-0 rounded-lg border border-border bg-card overflow-y-auto scrollbar-thin">
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-border sticky top-0 bg-card z-10">
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Filters</span>
+              <button onClick={toggleFilterSidebar} className="text-muted-foreground hover:text-foreground transition-colors" title="Collapse filters">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-3 space-y-4">
+              {/* Time Range */}
+              <div>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Time Range</span>
+                <div className="flex flex-col gap-1">
+                  {(["today", "7d", "30d"] as TimeRange[]).map((range) => (
+                    <button key={range} onClick={() => setTimeRange(range)}
+                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md transition-colors ${timeRange === range ? "bg-accent/15 text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}>
+                      {range === "today" ? "Today" : range === "7d" ? "Last 7 days" : "Last 30 days"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Event Types */}
+              <div>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Event Types</span>
+                <div className="flex flex-col gap-1">
+                  {([["recordings", "Recordings"], ["observations", "AI Observations"], ["status", "Status Changes"]] as [EventFilter, string][]).map(([value, label]) => (
+                    <label key={value} className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-md hover:bg-muted/50 cursor-pointer transition-colors">
+                      <input type="checkbox" checked={eventFilters.has(value)} onChange={() => toggleEventFilter(value)}
+                        className="w-3.5 h-3.5 rounded border-border accent-accent" />
+                      <span className={eventFilters.has(value) ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Person Filter */}
+              <div>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Person</span>
+                <select value={filterPerson} onChange={(e) => { setFilterPerson(e.target.value); if (e.target.value) handleSearch(); }}
+                  className="w-full px-2.5 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:ring-1 focus:ring-accent">
+                  <option value="">Any person</option>
+                  {persons.map((p) => <option key={p.id} value={p.display_name}>{p.display_name}</option>)}
+                </select>
+              </div>
+
+              {/* Object Filter */}
+              <div>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Object</span>
+                <input type="text" value={filterObject} onChange={(e) => setFilterObject(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+                  placeholder="e.g. car, dog, package"
+                  className="w-full px-2.5 py-1.5 rounded-md bg-background border border-border text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent" />
+              </div>
+
+              {/* Camera Filter */}
+              <div>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Camera</span>
+                <select value={selectedCamera || ""} onChange={(e) => setSelectedCamera(e.target.value || null)}
+                  className="w-full px-2.5 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:ring-1 focus:ring-accent">
+                  <option value="">All cameras</option>
+                  {cameras.map((cam) => <option key={cam.id} value={cam.id}>{cam.name}</option>)}
+                </select>
+              </div>
+
+              {/* Clear All */}
+              <button onClick={clearAllFilters}
+                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+                Clear all filters
+              </button>
+            </div>
+          </aside>
+        ) : (
+          <button onClick={toggleFilterSidebar}
+            className="flex-shrink-0 w-8 flex flex-col items-center gap-2 py-3 rounded-lg border border-border bg-card hover:border-muted-foreground/30 transition-colors cursor-pointer"
+            title="Expand filters">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+            </svg>
+            {activeFilterCount > 0 && (
+              <span className="w-4 h-4 rounded-full bg-accent text-[9px] font-bold text-black flex items-center justify-center">{activeFilterCount}</span>
+            )}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </button>
+        )}
+
         {/* RIGHT. Timeline + Search */}
         <main className="flex-1 flex flex-col min-h-0 min-w-0">
           {/* Search bar */}
@@ -1363,34 +1478,11 @@ function DashboardContent() {
               </svg>
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 {searchActive && <button onClick={clearSearch} className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted">Clear</button>}
-                <button onClick={() => setShowSearchFilters(!showSearchFilters)}
-                  className={`px-1.5 py-0.5 text-[10px] rounded border transition-colors ${showSearchFilters || activeFilterCount > 0 ? "border-accent text-accent" : "border-border text-muted-foreground hover:bg-muted"}`}>
-                  Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-                </button>
                 {!isSearching && searchQuery.trim() && !searchActive && (
                   <button onClick={handleSearch} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:bg-border">search</button>
                 )}
               </div>
             </div>
-
-            {showSearchFilters && (
-              <div className="mt-2 rounded-lg border border-border bg-card p-2.5 flex gap-2">
-                <div className="flex-1">
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Person</label>
-                  <select value={filterPerson} onChange={(e) => setFilterPerson(e.target.value)} className="w-full px-2 py-1 rounded-md bg-background border border-border text-xs">
-                    <option value="">Any</option>
-                    {persons.map((p) => <option key={p.id} value={p.display_name}>{p.display_name}</option>)}
-                  </select>
-                </div>
-                <div className="flex-1">
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Object</label>
-                  <select value={filterObject} onChange={(e) => setFilterObject(e.target.value)} className="w-full px-2 py-1 rounded-md bg-background border border-border text-xs">
-                    <option value="">Any</option>
-                    {OBJECT_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
 
             {searchActive && !aiAnswer && askingAi && (
               <div className="mt-2 rounded-lg border border-accent/40 bg-accent/5 p-4">
@@ -1454,18 +1546,9 @@ function DashboardContent() {
             )}
           </div>
 
-          {/* Event type filter bar */}
+          {/* Digest button */}
           {!searchActive && (
-            <div className="flex items-center gap-3 mb-3 flex-shrink-0">
-              <div className="flex gap-1">
-                {([["all", "All"], ["recordings", "Recordings"], ["observations", "AI"], ["status", "Status"]] as [EventFilter, string][]).map(([v, l]) => (
-                  <button key={v} onClick={() => setEventFilter(v)}
-                    className={`px-2 py-1 text-[11px] rounded transition-colors ${eventFilter === v ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-              <div className="flex-1" />
+            <div className="flex items-center justify-end mb-3 flex-shrink-0">
               <button onClick={fetchDigest} disabled={digestLoading}
                 className="px-2 py-1 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted disabled:opacity-50">
                 {digestLoading ? "..." : "Digest"}
