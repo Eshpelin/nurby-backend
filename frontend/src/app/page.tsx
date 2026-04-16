@@ -1058,14 +1058,8 @@ function DashboardContent() {
   const [eventFilters, setEventFilters] = useState<Set<EventFilter>>(new Set(["recordings", "observations", "status"]));
   const [timelineLoading, setTimelineLoading] = useState(true);
 
-  // Filter sidebar state
-  const [filterSidebarOpen, setFilterSidebarOpen] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("nurby-filter-sidebar");
-      return saved !== null ? saved === "open" : true;
-    }
-    return true;
-  });
+  // Filter modal state
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -1228,14 +1222,6 @@ function DashboardContent() {
     });
   };
 
-  const toggleFilterSidebar = () => {
-    setFilterSidebarOpen((prev) => {
-      const next = !prev;
-      localStorage.setItem("nurby-filter-sidebar", next ? "open" : "closed");
-      return next;
-    });
-  };
-
   const activeFilterCount = [
     filterPerson,
     filterObject,
@@ -1370,118 +1356,128 @@ function DashboardContent() {
           </div>
         </aside>
 
-        {/* MIDDLE. Filter sidebar */}
-        {filterSidebarOpen ? (
-          <aside className="w-56 flex-shrink-0 flex flex-col min-h-0 rounded-lg border border-border bg-card overflow-y-auto scrollbar-thin">
-            {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-border sticky top-0 bg-card z-10">
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Filters</span>
-              <button onClick={toggleFilterSidebar} className="text-muted-foreground hover:text-foreground transition-colors" title="Collapse filters">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="p-3 space-y-4">
-              {/* Time Range */}
-              <div>
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Time Range</span>
-                <div className="flex flex-col gap-1">
-                  {(["today", "7d", "30d"] as TimeRange[]).map((range) => (
-                    <button key={range} onClick={() => setTimeRange(range)}
-                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md transition-colors ${timeRange === range ? "bg-accent/15 text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}>
-                      {range === "today" ? "Today" : range === "7d" ? "Last 7 days" : "Last 30 days"}
+        {/* Filter modal */}
+        {filterModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]" onClick={() => setFilterModalOpen(false)}>
+            <div className="fixed inset-0 bg-black/60" />
+            <div className="relative w-full max-w-md rounded-xl border border-border bg-card shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <span className="text-sm font-medium">Filters</span>
+                <div className="flex items-center gap-3">
+                  {activeFilterCount > 0 && (
+                    <button onClick={clearAllFilters} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                      Clear all
                     </button>
-                  ))}
+                  )}
+                  <button onClick={() => setFilterModalOpen(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                    </svg>
+                  </button>
                 </div>
               </div>
 
-              {/* Event Types */}
-              <div>
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Event Types</span>
-                <div className="flex flex-col gap-1">
-                  {([["recordings", "Recordings"], ["observations", "AI Observations"], ["status", "Status Changes"]] as [EventFilter, string][]).map(([value, label]) => (
-                    <label key={value} className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-md hover:bg-muted/50 cursor-pointer transition-colors">
-                      <input type="checkbox" checked={eventFilters.has(value)} onChange={() => toggleEventFilter(value)}
-                        className="w-3.5 h-3.5 rounded border-border accent-accent" />
-                      <span className={eventFilters.has(value) ? "text-foreground" : "text-muted-foreground"}>{label}</span>
-                    </label>
-                  ))}
+              <div className="p-5 space-y-5">
+                {/* Time Range */}
+                <div>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Time Range</span>
+                  <div className="flex gap-2">
+                    {(["today", "7d", "30d"] as TimeRange[]).map((range) => (
+                      <button key={range} onClick={() => setTimeRange(range)}
+                        className={`flex-1 px-3 py-2 text-xs rounded-lg transition-colors ${timeRange === range ? "bg-accent/15 text-accent-foreground font-medium border border-accent/30" : "text-muted-foreground border border-border hover:text-foreground hover:bg-muted/50"}`}>
+                        {range === "today" ? "Today" : range === "7d" ? "7 days" : "30 days"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Event Types */}
+                <div>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Event Types</span>
+                  <div className="flex flex-col gap-1">
+                    {([["recordings", "Recordings"], ["observations", "AI Observations"], ["status", "Status Changes"]] as [EventFilter, string][]).map(([value, label]) => (
+                      <label key={value} className="flex items-center gap-2.5 px-3 py-2 text-xs rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
+                        <input type="checkbox" checked={eventFilters.has(value)} onChange={() => toggleEventFilter(value)}
+                          className="w-3.5 h-3.5 rounded border-border accent-accent" />
+                        <span className={eventFilters.has(value) ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Person Filter */}
+                  <div>
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Person</span>
+                    <select value={filterPerson} onChange={(e) => { setFilterPerson(e.target.value); if (e.target.value) handleSearch(); }}
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs focus:outline-none focus:ring-1 focus:ring-accent">
+                      <option value="">Any person</option>
+                      {persons.map((p) => <option key={p.id} value={p.display_name}>{p.display_name}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Object Filter */}
+                  <div>
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Object</span>
+                    <input type="text" value={filterObject} onChange={(e) => setFilterObject(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { handleSearch(); setFilterModalOpen(false); } }}
+                      placeholder="e.g. car, dog"
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent" />
+                  </div>
+                </div>
+
+                {/* Camera Filter */}
+                <div>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Camera</span>
+                  <select value={selectedCamera || ""} onChange={(e) => setSelectedCamera(e.target.value || null)}
+                    className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs focus:outline-none focus:ring-1 focus:ring-accent">
+                    <option value="">All cameras</option>
+                    {cameras.map((cam) => <option key={cam.id} value={cam.id}>{cam.name}</option>)}
+                  </select>
                 </div>
               </div>
 
-              {/* Person Filter */}
-              <div>
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Person</span>
-                <select value={filterPerson} onChange={(e) => { setFilterPerson(e.target.value); if (e.target.value) handleSearch(); }}
-                  className="w-full px-2.5 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:ring-1 focus:ring-accent">
-                  <option value="">Any person</option>
-                  {persons.map((p) => <option key={p.id} value={p.display_name}>{p.display_name}</option>)}
-                </select>
+              <div className="px-5 py-4 border-t border-border">
+                <button onClick={() => { handleSearch(); setFilterModalOpen(false); }}
+                  className="w-full py-2.5 text-xs font-medium rounded-lg bg-accent text-black hover:bg-accent/90 transition-colors">
+                  Apply Filters
+                </button>
               </div>
-
-              {/* Object Filter */}
-              <div>
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Object</span>
-                <input type="text" value={filterObject} onChange={(e) => setFilterObject(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-                  placeholder="e.g. car, dog, package"
-                  className="w-full px-2.5 py-1.5 rounded-md bg-background border border-border text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent" />
-              </div>
-
-              {/* Camera Filter */}
-              <div>
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Camera</span>
-                <select value={selectedCamera || ""} onChange={(e) => setSelectedCamera(e.target.value || null)}
-                  className="w-full px-2.5 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:ring-1 focus:ring-accent">
-                  <option value="">All cameras</option>
-                  {cameras.map((cam) => <option key={cam.id} value={cam.id}>{cam.name}</option>)}
-                </select>
-              </div>
-
-              {/* Clear All */}
-              <button onClick={clearAllFilters}
-                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-                Clear all filters
-              </button>
             </div>
-          </aside>
-        ) : (
-          <button onClick={toggleFilterSidebar}
-            className="flex-shrink-0 w-8 flex flex-col items-center gap-2 py-3 rounded-lg border border-border bg-card hover:border-muted-foreground/30 transition-colors cursor-pointer"
-            title="Expand filters">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-            </svg>
-            {activeFilterCount > 0 && (
-              <span className="w-4 h-4 rounded-full bg-accent text-[9px] font-bold text-black flex items-center justify-center">{activeFilterCount}</span>
-            )}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-          </button>
+          </div>
         )}
 
         {/* RIGHT. Timeline + Search */}
         <main className="flex-1 flex flex-col min-h-0 min-w-0">
           {/* Search bar */}
           <div className="flex-shrink-0 mb-3">
-            <div className="relative">
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSearch(); } if (e.key === "Escape") clearSearch(); }}
-                placeholder={`Try "${searchHint}"`}
-                className="w-full bg-card border border-border focus:border-accent rounded-lg pl-9 pr-32 py-2.5 text-sm focus:outline-none transition-colors"
-              />
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-              </svg>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {searchActive && <button onClick={clearSearch} className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted">Clear</button>}
-                {!isSearching && searchQuery.trim() && !searchActive && (
-                  <button onClick={handleSearch} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:bg-border">search</button>
-                )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSearch(); } if (e.key === "Escape") clearSearch(); }}
+                  placeholder={`Try "${searchHint}"`}
+                  className="w-full bg-card border border-border focus:border-accent rounded-lg pl-9 pr-32 py-2.5 text-sm focus:outline-none transition-colors"
+                />
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                </svg>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {searchActive && <button onClick={clearSearch} className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted">Clear</button>}
+                  {!isSearching && searchQuery.trim() && !searchActive && (
+                    <button onClick={handleSearch} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:bg-border">search</button>
+                  )}
+                </div>
               </div>
+              <button onClick={() => setFilterModalOpen(true)}
+                className={`relative flex-shrink-0 px-3 py-2.5 rounded-lg border transition-colors ${activeFilterCount > 0 ? "border-accent/40 bg-accent/10 text-accent-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground hover:border-muted-foreground/30"}`}
+                title="Filters">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                </svg>
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-accent text-[9px] font-bold text-black flex items-center justify-center">{activeFilterCount}</span>
+                )}
+              </button>
             </div>
 
             {searchActive && !aiAnswer && askingAi && (
