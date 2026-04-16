@@ -26,13 +26,30 @@ router = APIRouter()
 
 OLLAMA_URL = "http://localhost:11434"
 
-# Models ranked by quality (best first), with RAM requirements
+# Curated list of vision-capable models with RAM requirements.
+# Ollama has no public catalog API, so we maintain this list.
+# Sorted by quality descending within each family.
 VISION_MODELS = [
-    {"name": "gemma3:27b", "label": "Gemma 3 27B", "ram_gb": 20, "quality": "best", "description": "Highest quality. Needs 20+ GB RAM"},
-    {"name": "gemma3:12b", "label": "Gemma 3 12B", "ram_gb": 10, "quality": "great", "description": "Great quality. Needs 10+ GB RAM"},
-    {"name": "gemma3:4b", "label": "Gemma 3 4B", "ram_gb": 4, "quality": "good", "description": "Good balance of speed and quality. Needs 4+ GB RAM"},
-    {"name": "gemma3:1b", "label": "Gemma 3 1B", "ram_gb": 2, "quality": "fast", "description": "Fastest. Works on low-end hardware. Needs 2+ GB RAM"},
-    {"name": "moondream", "label": "Moondream 1.8B", "ram_gb": 2, "quality": "fast", "description": "Lightweight vision model for edge devices"},
+    # Gemma 3 (Google, all sizes support vision)
+    {"name": "gemma3:27b", "label": "Gemma 3 27B", "family": "Gemma", "ram_gb": 20, "quality": "best", "vision": True, "description": "Highest quality vision model from Google"},
+    {"name": "gemma3:12b", "label": "Gemma 3 12B", "family": "Gemma", "ram_gb": 10, "quality": "great", "vision": True, "description": "Great balance of quality and speed"},
+    {"name": "gemma3:4b", "label": "Gemma 3 4B", "family": "Gemma", "ram_gb": 4, "quality": "good", "vision": True, "description": "Good quality, runs on most machines"},
+    {"name": "gemma3:1b", "label": "Gemma 3 1B", "family": "Gemma", "ram_gb": 2, "quality": "fast", "vision": True, "description": "Ultra-light, works on low-end hardware"},
+    # LLaVA (vision-language model)
+    {"name": "llava:34b", "label": "LLaVA 34B", "family": "LLaVA", "ram_gb": 24, "quality": "best", "vision": True, "description": "Top-tier vision understanding"},
+    {"name": "llava:13b", "label": "LLaVA 13B", "family": "LLaVA", "ram_gb": 10, "quality": "great", "vision": True, "description": "Strong vision model, well-tested"},
+    {"name": "llava:7b", "label": "LLaVA 7B", "family": "LLaVA", "ram_gb": 5, "quality": "good", "vision": True, "description": "Proven vision model, moderate resources"},
+    # LLaVA-Llama3
+    {"name": "llava-llama3", "label": "LLaVA-Llama3 8B", "family": "LLaVA", "ram_gb": 6, "quality": "good", "vision": True, "description": "LLaVA fine-tuned on Llama 3"},
+    # BakLLaVA
+    {"name": "bakllava", "label": "BakLLaVA 7B", "family": "LLaVA", "ram_gb": 5, "quality": "good", "vision": True, "description": "Mistral-based vision model"},
+    # Moondream (tiny, edge-optimized)
+    {"name": "moondream", "label": "Moondream 1.8B", "family": "Moondream", "ram_gb": 2, "quality": "fast", "vision": True, "description": "Tiny vision model for edge devices"},
+    # Llama 3.2 Vision
+    {"name": "llama3.2-vision:11b", "label": "Llama 3.2 Vision 11B", "family": "Llama", "ram_gb": 8, "quality": "great", "vision": True, "description": "Meta's multimodal Llama with vision"},
+    {"name": "llama3.2-vision:90b", "label": "Llama 3.2 Vision 90B", "family": "Llama", "ram_gb": 55, "quality": "best", "vision": True, "description": "Largest Llama vision model"},
+    # MiniCPM-V
+    {"name": "minicpm-v", "label": "MiniCPM-V 8B", "family": "MiniCPM", "ram_gb": 6, "quality": "good", "vision": True, "description": "Compact vision model from OpenBMB"},
 ]
 
 
@@ -137,10 +154,9 @@ async def deploy_model(
     """
     model_name = body.model
 
-    # Validate model name
-    valid_names = {m["name"] for m in VISION_MODELS}
-    if model_name not in valid_names:
-        return DeployStatus(stage="error", message=f"Unknown model. Choose from {', '.join(valid_names)}")
+    # Validate model name format (allow any model, not just curated list)
+    if not model_name or "/" in model_name or ".." in model_name:
+        return DeployStatus(stage="error", message="Invalid model name")
 
     # Step 1. Check if Ollama is installed
     if not shutil.which("ollama"):

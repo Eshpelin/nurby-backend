@@ -136,7 +136,7 @@ export default function SettingsPage() {
   const [ollamaStatus, setOllamaStatus] = useState<{
     installed: boolean; running: boolean; models: string[];
     recommended_model: string | null; system_ram_gb: number | null;
-    available_models: { name: string; label: string; ram_gb: number; quality: string; description: string }[];
+    available_models: { name: string; label: string; family: string; ram_gb: number; quality: string; vision: boolean; description: string }[];
   } | null>(null);
   const [ollamaChecking, setOllamaChecking] = useState(false);
   const [ollamaDeploying, setOllamaDeploying] = useState(false);
@@ -598,37 +598,72 @@ export default function SettingsPage() {
                       {/* Model selector */}
                       <div>
                         <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Choose a model</span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {ollamaStatus.available_models.map((m) => {
-                            const fits = ollamaStatus.system_ram_gb ? ollamaStatus.system_ram_gb >= m.ram_gb * 1.3 : true;
-                            const isInstalled = ollamaStatus.models.some((im) => im.startsWith(m.name.split(":")[0]));
-                            return (
-                              <button key={m.name}
-                                onClick={() => setOllamaSelectedModel(m.name)}
-                                disabled={!fits}
-                                className={`relative text-left px-3 py-2 rounded-lg border transition-colors ${
-                                  ollamaSelectedModel === m.name
-                                    ? "border-accent/50 bg-accent/10"
-                                    : fits
-                                      ? "border-border hover:border-muted-foreground/30"
-                                      : "border-border opacity-40 cursor-not-allowed"
-                                }`}>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs font-medium">{m.label}</span>
-                                  <div className="flex gap-1">
-                                    {isInstalled && (
-                                      <span className="text-[9px] px-1 py-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/40">ready</span>
-                                    )}
-                                    {m.name === ollamaStatus.recommended_model && (
-                                      <span className="text-[9px] px-1 py-0.5 rounded bg-accent/20 text-accent border border-accent/30">recommended</span>
-                                    )}
-                                  </div>
+                        <div className="space-y-2">
+                          {/* Group models by family */}
+                          {(() => {
+                            const families = new Map<string, typeof ollamaStatus.available_models>();
+                            for (const m of ollamaStatus.available_models) {
+                              const family = (m as Record<string, unknown>).family as string || "Other";
+                              if (!families.has(family)) families.set(family, []);
+                              families.get(family)!.push(m);
+                            }
+                            return Array.from(families.entries()).map(([family, models]) => (
+                              <div key={family}>
+                                <div className="text-[10px] font-medium text-muted-foreground mb-1">{family}</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                  {models.map((m) => {
+                                    const fits = ollamaStatus.system_ram_gb ? ollamaStatus.system_ram_gb >= m.ram_gb * 1.3 : true;
+                                    const isInstalled = ollamaStatus.models.some((im) => im.startsWith(m.name.split(":")[0]));
+                                    return (
+                                      <button key={m.name}
+                                        onClick={() => setOllamaSelectedModel(m.name)}
+                                        disabled={!fits}
+                                        className={`relative text-left px-3 py-2 rounded-lg border transition-colors ${
+                                          ollamaSelectedModel === m.name
+                                            ? "border-accent/50 bg-accent/10"
+                                            : fits
+                                              ? "border-border hover:border-muted-foreground/30"
+                                              : "border-border opacity-40 cursor-not-allowed"
+                                        }`}>
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs font-medium">{m.label}</span>
+                                          <div className="flex gap-1">
+                                            {isInstalled && (
+                                              <span className="text-[9px] px-1 py-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/40">ready</span>
+                                            )}
+                                            {m.name === ollamaStatus.recommended_model && (
+                                              <span className="text-[9px] px-1 py-0.5 rounded bg-accent/20 text-accent border border-accent/30">recommended</span>
+                                            )}
+                                            {!fits && (
+                                              <span className="text-[9px] px-1 py-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/40">needs {m.ram_gb}+ GB</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground mt-0.5">{m.description}</div>
+                                      </button>
+                                    );
+                                  })}
                                 </div>
-                                <div className="text-[10px] text-muted-foreground mt-0.5">{m.description}</div>
-                                {!fits && <div className="text-[10px] text-red-400 mt-0.5">Not enough RAM</div>}
-                              </button>
-                            );
-                          })}
+                              </div>
+                            ));
+                          })()}
+
+                          {/* Custom model input */}
+                          <div>
+                            <div className="text-[10px] font-medium text-muted-foreground mb-1">Custom</div>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder="Any Ollama model, e.g. llava-phi3"
+                                value={ollamaStatus.available_models.some((m) => m.name === ollamaSelectedModel) ? "" : ollamaSelectedModel}
+                                onChange={(e) => setOllamaSelectedModel(e.target.value.trim())}
+                                className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                              />
+                            </div>
+                            <div className="text-[10px] text-muted-foreground mt-1">
+                              Browse all models at <a href="https://ollama.com/search?c=vision" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">ollama.com/search</a>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
