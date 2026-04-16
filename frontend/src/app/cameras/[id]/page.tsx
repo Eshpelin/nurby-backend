@@ -28,6 +28,7 @@ interface Camera {
   vlm_max_tokens: number;
   detect_objects: boolean;
   detect_faces: boolean;
+  scene_mode: string;
   object_confidence: number;
   vlm_trigger: string;
   vlm_trigger_objects: string[] | null;
@@ -584,6 +585,7 @@ export default function CameraConfigPage() {
   const [vlmTriggerObjects, setVlmTriggerObjects] = useState<string[]>([]);
   const [detectObjects, setDetectObjects] = useState(true);
   const [detectFaces, setDetectFaces] = useState(true);
+  const [sceneMode, setSceneMode] = useState("indoor");
   const [objectConfidence, setObjectConfidence] = useState(0.35);
   const [detectionModels, setDetectionModels] = useState<{model: string; confidence: number; enabled: boolean; label_filter: string[]}[]>([]);
   const [detectionMerge, setDetectionMerge] = useState("any");
@@ -637,6 +639,7 @@ export default function CameraConfigPage() {
       setVlmTriggerObjects(cam.vlm_trigger_objects ?? []);
       setDetectObjects(cam.detect_objects ?? true);
       setDetectFaces(cam.detect_faces ?? true);
+      setSceneMode(cam.scene_mode ?? "indoor");
       setObjectConfidence(cam.object_confidence ?? 0.35);
       setDetectionModels(cam.detection_models ?? []);
       setDetectionMerge(cam.detection_merge ?? "any");
@@ -686,6 +689,7 @@ export default function CameraConfigPage() {
         vlm_trigger_objects: vlmTriggerObjects.length > 0 ? vlmTriggerObjects : null,
         detect_objects: detectObjects,
         detect_faces: detectFaces,
+        scene_mode: sceneMode,
         object_confidence: objectConfidence,
         detection_models: detectionModels.length > 0 ? detectionModels : null,
         detection_merge: detectionMerge,
@@ -1273,6 +1277,24 @@ export default function CameraConfigPage() {
           title="Detection"
           description="Object and face detection models for this camera"
         >
+          <FieldRow label="Scene Mode" hint="Controls how unknown faces are handled">
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                {(["indoor", "outdoor"] as const).map((mode) => (
+                  <button key={mode} onClick={() => setSceneMode(mode)}
+                    className={`flex-1 px-3 py-2 text-xs rounded-lg transition-colors ${sceneMode === mode ? "bg-accent/15 text-accent-foreground font-medium border border-accent/30" : "text-muted-foreground border border-border hover:text-foreground hover:bg-muted/50"}`}>
+                    {mode === "indoor" ? "Indoor" : "Outdoor"}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {sceneMode === "outdoor"
+                  ? "Outdoor mode will still recognize people you have already named, but will not try to identify unknown faces. This prevents your People page from filling up with strangers walking by."
+                  : "Indoor mode will track all faces and suggest unknown people for you to name."}
+              </p>
+            </div>
+          </FieldRow>
+
           <FieldRow label="Object Detection" hint="Enable YOLO-based object recognition">
             <Toggle
               checked={detectObjects}

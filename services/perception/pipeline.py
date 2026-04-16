@@ -215,8 +215,10 @@ class PerceptionPipeline:
                     camera_id, len(faces), len(matched),
                 )
 
-            # Cluster unknown faces for auto-discovery
-            if faces:
+            # Cluster unknown faces for auto-discovery (skip for outdoor cameras
+            # to avoid flooding suggestions with passersby)
+            is_outdoor = cam and getattr(cam, "scene_mode", "indoor") == "outdoor"
+            if faces and not is_outdoor:
                 for face in faces:
                     if not face.get("person_id"):
                         await self._face.cluster_unknown_face(face, camera_id, frame)

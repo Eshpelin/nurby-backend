@@ -28,6 +28,7 @@ class CameraCreate(BaseModel):
     vlm_max_tokens: int = Field(default=200, ge=50, le=2000)
     detect_objects: bool = True
     detect_faces: bool = True
+    scene_mode: str = "indoor"  # indoor, outdoor
     object_confidence: float = Field(default=0.35, ge=0.05, le=1.0)
     vlm_trigger: str = "always"  # always, on_object
     vlm_trigger_objects: list[str] | None = None
@@ -66,6 +67,7 @@ class CameraUpdate(BaseModel):
     vlm_max_tokens: int | None = Field(default=None, ge=50, le=2000)
     detect_objects: bool | None = None
     detect_faces: bool | None = None
+    scene_mode: str | None = None
     object_confidence: float | None = Field(default=None, ge=0.05, le=1.0)
     vlm_trigger: str | None = None
     vlm_trigger_objects: list[str] | None = None
@@ -104,6 +106,7 @@ class CameraResponse(BaseModel):
     vlm_max_tokens: int
     detect_objects: bool
     detect_faces: bool
+    scene_mode: str
     object_confidence: float
     vlm_trigger: str
     vlm_trigger_objects: list[str] | None

@@ -35,6 +35,7 @@ class Camera(Base):
     vlm_max_tokens: Mapped[int] = mapped_column(Integer, default=200)
     detect_objects: Mapped[bool] = mapped_column(Boolean, default=True)
     detect_faces: Mapped[bool] = mapped_column(Boolean, default=True)
+    scene_mode: Mapped[str] = mapped_column(String(16), default="indoor")  # indoor, outdoor
     object_confidence: Mapped[float] = mapped_column(Float, default=0.35)  # YOLO confidence threshold
     # VLM trigger config
     vlm_trigger: Mapped[str] = mapped_column(String(16), default="always")  # always, on_object
