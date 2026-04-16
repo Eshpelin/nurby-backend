@@ -155,15 +155,28 @@ class RuleEngine:
         if cam and not cam_ids and data.get("camera_id") != cam:
             return False
 
+        # Day of week filter
+        allowed_days = conditions.get("days")
+        if allowed_days:
+            day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+            today = day_map.get(datetime.now().weekday(), "")
+            if today not in allowed_days:
+                return False
+
         # Time window
         time_after = conditions.get("time_after")
         time_before = conditions.get("time_before")
         if time_after or time_before:
             now_time = datetime.now().strftime("%H:%M")
-            if time_after and now_time < time_after:
-                return False
-            if time_before and now_time > time_before:
-                return False
+            if time_after and time_before and time_after > time_before:
+                # Overnight range (e.g. 19:00 to 07:00)
+                if now_time < time_after and now_time > time_before:
+                    return False
+            else:
+                if time_after and now_time < time_after:
+                    return False
+                if time_before and now_time > time_before:
+                    return False
 
         # Confidence filter
         min_conf = conditions.get("min_confidence")

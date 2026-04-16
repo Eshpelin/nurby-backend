@@ -86,11 +86,13 @@ export default function RulesPage() {
   const [formTriggerType, setFormTriggerType] = useState("object_detected");
   const [formTriggerLabel, setFormTriggerLabel] = useState("");
   const [formTriggerPersonId, setFormTriggerPersonId] = useState("");
-  const [formTriggerMinScore, setFormTriggerMinScore] = useState("0.05");
+  const [formTriggerSensitivity, setFormTriggerSensitivity] = useState("medium");
   const [formCondCameras, setFormCondCameras] = useState<string[]>([]);
+  const [formScheduleMode, setFormScheduleMode] = useState<"always" | "custom">("always");
+  const [formCondDays, setFormCondDays] = useState<string[]>([]);
   const [formCondTimeAfter, setFormCondTimeAfter] = useState("");
   const [formCondTimeBefore, setFormCondTimeBefore] = useState("");
-  const [formCondMinConf, setFormCondMinConf] = useState("");
+  const [formCondConfidence, setFormCondConfidence] = useState("any");
   const [formActionType, setFormActionType] = useState("notify");
   const [formActionUrl, setFormActionUrl] = useState("");
   const [formActionMessage, setFormActionMessage] = useState("");
@@ -130,11 +132,13 @@ export default function RulesPage() {
     setFormTriggerType("object_detected");
     setFormTriggerLabel("");
     setFormTriggerPersonId("");
-    setFormTriggerMinScore("0.05");
+    setFormTriggerSensitivity("medium");
     setFormCondCameras([]);
+    setFormScheduleMode("always");
+    setFormCondDays([]);
     setFormCondTimeAfter("");
     setFormCondTimeBefore("");
-    setFormCondMinConf("");
+    setFormCondConfidence("any");
     setFormActionType("notify");
     setFormActionUrl("");
     setFormActionMessage("");
@@ -158,15 +162,37 @@ export default function RulesPage() {
     setFormTriggerType((tp.type as string) || "any");
     setFormTriggerLabel((tp.label as string) || "");
     setFormTriggerPersonId((tp.person_id as string) || "");
-    setFormTriggerMinScore(String(tp.min_score ?? "0.05"));
+    // Map min_score back to sensitivity level
+    const ms = tp.min_score as number | undefined;
+    if (ms != null) {
+      if (ms <= 0.02) setFormTriggerSensitivity("very_high");
+      else if (ms <= 0.05) setFormTriggerSensitivity("high");
+      else if (ms <= 0.15) setFormTriggerSensitivity("medium");
+      else setFormTriggerSensitivity("low");
+    } else {
+      setFormTriggerSensitivity("medium");
+    }
 
     const cond = r.conditions || {};
     const camIds = cond.camera_ids as string[] | undefined;
     const camId = cond.camera_id as string | undefined;
     setFormCondCameras(camIds || (camId ? [camId] : []));
+    const days = cond.days as string[] | undefined;
+    setFormCondDays(days || []);
+    const hasSchedule = !!(cond.time_after || cond.time_before || (days && days.length > 0));
+    setFormScheduleMode(hasSchedule ? "custom" : "always");
     setFormCondTimeAfter((cond.time_after as string) || "");
     setFormCondTimeBefore((cond.time_before as string) || "");
-    setFormCondMinConf(cond.min_confidence ? String(cond.min_confidence) : "");
+    // Map min_confidence back to label
+    const mc = cond.min_confidence as number | undefined;
+    if (mc != null) {
+      if (mc >= 0.8) setFormCondConfidence("very_high");
+      else if (mc >= 0.6) setFormCondConfidence("high");
+      else if (mc >= 0.3) setFormCondConfidence("medium");
+      else setFormCondConfidence("low");
+    } else {
+      setFormCondConfidence("any");
+    }
 
     const acts = Array.isArray(r.actions) ? r.actions[0] : r.actions;
     setFormActionType((acts?.type as string) || "notify");
@@ -186,15 +212,32 @@ export default function RulesPage() {
     if (formTriggerType === "face_recognized" && formTriggerPersonId) {
       trigger_pattern.person_id = formTriggerPersonId;
     }
-    if (formTriggerType === "motion" && formTriggerMinScore) {
-      trigger_pattern.min_score = parseFloat(formTriggerMinScore);
+    if (formTriggerType === "motion") {
+      const sensitivityMap: Record<string, number> = {
+        very_high: 0.01,
+        high: 0.03,
+        medium: 0.08,
+        low: 0.2,
+      };
+      trigger_pattern.min_score = sensitivityMap[formTriggerSensitivity] ?? 0.08;
     }
 
     const conditions: Record<string, unknown> = {};
     if (formCondCameras.length > 0) conditions.camera_ids = formCondCameras;
-    if (formCondTimeAfter) conditions.time_after = formCondTimeAfter;
-    if (formCondTimeBefore) conditions.time_before = formCondTimeBefore;
-    if (formCondMinConf) conditions.min_confidence = parseFloat(formCondMinConf);
+    if (formScheduleMode === "custom") {
+      if (formCondTimeAfter) conditions.time_after = formCondTimeAfter;
+      if (formCondTimeBefore) conditions.time_before = formCondTimeBefore;
+      if (formCondDays.length > 0) conditions.days = formCondDays;
+    }
+    if (formCondConfidence !== "any") {
+      const confMap: Record<string, number> = {
+        low: 0.2,
+        medium: 0.4,
+        high: 0.6,
+        very_high: 0.8,
+      };
+      conditions.min_confidence = confMap[formCondConfidence] ?? 0.4;
+    }
 
     const action: Record<string, unknown> = { type: formActionType };
     if (formActionType === "webhook") action.url = formActionUrl;
@@ -433,11 +476,17 @@ export default function RulesPage() {
                             });
                             parts.push(`Cameras. ${names.join(", ")}`);
                           }
+                          const days = cond.days as string[] | undefined;
+                          if (days && days.length > 0 && days.length < 7) {
+                            parts.push(`Days. ${days.map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(", ")}`);
+                          }
                           if (cond.time_after || cond.time_before) {
-                            parts.push(`Time. ${cond.time_after || "00:00"} to ${cond.time_before || "23:59"}`);
+                            parts.push(`Hours. ${cond.time_after || "00:00"} to ${cond.time_before || "23:59"}`);
                           }
                           if (cond.min_confidence) {
-                            parts.push(`Min confidence. ${cond.min_confidence}`);
+                            const mc = cond.min_confidence as number;
+                            const label = mc >= 0.8 ? "Very high" : mc >= 0.6 ? "High" : mc >= 0.4 ? "Medium" : "Low";
+                            parts.push(`Confidence. ${label} (${Math.round(mc * 100)}%+)`);
                           }
                           return parts.map((p, i) => <div key={i}>{p}</div>);
                         })()}
@@ -550,18 +599,30 @@ export default function RulesPage() {
 
                 {formTriggerType === "motion" && (
                   <div>
-                    <label className="text-xs text-muted-foreground">
-                      Min motion score
+                    <label className="text-xs text-muted-foreground block mb-1.5">
+                      Motion sensitivity
                     </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      value={formTriggerMinScore}
-                      onChange={(e) => setFormTriggerMinScore(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    />
+                    <div className="grid grid-cols-4 gap-1">
+                      {[
+                        { value: "very_high", label: "Any movement", desc: "Triggers on smallest change" },
+                        { value: "high", label: "Sensitive", desc: "Small movements" },
+                        { value: "medium", label: "Normal", desc: "Moderate activity" },
+                        { value: "low", label: "Only major", desc: "Large movements only" },
+                      ].map((s) => (
+                        <button
+                          key={s.value}
+                          type="button"
+                          onClick={() => setFormTriggerSensitivity(s.value)}
+                          className={`px-2 py-2 text-xs rounded border transition-colors text-center ${
+                            formTriggerSensitivity === s.value
+                              ? "border-accent bg-accent/10 text-accent"
+                              : "border-border hover:bg-muted"
+                          }`}
+                        >
+                          <div className="font-medium">{s.label}</div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </fieldset>
@@ -609,38 +670,166 @@ export default function RulesPage() {
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground">Active after</label>
-                    <input
-                      type="time"
-                      value={formCondTimeAfter}
-                      onChange={(e) => setFormCondTimeAfter(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Active before</label>
-                    <input
-                      type="time"
-                      value={formCondTimeBefore}
-                      onChange={(e) => setFormCondTimeBefore(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    />
-                  </div>
-                </div>
+                {/* Schedule */}
                 <div>
-                  <label className="text-xs text-muted-foreground">Min confidence</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    value={formCondMinConf}
-                    onChange={(e) => setFormCondMinConf(e.target.value)}
-                    className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    placeholder="0.0 - 1.0"
-                  />
+                  <label className="text-xs text-muted-foreground block mb-1.5">Schedule</label>
+                  <div className="flex gap-1 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormScheduleMode("always")}
+                      className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                        formScheduleMode === "always"
+                          ? "border-accent bg-accent/10 text-accent"
+                          : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      Always on
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormScheduleMode("custom")}
+                      className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                        formScheduleMode === "custom"
+                          ? "border-accent bg-accent/10 text-accent"
+                          : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      Custom schedule
+                    </button>
+                  </div>
+
+                  {formScheduleMode === "custom" && (
+                    <div className="space-y-2 pl-1">
+                      {/* Days of week */}
+                      <div>
+                        <label className="text-[10px] text-muted-foreground block mb-1">Active on</label>
+                        <div className="flex gap-1">
+                          {[
+                            { value: "mon", label: "M" },
+                            { value: "tue", label: "T" },
+                            { value: "wed", label: "W" },
+                            { value: "thu", label: "T" },
+                            { value: "fri", label: "F" },
+                            { value: "sat", label: "S" },
+                            { value: "sun", label: "S" },
+                          ].map((day) => (
+                            <button
+                              key={day.value}
+                              type="button"
+                              onClick={() => {
+                                setFormCondDays((prev) =>
+                                  prev.includes(day.value)
+                                    ? prev.filter((d) => d !== day.value)
+                                    : [...prev, day.value]
+                                );
+                              }}
+                              className={`w-8 h-8 text-xs rounded-full border transition-colors ${
+                                formCondDays.includes(day.value)
+                                  ? "border-accent bg-accent/20 text-accent"
+                                  : "border-border hover:bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              {day.label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (formCondDays.length === 7) {
+                                setFormCondDays([]);
+                              } else {
+                                setFormCondDays(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+                              }
+                            }}
+                            className="px-2 h-8 text-[10px] rounded border border-border hover:bg-muted text-muted-foreground ml-1"
+                          >
+                            {formCondDays.length === 7 ? "None" : "All"}
+                          </button>
+                        </div>
+                        {formCondDays.length === 0 && (
+                          <span className="text-[10px] text-muted-foreground">No days selected = every day</span>
+                        )}
+                      </div>
+
+                      {/* Time range */}
+                      <div>
+                        <label className="text-[10px] text-muted-foreground block mb-1">Active between</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            value={formCondTimeAfter}
+                            onChange={(e) => setFormCondTimeAfter(e.target.value)}
+                            className="flex-1 px-2 py-1.5 rounded-md bg-background border border-border text-sm"
+                          />
+                          <span className="text-xs text-muted-foreground">to</span>
+                          <input
+                            type="time"
+                            value={formCondTimeBefore}
+                            onChange={(e) => setFormCondTimeBefore(e.target.value)}
+                            className="flex-1 px-2 py-1.5 rounded-md bg-background border border-border text-sm"
+                          />
+                        </div>
+                        {!formCondTimeAfter && !formCondTimeBefore && (
+                          <span className="text-[10px] text-muted-foreground">No times set = all day</span>
+                        )}
+                      </div>
+
+                      {/* Quick presets */}
+                      <div className="flex gap-1">
+                        {[
+                          { label: "Daytime", after: "07:00", before: "19:00", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+                          { label: "Nighttime", after: "19:00", before: "07:00", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+                          { label: "Weekdays", after: "", before: "", days: ["mon", "tue", "wed", "thu", "fri"] },
+                          { label: "Weekends", after: "", before: "", days: ["sat", "sun"] },
+                        ].map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => {
+                              setFormCondTimeAfter(preset.after);
+                              setFormCondTimeBefore(preset.before);
+                              setFormCondDays(preset.days);
+                            }}
+                            className="px-2 py-1 text-[10px] rounded border border-border hover:bg-muted text-muted-foreground transition-colors"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Detection confidence */}
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">
+                    Detection confidence
+                  </label>
+                  <div className="grid grid-cols-5 gap-1">
+                    {[
+                      { value: "any", label: "Any", desc: "All detections" },
+                      { value: "low", label: "Low+", desc: "20%+" },
+                      { value: "medium", label: "Medium+", desc: "40%+" },
+                      { value: "high", label: "High+", desc: "60%+" },
+                      { value: "very_high", label: "Very high", desc: "80%+" },
+                    ].map((c) => (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() => setFormCondConfidence(c.value)}
+                        className={`px-1 py-1.5 text-[11px] rounded border transition-colors text-center ${
+                          formCondConfidence === c.value
+                            ? "border-accent bg-accent/10 text-accent"
+                            : "border-border hover:bg-muted"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    Higher confidence = fewer false positives but may miss some detections
+                  </span>
                 </div>
               </fieldset>
 
@@ -696,17 +885,32 @@ export default function RulesPage() {
               {/* Cooldown */}
               <div>
                 <label className="text-xs font-medium text-muted-foreground block mb-1">
-                  Cooldown (seconds)
+                  Wait between alerts
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={formCooldown}
-                  onChange={(e) => setFormCooldown(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                />
-                <span className="text-xs text-muted-foreground">
-                  Min time between fires for this rule
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { value: "0", label: "None" },
+                    { value: "30", label: "30 sec" },
+                    { value: "300", label: "5 min" },
+                    { value: "900", label: "15 min" },
+                    { value: "3600", label: "1 hour" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setFormCooldown(opt.value)}
+                      className={`px-2 py-1.5 text-xs rounded border transition-colors ${
+                        formCooldown === opt.value
+                          ? "border-accent bg-accent/10 text-accent"
+                          : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  Prevents repeated alerts for the same event
                 </span>
               </div>
 
