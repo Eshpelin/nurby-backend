@@ -640,7 +640,7 @@ function AddCameraModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/cameras`, {
+      const res = await authFetch(`/api/cameras`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -919,14 +919,14 @@ function DashboardContent() {
 
   const fetchActivity = useCallback(async (cameraId: string) => {
     try {
-      const res = await fetch(`/api/observations?camera_id=${cameraId}&limit=15`);
+      const res = await authFetch(`/api/observations?camera_id=${cameraId}&limit=15`);
       if (res.ok) {
         const obs: Observation[] = await res.json();
         const events = obs.flatMap(observationToEvents).slice(0, 10);
         setActivityEvents((prev) => ({ ...prev, [cameraId]: events }));
       }
     } catch { /* silent */ }
-  }, []);
+  }, [authFetch]);
 
   const fetchPersons = useCallback(async () => {
     try {
@@ -944,9 +944,9 @@ function DashboardContent() {
       if (selectedCamera) statusParams.set("camera_id", selectedCamera);
 
       const [recRes, obsRes, statusRes] = await Promise.all([
-        fetch(`/api/recordings?${params}`),
-        fetch(`/api/observations?${params}`),
-        fetch(`/api/cameras/status-logs?${statusParams}`),
+        authFetch(`/api/recordings?${params}`),
+        authFetch(`/api/observations?${params}`),
+        authFetch(`/api/cameras/status-logs?${statusParams}`),
       ]);
 
       const now = Date.now();
@@ -958,14 +958,14 @@ function DashboardContent() {
       if (statusRes.ok) setStatusLogs((await statusRes.json()).filter((s: StatusLog) => new Date(s.timestamp).getTime() >= cutoff));
     } catch { /* silent */ }
     finally { setTimelineLoading(false); }
-  }, [selectedCamera, timeRange]);
+  }, [selectedCamera, timeRange, authFetch]);
 
   const fetchDigest = useCallback(async () => {
     setDigestLoading(true);
     try {
       const params = new URLSearchParams({ period: digestPeriod });
       if (selectedCamera) params.set("camera_id", selectedCamera);
-      const res = await fetch(`/api/search/digest?${params}`);
+      const res = await authFetch(`/api/search/digest?${params}`);
       if (res.ok) setDigest(await res.json());
     } catch { /* silent */ }
     finally { setDigestLoading(false); }
@@ -983,7 +983,7 @@ function DashboardContent() {
     if (filterPerson) params.set("person", filterPerson);
     if (filterObject) params.set("object", filterObject);
     try {
-      const res = await fetch(`/api/search?${params}`);
+      const res = await authFetch(`/api/search?${params}`);
       if (res.ok) setSearchResults((await res.json()).results);
     } catch { /* silent */ }
     finally { setIsSearching(false); }

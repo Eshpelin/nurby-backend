@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/lib/auth";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -198,13 +200,14 @@ function HoldButton({
 }
 
 function PTZControlPanel({ cameraId }: { cameraId: string }) {
+  const { authFetch } = useAuth();
   const [presets, setPresets] = useState<PTZPreset[]>([]);
   const [speed, setSpeed] = useState(0.5);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchPresets = useCallback(async () => {
     try {
-      const res = await fetch(`/api/cameras/${cameraId}/ptz/presets`);
+      const res = await authFetch(`/api/cameras/${cameraId}/ptz/presets`);
       if (res.ok) setPresets(await res.json());
     } catch {
       /* silent */
@@ -218,7 +221,7 @@ function PTZControlPanel({ cameraId }: { cameraId: string }) {
   const sendMove = useCallback(
     async (pan: number, tilt: number, zoom: number) => {
       try {
-        await fetch(`/api/cameras/${cameraId}/ptz/move`, {
+        await authFetch(`/api/cameras/${cameraId}/ptz/move`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pan, tilt, zoom, speed }),
@@ -232,7 +235,7 @@ function PTZControlPanel({ cameraId }: { cameraId: string }) {
 
   const sendStop = useCallback(async () => {
     try {
-      await fetch(`/api/cameras/${cameraId}/ptz/stop`, { method: "POST" });
+      await authFetch(`/api/cameras/${cameraId}/ptz/stop`, { method: "POST" });
     } catch {
       /* silent */
     }
@@ -257,7 +260,7 @@ function PTZControlPanel({ cameraId }: { cameraId: string }) {
   const goToPreset = useCallback(
     async (token: string) => {
       try {
-        await fetch(`/api/cameras/${cameraId}/ptz/goto`, {
+        await authFetch(`/api/cameras/${cameraId}/ptz/goto`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ preset_token: token }),
@@ -545,6 +548,7 @@ function ZoneEditorCanvas({
 }
 
 export default function CameraConfigPage() {
+  const { authFetch } = useAuth();
   const params = useParams();
   const router = useRouter();
   const cameraId = params.id as string;
@@ -596,8 +600,8 @@ export default function CameraConfigPage() {
   const fetchData = useCallback(async () => {
     try {
       const [camRes, provRes] = await Promise.all([
-        fetch(`/api/cameras/${cameraId}`),
-        fetch(`/api/providers`),
+        authFetch(`/api/cameras/${cameraId}`),
+        authFetch(`/api/providers`),
       ]);
       if (!camRes.ok) {
         setError("Camera not found");
@@ -700,7 +704,7 @@ export default function CameraConfigPage() {
       if (password) payload.password = password;
       if (authToken.trim()) payload.auth_token = authToken.trim();
 
-      const res = await fetch(`/api/cameras/${cameraId}`, {
+      const res = await authFetch(`/api/cameras/${cameraId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -724,7 +728,7 @@ export default function CameraConfigPage() {
 
   async function handleDelete() {
     try {
-      const res = await fetch(`/api/cameras/${cameraId}`, { method: "DELETE" });
+      const res = await authFetch(`/api/cameras/${cameraId}`, { method: "DELETE" });
       if (res.ok) {
         router.push("/");
       }

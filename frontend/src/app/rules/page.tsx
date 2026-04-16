@@ -190,7 +190,7 @@ export default function RulesPage() {
   const fetchRuleEvents = useCallback(async (ruleId: string) => {
     setEventsLoading(true);
     try {
-      const res = await fetch(`/api/events/history?rule_id=${ruleId}&limit=20`);
+      const res = await authFetch(`/api/events/history?rule_id=${ruleId}&limit=20`);
       if (res.ok) setRuleEvents(await res.json());
     } catch {
       /* silent */
@@ -447,7 +447,7 @@ export default function RulesPage() {
     try {
       let res: Response;
       if (editRule) {
-        res = await fetch(`/api/rules/${editRule.id}`, {
+        res = await authFetch(`/api/rules/${editRule.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -476,7 +476,7 @@ export default function RulesPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      await fetch(`/api/rules/${id}`, { method: "DELETE" });
+      await authFetch(`/api/rules/${id}`, { method: "DELETE" });
       if (selectedRule?.id === id) setSelectedRule(null);
       fetchRules();
     } catch {
@@ -486,7 +486,7 @@ export default function RulesPage() {
 
   const handleToggle = async (rule: Rule) => {
     try {
-      await fetch(`/api/rules/${rule.id}`, {
+      await authFetch(`/api/rules/${rule.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...rule, enabled: !rule.enabled }),

@@ -126,7 +126,7 @@ export function Navbar() {
   const handleMarkRead = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/notifications/${id}/read`, { method: "PATCH" });
+        await authFetch(`/api/notifications/${id}/read`, { method: "PATCH" });
         setNotifications((prev) =>
           prev.map((n) => (n.id === id ? { ...n, read: true } : n))
         );

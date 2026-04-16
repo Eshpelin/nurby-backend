@@ -266,7 +266,7 @@ export default function SettingsPage() {
     try {
       let res: Response;
       if (editProvider) {
-        res = await fetch(`/api/providers/${editProvider.id}`, {
+        res = await authFetch(`/api/providers/${editProvider.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -296,7 +296,7 @@ export default function SettingsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      await fetch(`/api/providers/${id}`, { method: "DELETE" });
+      await authFetch(`/api/providers/${id}`, { method: "DELETE" });
       fetchProviders();
     } catch {
       /* silent */
@@ -308,7 +308,7 @@ export default function SettingsPage() {
     setTestResult((prev) => ({ ...prev, [provider.id]: undefined as never }));
 
     try {
-      const res = await fetch(`/api/providers/${provider.id}/test`, {
+      const res = await authFetch(`/api/providers/${provider.id}/test`, {
         method: "POST",
       });
       if (res.ok) {
@@ -361,7 +361,7 @@ export default function SettingsPage() {
 
   const handleDeleteInvite = async (id: string) => {
     try {
-      await fetch(`/api/invites/${id}`, { method: "DELETE" });
+      await authFetch(`/api/invites/${id}`, { method: "DELETE" });
       fetchInviteKeys();
     } catch {
       /* silent */

@@ -79,7 +79,7 @@ export default function RecordingsPage() {
       params.set("offset", String(page * PAGE_SIZE));
       if (cameraFilter) params.set("camera_id", cameraFilter);
 
-      const res = await fetch(`/api/recordings?${params.toString()}`);
+      const res = await authFetch(`/api/recordings?${params.toString()}`);
       if (res.ok) {
         let list: Recording[] = await res.json();
 

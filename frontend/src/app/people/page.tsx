@@ -208,7 +208,7 @@ export default function PeoplePage() {
 
       let res: Response;
       if (editPerson) {
-        res = await fetch(`/api/persons/${editPerson.id}`, {
+        res = await authFetch(`/api/persons/${editPerson.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -238,7 +238,7 @@ export default function PeoplePage() {
 
   const handleDelete = async (id: string) => {
     try {
-      await fetch(`/api/persons/${id}`, { method: "DELETE" });
+      await authFetch(`/api/persons/${id}`, { method: "DELETE" });
       fetchPersons();
       fetchSummaries();
     } catch {
@@ -254,7 +254,7 @@ export default function PeoplePage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch(`/api/persons/${personId}/face`, {
+      const res = await authFetch(`/api/persons/${personId}/face`, {
         method: "POST",
         body: formData,
       });
@@ -275,7 +275,7 @@ export default function PeoplePage() {
 
     setNamingSubmitting(clusterId);
     try {
-      const res = await fetch(`/api/persons/suggestions/${clusterId}/name`, {
+      const res = await authFetch(`/api/persons/suggestions/${clusterId}/name`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -297,7 +297,7 @@ export default function PeoplePage() {
 
   const handleIgnoreSuggestion = async (clusterId: string) => {
     try {
-      await fetch(`/api/persons/suggestions/${clusterId}/ignore`, {
+      await authFetch(`/api/persons/suggestions/${clusterId}/ignore`, {
         method: "POST",
       });
       setSuggestions((prev) => prev.filter((s) => s.id !== clusterId));
