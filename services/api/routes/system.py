@@ -1,11 +1,14 @@
 import time
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_current_user, require_admin
+from shared.config import settings
 from shared.database import get_db
+from shared.email import send_email
 from shared.models import Camera, Observation, Recording, User
 from shared.schemas import CameraStorageStats, StorageResponse, SystemStatus
 
@@ -86,3 +89,41 @@ async def get_storage_stats(_current_user: User = Depends(get_current_user), db:
         total_recording_bytes=total_bytes,
         total_observations=total_obs,
     )
+
+
+@router.get("/smtp")
+async def get_smtp_config(_current_user: User = Depends(require_admin)):
+    """Return current SMTP configuration with masked password."""
+    masked_password = ""
+    if settings.smtp_password:
+        pw = settings.smtp_password
+        masked_password = pw[:2] + "***" + pw[-2:] if len(pw) >= 4 else "***"
+    return {
+        "smtp_host": settings.smtp_host,
+        "smtp_port": settings.smtp_port,
+        "smtp_user": settings.smtp_user,
+        "smtp_password": masked_password,
+        "smtp_from": settings.smtp_from,
+        "smtp_tls": settings.smtp_tls,
+    }
+
+
+class SmtpTestRequest(BaseModel):
+    to: str
+
+
+@router.post("/smtp-test")
+async def test_smtp(body: SmtpTestRequest, _current_user: User = Depends(require_admin)):
+    """Send a test email to verify SMTP configuration."""
+    if not settings.smtp_host:
+        return {"ok": False, "message": "SMTP not configured. Set SMTP_HOST in your environment or .env file"}
+
+    try:
+        await send_email(
+            to=body.to,
+            subject="Nurby SMTP Test",
+            body="This is a test email from Nurby. Your SMTP configuration is working correctly.",
+        )
+        return {"ok": True, "message": f"Test email sent to {body.to}"}
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)}

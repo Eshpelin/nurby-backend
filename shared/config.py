@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production-use-a-real-secret"
     jwt_expiry_hours: int = 24
 
+    # SMTP settings for email notifications
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

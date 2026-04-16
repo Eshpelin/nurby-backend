@@ -9,6 +9,7 @@ Supported action types.
     api_call    Full HTTP call with method, auth (Bearer/API key/Basic), custom payload
     broadcast   Push to WebSocket clients with optional custom payload
     notify      Store notification + broadcast via WebSocket
+    email       Send email via SMTP with template subject and body
 """
 
 import base64
@@ -167,6 +168,8 @@ async def execute_action(
         await _execute_broadcast(action, observation_data, rule, event_id)
     elif action_type == "notify":
         await _execute_notify(action, observation_data, rule, event_id)
+    elif action_type == "email":
+        await _execute_email(action, observation_data, rule, event_id)
     else:
         logger.warning("Unknown action type '%s' in rule '%s'", action_type, rule.name)
         await _update_event_status(event_id, action_type or "unknown", "failed", f"Unknown action type '{action_type}'")
@@ -379,3 +382,42 @@ async def _execute_notify(
     except Exception as exc:
         logger.error("Notification failed for rule '%s'. %s", rule.name, exc)
         await _update_event_status(event_id, "notify", "failed", str(exc))
+
+
+async def _execute_email(
+    action: dict,
+    observation_data: dict,
+    rule,
+    event_id: uuid.UUID,
+):
+    """Send an email via SMTP with template subject and body."""
+    from shared.config import settings
+    from shared.email import send_email
+
+    recipient = action.get("to")
+    if not recipient:
+        logger.error("Email action missing 'to' in rule '%s'", rule.name)
+        await _update_event_status(event_id, "email", "failed", "Missing 'to' in email action")
+        return
+
+    if not settings.smtp_host:
+        logger.error("SMTP not configured. Cannot send email for rule '%s'", rule.name)
+        await _update_event_status(
+            event_id, "email", "failed", "SMTP not configured. Set SMTP_HOST in environment"
+        )
+        return
+
+    context = _build_template_context(observation_data, rule, event_id)
+
+    subject_template = action.get("subject", "Nurby alert. {{rule_name}}")
+    body_template = action.get("body", "Rule {{rule_name}} fired at {{timestamp}}")
+    subject = _render_template(subject_template, context)
+    body = _render_template(body_template, context)
+
+    try:
+        await send_email(to=recipient, subject=subject, body=body)
+        logger.info("Email sent for rule '%s' to %s", rule.name, recipient)
+        await _update_event_status(event_id, "email", "success")
+    except Exception as exc:
+        logger.error("Email failed for rule '%s' to %s. %s", rule.name, recipient, exc)
+        await _update_event_status(event_id, "email", "failed", str(exc))

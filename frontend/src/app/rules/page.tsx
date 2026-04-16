@@ -52,6 +52,7 @@ const ACTION_TYPES = [
   { value: "api_call", label: "API Call" },
   { value: "broadcast", label: "WebSocket broadcast" },
   { value: "notify", label: "Notification" },
+  { value: "email", label: "Email" },
 ];
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -119,6 +120,7 @@ function describeActions(actions: Record<string, unknown> | Record<string, unkno
       }
       if (a.type === "broadcast") return "Broadcast via WebSocket";
       if (a.type === "notify") return `Notify. "${(a.message as string) || "..."}"`;
+      if (a.type === "email") return `Email to ${(a.to as string) || "..."}`;
       return String(a.type);
     })
     .join(", ");
@@ -236,6 +238,9 @@ export default function RulesPage() {
   const [formActionPayloadTemplate, setFormActionPayloadTemplate] = useState("");
   const [formActionUseCustomPayload, setFormActionUseCustomPayload] = useState(false);
   const [formPayloadError, setFormPayloadError] = useState("");
+  const [formActionEmailTo, setFormActionEmailTo] = useState("");
+  const [formActionEmailSubject, setFormActionEmailSubject] = useState("");
+  const [formActionEmailBody, setFormActionEmailBody] = useState("");
   const [formCooldown, setFormCooldown] = useState("300");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -315,6 +320,9 @@ export default function RulesPage() {
     setFormActionPayloadTemplate("");
     setFormActionUseCustomPayload(false);
     setFormPayloadError("");
+    setFormActionEmailTo("");
+    setFormActionEmailSubject("");
+    setFormActionEmailBody("");
     setFormCooldown("300");
     setFormError("");
   };
@@ -390,6 +398,11 @@ export default function RulesPage() {
       setFormActionAuthUser("");
       setFormActionAuthPass("");
     }
+
+    // Restore email fields
+    setFormActionEmailTo((acts?.to as string) || "");
+    setFormActionEmailSubject((acts?.subject as string) || "");
+    setFormActionEmailBody((acts?.body as string) || "");
 
     // Restore payload template
     const pt = acts?.payload_template;
@@ -513,6 +526,11 @@ export default function RulesPage() {
       action.message = formActionMessage || "Rule '{rule_name}' triggered";
       action.severity = formActionSeverity;
     }
+    if (formActionType === "email") {
+      action.to = formActionEmailTo;
+      action.subject = formActionEmailSubject || "Nurby alert. {{rule_name}}";
+      action.body = formActionEmailBody || "Rule {{rule_name}} fired at {{timestamp}}";
+    }
 
     return {
       name: formName.trim(),
@@ -531,6 +549,10 @@ export default function RulesPage() {
     }
     if ((formActionType === "webhook" || formActionType === "api_call") && !formActionUrl.trim()) {
       setFormError("URL is required");
+      return;
+    }
+    if (formActionType === "email" && !formActionEmailTo.trim()) {
+      setFormError("Recipient email is required");
       return;
     }
     if (formActionUseCustomPayload && formActionPayloadTemplate.trim()) {
@@ -1443,6 +1465,67 @@ export default function RulesPage() {
                       <option value="critical">Critical</option>
                     </select>
                   </>
+                )}
+
+                {/* Email fields */}
+                {formActionType === "email" && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Recipient</label>
+                      <input
+                        type="email"
+                        value={formActionEmailTo}
+                        onChange={(e) => setFormActionEmailTo(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                        placeholder="user@example.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Subject template</label>
+                      <input
+                        type="text"
+                        value={formActionEmailSubject}
+                        onChange={(e) => setFormActionEmailSubject(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                        placeholder="Nurby alert. {{rule_name}}"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Body template</label>
+                      <textarea
+                        value={formActionEmailBody}
+                        onChange={(e) => setFormActionEmailBody(e.target.value)}
+                        rows={4}
+                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm resize-y"
+                        placeholder="Rule {{rule_name}} fired at {{timestamp}} on camera {{camera_id}}"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-muted-foreground mb-1">
+                        Available variables (click to insert into body)
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {TEMPLATE_VARIABLES.map((v) => (
+                          <button
+                            key={v.key}
+                            type="button"
+                            title={v.desc}
+                            onClick={() => {
+                              setFormActionEmailBody(
+                                (prev) => prev + `{{${v.key}}}`
+                              );
+                            }}
+                            className="px-1.5 py-0.5 text-[10px] rounded border border-border hover:bg-muted text-muted-foreground font-mono transition-colors"
+                          >
+                            {`{{${v.key}}}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5">
+                      SMTP must be configured in Settings for email delivery to work.
+                    </div>
+                  </div>
                 )}
               </fieldset>
 
