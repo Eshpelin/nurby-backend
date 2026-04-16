@@ -3,9 +3,11 @@ VLM (Vision Language Model) client. Sends frames to a configured
 vision model and returns natural language scene descriptions.
 
 Supports multiple providers through a unified interface.
-    OpenAI (GPT-4o, GPT-4o-mini)
-    Anthropic (Claude)
-    Ollama (local models like llava, moondream)
+    openai       Any OpenAI-compatible API (OpenAI, Gemini, Together,
+                 Groq, Fireworks, Mistral, DeepSeek, LMStudio, vLLM)
+    anthropic    Anthropic native API (Claude)
+    google       Google Gemini native API
+    ollama       Ollama local models (moondream, llava, etc.)
 """
 
 import asyncio
@@ -76,6 +78,8 @@ class VLMClient:
                 return await self._call_openai(b64_image, user_prompt, provider)
             elif provider.kind == "anthropic":
                 return await self._call_anthropic(b64_image, user_prompt, provider)
+            elif provider.kind == "google":
+                return await self._call_google(b64_image, user_prompt, provider)
             elif provider.kind == "ollama":
                 return await self._call_ollama(b64_image, user_prompt, provider)
             else:
@@ -154,6 +158,36 @@ class VLMClient:
         response.raise_for_status()
         data = response.json()
         return data["content"][0]["text"]
+
+    async def _call_google(self, b64_image: str, prompt: str, provider: Provider) -> str | None:
+        """Call Google Gemini native API (generativelanguage.googleapis.com)."""
+        http = await self._get_http()
+        model = provider.default_model or "gemini-2.0-flash"
+
+        response = await http.post(
+            f"{provider.base_url}/v1beta/models/{model}:generateContent",
+            headers={"x-goog-api-key": provider.api_key},
+            json={
+                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": b64_image,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                "generationConfig": {"maxOutputTokens": 200},
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     async def _call_ollama(self, b64_image: str, prompt: str, provider: Provider) -> str | None:
         http = await self._get_http()

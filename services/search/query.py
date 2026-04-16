@@ -222,6 +222,20 @@ async def _call_text_llm(provider, system_prompt: str, user_prompt: str) -> str:
             resp.raise_for_status()
             return resp.json()["content"][0]["text"]
 
+        elif provider.kind == "google":
+            model = provider.default_model or "gemini-2.0-flash"
+            resp = await client.post(
+                f"{provider.base_url}/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": provider.api_key},
+                json={
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                    "contents": [{"parts": [{"text": user_prompt}]}],
+                    "generationConfig": {"maxOutputTokens": 500},
+                },
+            )
+            resp.raise_for_status()
+            return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
         elif provider.kind == "ollama":
             model = provider.default_model or "llama3"
             resp = await client.post(

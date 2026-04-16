@@ -13,27 +13,28 @@ interface Provider {
 }
 
 const PROVIDER_KINDS = [
-  {
-    value: "openai",
-    label: "OpenAI",
-    description: "GPT-4o, GPT-4o-mini",
-    defaultUrl: "https://api.openai.com",
-    defaultModel: "gpt-4o-mini",
-  },
-  {
-    value: "anthropic",
-    label: "Anthropic",
-    description: "Claude Sonnet, Opus, Haiku",
-    defaultUrl: "https://api.anthropic.com",
-    defaultModel: "claude-sonnet-4-20250514",
-  },
-  {
-    value: "ollama",
-    label: "Ollama",
-    description: "Local models (moondream, llava, etc.)",
-    defaultUrl: "http://localhost:11434",
-    defaultModel: "moondream",
-  },
+  { value: "openai", label: "OpenAI-compatible" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Google Gemini" },
+  { value: "ollama", label: "Ollama" },
+];
+
+const ALL_PROVIDERS = [
+  // Cloud providers
+  { name: "OpenAI", kind: "openai", url: "https://api.openai.com", model: "gpt-4o-mini", description: "GPT-4o, GPT-4o-mini, o1", needsKey: true },
+  { name: "Anthropic", kind: "anthropic", url: "https://api.anthropic.com", model: "claude-sonnet-4-20250514", description: "Claude Sonnet, Opus, Haiku", needsKey: true },
+  { name: "Google Gemini", kind: "google", url: "https://generativelanguage.googleapis.com", model: "gemini-2.0-flash", description: "Gemini 2.0 Flash, Pro, Ultra", needsKey: true },
+  { name: "Together AI", kind: "openai", url: "https://api.together.xyz", model: "meta-llama/Llama-3-70b-chat-hf", description: "Llama, Mixtral, Qwen, SDXL", needsKey: true },
+  { name: "Groq", kind: "openai", url: "https://api.groq.com/openai", model: "llama-3.1-70b-versatile", description: "Ultra-fast Llama, Mixtral inference", needsKey: true },
+  { name: "Fireworks AI", kind: "openai", url: "https://api.fireworks.ai/inference", model: "accounts/fireworks/models/llama-v3p1-70b-instruct", description: "Llama, Mixtral, FireFunction", needsKey: true },
+  { name: "Mistral AI", kind: "openai", url: "https://api.mistral.ai", model: "mistral-large-latest", description: "Mistral Large, Medium, Small", needsKey: true },
+  { name: "DeepSeek", kind: "openai", url: "https://api.deepseek.com", model: "deepseek-chat", description: "DeepSeek V3, R1", needsKey: true },
+  { name: "OpenRouter", kind: "openai", url: "https://openrouter.ai/api", model: "openai/gpt-4o-mini", description: "Unified gateway to 200+ models", needsKey: true },
+  { name: "Perplexity", kind: "openai", url: "https://api.perplexity.ai", model: "llama-3.1-sonar-large-128k-online", description: "Online search-grounded models", needsKey: true },
+  // Local providers
+  { name: "Ollama", kind: "ollama", url: "http://localhost:11434", model: "moondream", description: "Local models (moondream, llava, etc.)", needsKey: false },
+  { name: "LMStudio", kind: "openai", url: "http://localhost:1234", model: "local-model", description: "Local OpenAI-compatible server", needsKey: false },
+  { name: "vLLM", kind: "openai", url: "http://localhost:8000", model: "local-model", description: "High-throughput local serving", needsKey: false },
 ];
 
 export default function SettingsPage() {
@@ -79,16 +80,16 @@ export default function SettingsPage() {
     setFormError("");
   };
 
-  const openCreate = (kind?: string) => {
+  const openCreate = (presetName?: string) => {
     setEditProvider(null);
     resetForm();
-    if (kind) {
-      setFormKind(kind);
-      const preset = PROVIDER_KINDS.find((p) => p.value === kind);
+    if (presetName) {
+      const preset = ALL_PROVIDERS.find((p) => p.name === presetName);
       if (preset) {
-        setFormName(preset.label);
-        setFormBaseUrl(preset.defaultUrl);
-        setFormModel(preset.defaultModel);
+        setFormKind(preset.kind);
+        setFormName(preset.name);
+        setFormBaseUrl(preset.url);
+        setFormModel(preset.model);
       }
     }
     setShowModal(true);
@@ -109,13 +110,15 @@ export default function SettingsPage() {
   const handleKindChange = (kind: string) => {
     setFormKind(kind);
     if (!editProvider) {
-      const preset = PROVIDER_KINDS.find((p) => p.value === kind);
+      // Find first matching preset for this kind
+      const preset = ALL_PROVIDERS.find((p) => p.kind === kind);
       if (preset) {
-        if (!formName || PROVIDER_KINDS.some((p) => p.label === formName)) {
-          setFormName(preset.label);
+        const kindLabel = PROVIDER_KINDS.find((k) => k.value === kind)?.label || kind;
+        if (!formName || ALL_PROVIDERS.some((p) => p.name === formName) || PROVIDER_KINDS.some((p) => p.label === formName)) {
+          setFormName(kindLabel);
         }
-        setFormBaseUrl(preset.defaultUrl);
-        setFormModel(preset.defaultModel);
+        setFormBaseUrl(preset.url);
+        setFormModel(preset.model);
       }
     }
   };
@@ -129,8 +132,9 @@ export default function SettingsPage() {
       setFormError("Base URL is required");
       return;
     }
-    if (formKind !== "ollama" && !formApiKey.trim() && !editProvider) {
-      setFormError("API key is required");
+    const isLocal = formKind === "ollama" || formBaseUrl.includes("localhost") || formBaseUrl.includes("127.0.0.1");
+    if (!isLocal && !formApiKey.trim() && !editProvider) {
+      setFormError("API key is required for cloud providers");
       return;
     }
 
@@ -275,23 +279,34 @@ export default function SettingsPage() {
       </div>
 
       {/* Provider presets */}
-      {providers.length === 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium mb-3">Quick setup</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {PROVIDER_KINDS.map((pk) => (
-              <button
-                key={pk.value}
-                onClick={() => openCreate(pk.value)}
-                className="rounded-lg border border-border bg-card p-4 text-left hover:border-muted-foreground/30 transition-colors"
-              >
-                <div className="font-medium text-sm mb-1">{pk.label}</div>
-                <div className="text-xs text-muted-foreground">{pk.description}</div>
-              </button>
-            ))}
-          </div>
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium">
+            {providers.length === 0 ? "Choose a provider to get started" : "Add another provider"}
+          </h2>
         </div>
-      )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+          {ALL_PROVIDERS.map((preset) => (
+            <button
+              key={preset.name}
+              onClick={() => openCreate(preset.name)}
+              className="rounded-lg border border-border bg-card p-3 text-left hover:border-accent/50 transition-colors group"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium text-sm group-hover:text-accent transition-colors">
+                  {preset.name}
+                </span>
+                {!preset.needsKey && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/40">
+                    local
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-muted-foreground leading-snug">{preset.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Provider list */}
       {loading ? (
@@ -387,7 +402,7 @@ export default function SettingsPage() {
                 <label className="text-xs font-medium text-muted-foreground block mb-1">
                   Provider type
                 </label>
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-4 gap-1">
                   {PROVIDER_KINDS.map((pk) => (
                     <button
                       key={pk.value}
@@ -403,6 +418,13 @@ export default function SettingsPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Kind hint */}
+              {formKind === "openai" && (
+                <div className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5">
+                  OpenAI-compatible API. Works with OpenAI, Gemini, Together, Groq, Fireworks, Mistral, DeepSeek, LMStudio, vLLM, and any provider that implements the /v1/chat/completions endpoint.
+                </div>
+              )}
 
               {/* Name */}
               <div>
@@ -431,12 +453,15 @@ export default function SettingsPage() {
                   placeholder="https://api.openai.com"
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  For Ollama, use http://localhost:11434. For LMStudio, use http://localhost:1234.
+                  {formKind === "ollama" && "Default. http://localhost:11434"}
+                  {formKind === "openai" && "Most providers use OpenAI-compatible APIs. Select a preset above to prefill."}
+                  {formKind === "google" && "Default. https://generativelanguage.googleapis.com"}
+                  {formKind === "anthropic" && "Default. https://api.anthropic.com"}
                 </span>
               </div>
 
               {/* API Key */}
-              {formKind !== "ollama" && (
+              {!(formKind === "ollama" || formBaseUrl.includes("localhost") || formBaseUrl.includes("127.0.0.1")) && (
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-1">
                     API key
