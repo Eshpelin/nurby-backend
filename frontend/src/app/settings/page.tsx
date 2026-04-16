@@ -43,7 +43,7 @@ export default function SettingsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editProvider, setEditProvider] = useState<Provider | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; message: string; latency_ms?: number; models?: string[] }>>({});
 
   // Form
   const [formName, setFormName] = useState("");
@@ -194,41 +194,26 @@ export default function SettingsPage() {
 
   const handleTest = async (provider: Provider) => {
     setTestingId(provider.id);
-    setTestResult({});
+    setTestResult((prev) => ({ ...prev, [provider.id]: undefined as never }));
 
     try {
-      // Simple connectivity test. hit models/list endpoint
-      let url = "";
-      const headers: Record<string, string> = {};
-
-      if (provider.kind === "openai") {
-        url = `${provider.base_url}/v1/models`;
-        // API key is not returned by the API for security, so we just test the URL
-      } else if (provider.kind === "anthropic") {
-        url = `${provider.base_url}/v1/messages`;
-      } else if (provider.kind === "ollama") {
-        url = `${provider.base_url}/api/tags`;
-      }
-
-      if (!url) {
-        setTestResult({ [provider.id]: { ok: false, message: "Unknown provider kind" } });
-        return;
-      }
-
-      const res = await fetch(`/api/providers/${provider.id}`);
+      const res = await fetch(`/api/providers/${provider.id}/test`, {
+        method: "POST",
+      });
       if (res.ok) {
-        setTestResult({
-          [provider.id]: { ok: true, message: "Provider configured and reachable" },
-        });
+        const data = await res.json();
+        setTestResult((prev) => ({ ...prev, [provider.id]: data }));
       } else {
-        setTestResult({
-          [provider.id]: { ok: false, message: "Provider not found in database" },
-        });
+        setTestResult((prev) => ({
+          ...prev,
+          [provider.id]: { ok: false, message: `Test endpoint returned ${res.status}` },
+        }));
       }
     } catch {
-      setTestResult({
-        [provider.id]: { ok: false, message: "Connection failed" },
-      });
+      setTestResult((prev) => ({
+        ...prev,
+        [provider.id]: { ok: false, message: "Network error. Could not reach Nurby API" },
+      }));
     } finally {
       setTestingId(null);
     }
@@ -370,13 +355,37 @@ export default function SettingsPage() {
               </div>
               {testResult[p.id] && (
                 <div
-                  className={`mt-2 text-xs px-2 py-1 rounded ${
+                  className={`mt-2 text-xs px-2 py-2 rounded space-y-1 ${
                     testResult[p.id].ok
                       ? "bg-green-900/20 text-green-400"
                       : "bg-red-900/20 text-red-400"
                   }`}
                 >
-                  {testResult[p.id].message}
+                  <div className="flex items-center justify-between">
+                    <span>{testResult[p.id].message}</span>
+                    {testResult[p.id].latency_ms != null && (
+                      <span className="font-mono text-[10px] opacity-70">
+                        {testResult[p.id].latency_ms}ms
+                      </span>
+                    )}
+                  </div>
+                  {testResult[p.id].models && testResult[p.id].models!.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {testResult[p.id].models!.slice(0, 8).map((m) => (
+                        <span
+                          key={m}
+                          className="px-1 py-0.5 text-[10px] rounded bg-black/20 font-mono"
+                        >
+                          {m}
+                        </span>
+                      ))}
+                      {testResult[p.id].models!.length > 8 && (
+                        <span className="text-[10px] opacity-70">
+                          +{testResult[p.id].models!.length - 8} more
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

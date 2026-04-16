@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // API calls use relative paths, proxied by Next.js rewrites in dev
 
@@ -106,6 +106,55 @@ export default function TimelinePage() {
   const [timeRange, setTimeRange] = useState<TimeRange>("7d");
   const [eventFilter, setEventFilter] = useState<EventFilter>("all");
   const [loading, setLoading] = useState(true);
+  const [digest, setDigest] = useState<{
+    period_label: string;
+    total_observations: number;
+    summary: string;
+    highlights: string[];
+    stats: Record<string, unknown>;
+  } | null>(null);
+  const [digestPeriod, setDigestPeriod] = useState<"daily" | "hourly">("daily");
+  const [digestLoading, setDigestLoading] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<{ type: string; rule_name?: string; camera_id?: string; timestamp?: string; message?: string }[]>([]);
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // WebSocket connection for real-time events
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    function connect() {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => {
+        setWsConnected(false);
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+      ws.onerror = () => ws.close();
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (data.type === "event" || data.type === "notification") {
+            setLiveEvents((prev) => [data, ...prev].slice(0, 20));
+            // Trigger data refresh to pick up new observations
+            fetchData();
+          }
+        } catch {
+          /* ignore non-JSON */
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCameras = useCallback(async () => {
     try {
@@ -156,6 +205,20 @@ export default function TimelinePage() {
       setLoading(false);
     }
   }, [selectedCamera, timeRange]);
+
+  const fetchDigest = useCallback(async () => {
+    setDigestLoading(true);
+    try {
+      const params = new URLSearchParams({ period: digestPeriod });
+      if (selectedCamera) params.set("camera_id", selectedCamera);
+      const res = await fetch(`/api/search/digest?${params}`);
+      if (res.ok) setDigest(await res.json());
+    } catch {
+      /* silent */
+    } finally {
+      setDigestLoading(false);
+    }
+  }, [digestPeriod, selectedCamera]);
 
   useEffect(() => {
     fetchCameras();
@@ -219,7 +282,17 @@ export default function TimelinePage() {
             {totalCount} event{totalCount !== 1 ? "s" : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                wsConnected ? "bg-green-500 pulse-dot" : "bg-red-500"
+              }`}
+            />
+            <span className="text-muted-foreground font-mono">
+              {wsConnected ? "live" : "disconnected"}
+            </span>
+          </div>
           <div className="flex items-center gap-1 p-1 rounded-md bg-card border border-border">
             {(["today", "7d", "30d"] as TimeRange[]).map((range) => (
               <button
@@ -309,10 +382,102 @@ export default function TimelinePage() {
               ))}
             </div>
           </div>
+
+          {/* Digest */}
+          <div>
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Activity digest
+            </div>
+            <div className="flex gap-1 mb-2">
+              {(["daily", "hourly"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setDigestPeriod(p)}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    digestPeriod === p
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p === "daily" ? "24h" : "1h"}
+                </button>
+              ))}
+              <button
+                onClick={fetchDigest}
+                disabled={digestLoading}
+                className="px-2 py-1 text-xs rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50 ml-auto"
+              >
+                {digestLoading ? "..." : "Generate"}
+              </button>
+            </div>
+            {digest ? (
+              <div className="rounded-md border border-border bg-card/50 p-3 space-y-2">
+                <div className="text-xs text-muted-foreground font-mono">
+                  {digest.period_label}
+                </div>
+                <p className="text-sm leading-relaxed">{digest.summary}</p>
+                {digest.highlights.length > 0 && (
+                  <div className="space-y-1">
+                    {digest.highlights.map((h, i) => (
+                      <div key={i} className="text-xs text-muted-foreground">
+                        {h}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="text-[10px] text-muted-foreground font-mono">
+                  {digest.total_observations} observations
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Click Generate to create a summary of recent activity
+              </p>
+            )}
+          </div>
         </aside>
 
         {/* Timeline feed */}
         <section className="col-span-9">
+          {/* Live event toasts */}
+          {liveEvents.length > 0 && (
+            <div className="mb-4 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-accent uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent pulse-dot" />
+                  Live events
+                </span>
+                <button
+                  onClick={() => setLiveEvents([])}
+                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  clear
+                </button>
+              </div>
+              {liveEvents.slice(0, 5).map((evt, i) => (
+                <div
+                  key={i}
+                  className="px-3 py-2 rounded-md border border-accent/30 bg-accent/5 text-sm flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      evt.type === "notification"
+                        ? "bg-yellow-400"
+                        : "bg-accent"
+                    }`} />
+                    <span>
+                      {evt.message || `Rule "${evt.rule_name}" fired`}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground font-mono">
+                    {evt.timestamp
+                      ? formatTime(evt.timestamp)
+                      : "now"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {loading && entries.length === 0 ? (
             <div className="flex items-center justify-center py-20">
               <div className="text-sm text-muted-foreground">

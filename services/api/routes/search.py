@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.database import get_db
 from services.search.query import search_observations, answer_question
+from services.search.digest import generate_digest
+from services.search.embeddings import get_embedding_provider
 
 router = APIRouter()
 
@@ -61,3 +63,14 @@ async def ask_question(
     """Answer a natural language question grounded in observation history."""
     result = await answer_question(db, body.question)
     return QuestionResponse(**result)
+
+
+@router.get("/digest")
+async def get_digest(
+    period: str = Query(default="daily", pattern="^(hourly|daily)$"),
+    camera_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate an activity digest for the given period."""
+    provider = await get_embedding_provider()
+    return await generate_digest(db, period=period, camera_id=camera_id, provider=provider)
