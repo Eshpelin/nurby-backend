@@ -30,6 +30,9 @@ interface Camera {
   retention_mode: string;
   retention_days: number;
   retention_gb: number;
+  detection_models: {model: string; confidence: number; enabled: boolean; label_filter: string[]}[] | null;
+  detection_merge: string;
+  detection_consensus_min: number;
   status: string;
   width: number | null;
   height: number | null;
@@ -181,6 +184,9 @@ export default function CameraConfigPage() {
   const [detectObjects, setDetectObjects] = useState(true);
   const [detectFaces, setDetectFaces] = useState(true);
   const [objectConfidence, setObjectConfidence] = useState(0.35);
+  const [detectionModels, setDetectionModels] = useState<{model: string; confidence: number; enabled: boolean; label_filter: string[]}[]>([]);
+  const [detectionMerge, setDetectionMerge] = useState("any");
+  const [detectionConsensusMin, setDetectionConsensusMin] = useState(2);
   const [digestEnabled, setDigestEnabled] = useState(true);
   const [digestPeriod, setDigestPeriod] = useState("24h");
   const [digestProviderId, setDigestProviderId] = useState<string | null>(null);
@@ -224,6 +230,9 @@ export default function CameraConfigPage() {
       setDetectObjects(cam.detect_objects ?? true);
       setDetectFaces(cam.detect_faces ?? true);
       setObjectConfidence(cam.object_confidence ?? 0.35);
+      setDetectionModels(cam.detection_models ?? []);
+      setDetectionMerge(cam.detection_merge ?? "any");
+      setDetectionConsensusMin(cam.detection_consensus_min ?? 2);
       setDigestEnabled(cam.digest_enabled ?? true);
       setDigestPeriod(cam.digest_period ?? "24h");
       setDigestProviderId(cam.digest_provider_id ?? null);
@@ -263,6 +272,9 @@ export default function CameraConfigPage() {
         detect_objects: detectObjects,
         detect_faces: detectFaces,
         object_confidence: objectConfidence,
+        detection_models: detectionModels.length > 0 ? detectionModels : null,
+        detection_merge: detectionMerge,
+        detection_consensus_min: detectionConsensusMin,
         digest_enabled: digestEnabled,
         digest_period: digestPeriod,
         digest_provider_id: digestProviderId,
@@ -597,12 +609,12 @@ export default function CameraConfigPage() {
           </FieldRow>
         </Section>
 
-        {/* ── Detection ── */}
+        {/* Detection */}
         <Section
           title="Detection"
-          description="Object and face detection settings for this camera"
+          description="Object and face detection models for this camera"
         >
-          <FieldRow label="Object Detection" hint="YOLO object recognition">
+          <FieldRow label="Object Detection" hint="Enable YOLO-based object recognition">
             <Toggle
               checked={detectObjects}
               onChange={setDetectObjects}
@@ -611,22 +623,157 @@ export default function CameraConfigPage() {
           </FieldRow>
 
           {detectObjects && (
-            <FieldRow label="Confidence Threshold" hint="Min confidence to report detection">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.95}
-                  step={0.05}
-                  value={objectConfidence}
-                  onChange={(e) => setObjectConfidence(Number(e.target.value))}
-                  className="flex-1 accent-accent"
-                />
-                <span className="font-mono text-xs text-muted-foreground w-12 text-right">
-                  {(objectConfidence * 100).toFixed(0)}%
-                </span>
-              </div>
-            </FieldRow>
+            <>
+              {/* Model list */}
+              <FieldRow label="Detection Models" hint="Run multiple models for better accuracy">
+                <div className="space-y-2">
+                  {detectionModels.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2 p-2.5 rounded-md border border-border bg-background">
+                      <Toggle
+                        checked={m.enabled}
+                        onChange={(v) => {
+                          const updated = [...detectionModels];
+                          updated[i] = { ...m, enabled: v };
+                          setDetectionModels(updated);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={m.model}
+                        onChange={(e) => {
+                          const updated = [...detectionModels];
+                          updated[i] = { ...m, model: e.target.value };
+                          setDetectionModels(updated);
+                        }}
+                        placeholder="yolov8n.pt"
+                        className="flex-1 px-2 py-1 text-xs font-mono rounded border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                      <div className="flex items-center gap-1.5 min-w-[140px]">
+                        <input
+                          type="range"
+                          min={0.05}
+                          max={0.95}
+                          step={0.05}
+                          value={m.confidence}
+                          onChange={(e) => {
+                            const updated = [...detectionModels];
+                            updated[i] = { ...m, confidence: Number(e.target.value) };
+                            setDetectionModels(updated);
+                          }}
+                          className="flex-1 accent-accent"
+                        />
+                        <span className="font-mono text-[11px] text-muted-foreground w-8 text-right">
+                          {(m.confidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetectionModels(detectionModels.filter((_, j) => j !== i));
+                        }}
+                        className="text-muted-foreground hover:text-danger transition-colors text-sm px-1"
+                        title="Remove model"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetectionModels([
+                        ...detectionModels,
+                        { model: "yolov8n.pt", confidence: 0.35, enabled: true, label_filter: [] },
+                      ]);
+                    }}
+                    className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-md hover:border-accent transition-colors"
+                  >
+                    + Add detection model
+                  </button>
+
+                  {detectionModels.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      No models configured. Single YOLO model with {(objectConfidence * 100).toFixed(0)}% confidence used as fallback.
+                    </p>
+                  )}
+                </div>
+              </FieldRow>
+
+              {/* Fallback confidence (shown when no models configured) */}
+              {detectionModels.length === 0 && (
+                <FieldRow label="Confidence Threshold" hint="Min confidence for default YOLO model">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={0.95}
+                      step={0.05}
+                      value={objectConfidence}
+                      onChange={(e) => setObjectConfidence(Number(e.target.value))}
+                      className="flex-1 accent-accent"
+                    />
+                    <span className="font-mono text-xs text-muted-foreground w-12 text-right">
+                      {(objectConfidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </FieldRow>
+              )}
+
+              {/* Merge strategy (only when multiple models) */}
+              {detectionModels.length > 1 && (
+                <>
+                  <FieldRow label="Merge Strategy" hint="How to combine results from multiple models">
+                    <div className="flex gap-1.5">
+                      {([
+                        { value: "any", label: "Any Model", desc: "Union of all detections" },
+                        { value: "consensus", label: "Consensus", desc: "Multiple models must agree" },
+                        { value: "best", label: "Best Score", desc: "Highest confidence per object" },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setDetectionMerge(opt.value)}
+                          className={`px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
+                            detectionMerge === opt.value
+                              ? "border-accent bg-accent/10 text-accent-foreground"
+                              : "border-border hover:border-muted-foreground text-muted-foreground"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                      {detectionMerge === "any"
+                        ? "Keep all detections from all models. Overlapping boxes get de-duplicated."
+                        : detectionMerge === "consensus"
+                          ? `Only keep objects detected by at least ${detectionConsensusMin} model${detectionConsensusMin !== 1 ? "s" : ""}.`
+                          : "For each detected object region, keep only the highest confidence result."}
+                    </p>
+                  </FieldRow>
+
+                  {detectionMerge === "consensus" && (
+                    <FieldRow label="Min Agreement" hint="Number of models that must detect the same object">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min={2}
+                          max={Math.max(2, detectionModels.filter((m) => m.enabled).length)}
+                          step={1}
+                          value={detectionConsensusMin}
+                          onChange={(e) => setDetectionConsensusMin(Number(e.target.value))}
+                          className="flex-1 accent-accent"
+                        />
+                        <span className="font-mono text-xs text-muted-foreground w-12 text-right">
+                          {detectionConsensusMin} / {detectionModels.filter((m) => m.enabled).length}
+                        </span>
+                      </div>
+                    </FieldRow>
+                  )}
+                </>
+              )}
+            </>
           )}
 
           <FieldRow label="Face Detection" hint="Detect and match known people">

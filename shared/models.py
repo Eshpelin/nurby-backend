@@ -32,6 +32,10 @@ class Camera(Base):
     detect_objects: Mapped[bool] = mapped_column(Boolean, default=True)
     detect_faces: Mapped[bool] = mapped_column(Boolean, default=True)
     object_confidence: Mapped[float] = mapped_column(Float, default=0.35)  # YOLO confidence threshold
+    # Multi-model detection config
+    detection_models: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # list of {"model", "confidence", "enabled", "label_filter"}
+    detection_merge: Mapped[str] = mapped_column(String(16), default="any")  # any, consensus, best
+    detection_consensus_min: Mapped[int] = mapped_column(Integer, default=2)  # min models that must agree for consensus mode
     # Per-camera digest config
     digest_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     digest_period: Mapped[str] = mapped_column(String(16), default="24h")  # 1h, 6h, 12h, 24h, 48h, 7d

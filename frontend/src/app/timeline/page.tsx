@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 // API calls use relative paths, proxied by Next.js rewrites in dev
 
@@ -126,12 +127,15 @@ function statusColor(status: string): string {
 type TimeRange = "today" | "7d" | "30d";
 type EventFilter = "all" | "recordings" | "observations" | "status";
 
-export default function TimelinePage() {
+function TimelineContent() {
+  const searchParams = useSearchParams();
+  const initialCamera = searchParams.get("camera");
+
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
   const [statusLogs, setStatusLogs] = useState<StatusLog[]>([]);
   const [cameras, setCameras] = useState<Record<string, Camera>>({});
-  const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
+  const [selectedCamera, setSelectedCamera] = useState<string | null>(initialCamera);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>("7d");
   const [eventFilter, setEventFilter] = useState<EventFilter>("all");
@@ -756,5 +760,13 @@ export default function TimelinePage() {
         </section>
       </div>
     </div>
+  );
+}
+
+export default function TimelinePage() {
+  return (
+    <Suspense>
+      <TimelineContent />
+    </Suspense>
   );
 }

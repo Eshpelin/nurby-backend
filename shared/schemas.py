@@ -25,6 +25,9 @@ class CameraCreate(BaseModel):
     detect_objects: bool = True
     detect_faces: bool = True
     object_confidence: float = Field(default=0.35, ge=0.05, le=1.0)
+    detection_models: list[dict] | None = None
+    detection_merge: str = "any"
+    detection_consensus_min: int = Field(default=2, ge=1, le=10)
     digest_enabled: bool = True
     digest_period: str = "24h"
     digest_provider_id: uuid.UUID | None = None
@@ -53,6 +56,9 @@ class CameraUpdate(BaseModel):
     detect_objects: bool | None = None
     detect_faces: bool | None = None
     object_confidence: float | None = Field(default=None, ge=0.05, le=1.0)
+    detection_models: list[dict] | None = None
+    detection_merge: str | None = None
+    detection_consensus_min: int | None = Field(default=None, ge=1, le=10)
     digest_enabled: bool | None = None
     digest_period: str | None = None
     digest_provider_id: uuid.UUID | None = None
@@ -81,6 +87,9 @@ class CameraResponse(BaseModel):
     detect_objects: bool
     detect_faces: bool
     object_confidence: float
+    detection_models: list[dict] | None
+    detection_merge: str
+    detection_consensus_min: int
     digest_enabled: bool
     digest_period: str
     digest_provider_id: uuid.UUID | None

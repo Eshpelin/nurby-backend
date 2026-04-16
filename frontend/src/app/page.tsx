@@ -81,7 +81,7 @@ function CameraCard({ camera, digest, digestLoading, onRefreshDigest }: {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden group">
       <div
-        onClick={() => (window.location.href = `/cameras/${camera.id}`)}
+        onClick={() => (window.location.href = `/timeline?camera=${camera.id}`)}
         className="cursor-pointer hover:bg-card-elevated/30 transition-colors"
       >
         <div className="relative aspect-video bg-black">
@@ -100,6 +100,21 @@ function CameraCard({ camera, digest, digestLoading, onRefreshDigest }: {
               </span>
             </div>
           )}
+
+          {/* Settings gear */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.location.href = `/cameras/${camera.id}`;
+            }}
+            className="absolute top-2 right-2 z-10 w-7 h-7 rounded-md bg-black/60 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100"
+            title="Camera settings"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
         </div>
 
         <div className="px-3 py-2.5 flex items-start justify-between gap-2">

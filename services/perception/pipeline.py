@@ -157,8 +157,20 @@ class PerceptionPipeline:
         # Step 1. Run object detection (if enabled for this camera)
         detections = []
         if cam is None or cam.detect_objects:
-            confidence_threshold = cam.object_confidence if cam else 0.35
-            detections = await self._detector.detect(frame, confidence=confidence_threshold)
+            model_configs = cam.detection_models if cam and cam.detection_models else None
+
+            if model_configs and len(model_configs) > 0:
+                # Multi-model path
+                merge_strategy = cam.detection_merge if cam else "any"
+                consensus_min = cam.detection_consensus_min if cam else 2
+                detections = await self._detector.detect_multi(
+                    frame, model_configs, merge=merge_strategy, consensus_min=consensus_min
+                )
+            else:
+                # Single model fallback
+                confidence_threshold = cam.object_confidence if cam else 0.35
+                detections = await self._detector.detect(frame, confidence=confidence_threshold)
+
             detection_summary = self._detector.summarize(detections)
             logger.info("Detections for camera %s. %s", camera_id, detection_summary)
 
