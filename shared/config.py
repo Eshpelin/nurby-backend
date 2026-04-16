@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     mediamtx_api_url: str = "http://localhost:9997"
     recordings_path: str = "./recordings"
     thumbnails_path: str = "./thumbnails"
+    jwt_secret: str = "change-me-in-production-use-a-real-secret"
+    jwt_expiry_hours: int = 24
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

@@ -36,9 +36,40 @@ const OBJECT_LABELS = [
 
 const ACTION_TYPES = [
   { value: "webhook", label: "Webhook" },
+  { value: "api_call", label: "API Call" },
   { value: "broadcast", label: "WebSocket broadcast" },
   { value: "notify", label: "Notification" },
 ];
+
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+const AUTH_TYPES = [
+  { value: "none", label: "No auth" },
+  { value: "bearer", label: "Bearer token" },
+  { value: "api_key", label: "API key header" },
+  { value: "basic", label: "Basic auth" },
+];
+
+const TEMPLATE_VARIABLES = [
+  { key: "event_id", desc: "Event UUID" },
+  { key: "rule_name", desc: "Rule name" },
+  { key: "camera_id", desc: "Camera UUID" },
+  { key: "timestamp", desc: "ISO timestamp" },
+  { key: "motion_score", desc: "Motion score (0-1)" },
+  { key: "object_detections", desc: "Detection results (object)" },
+  { key: "person_detections", desc: "Face results (object)" },
+  { key: "vlm_description", desc: "VLM scene description" },
+  { key: "confidence", desc: "VLM confidence" },
+  { key: "observation_id", desc: "Observation UUID" },
+];
+
+const DEFAULT_PAYLOAD_TEMPLATE = `{
+  "event": "{{rule_name}}",
+  "camera": "{{camera_id}}",
+  "timestamp": "{{timestamp}}",
+  "description": "{{vlm_description}}",
+  "detections": "{{object_detections}}"
+}`;
 
 function describeTrigger(pattern: Record<string, unknown>): string {
   const t = pattern.type as string;
@@ -64,7 +95,15 @@ function describeActions(actions: Record<string, unknown> | Record<string, unkno
   const list = Array.isArray(actions) ? actions : [actions];
   return list
     .map((a) => {
-      if (a.type === "webhook") return `POST to ${(a.url as string) || "..."}`;
+      if (a.type === "webhook") {
+        const hasAuth = !!(a.auth as Record<string, unknown> | undefined);
+        return `POST to ${(a.url as string) || "..."}${hasAuth ? " (authenticated)" : ""}`;
+      }
+      if (a.type === "api_call") {
+        const method = (a.method as string) || "POST";
+        const hasAuth = !!(a.auth as Record<string, unknown> | undefined);
+        return `${method} ${(a.url as string) || "..."}${hasAuth ? " (authenticated)" : ""}`;
+      }
       if (a.type === "broadcast") return "Broadcast via WebSocket";
       if (a.type === "notify") return `Notify. "${(a.message as string) || "..."}"`;
       return String(a.type);
@@ -95,8 +134,18 @@ export default function RulesPage() {
   const [formCondConfidence, setFormCondConfidence] = useState("any");
   const [formActionType, setFormActionType] = useState("notify");
   const [formActionUrl, setFormActionUrl] = useState("");
+  const [formActionMethod, setFormActionMethod] = useState("POST");
   const [formActionMessage, setFormActionMessage] = useState("");
   const [formActionSeverity, setFormActionSeverity] = useState("info");
+  const [formActionAuthType, setFormActionAuthType] = useState("none");
+  const [formActionAuthToken, setFormActionAuthToken] = useState("");
+  const [formActionAuthHeader, setFormActionAuthHeader] = useState("X-API-Key");
+  const [formActionAuthKey, setFormActionAuthKey] = useState("");
+  const [formActionAuthUser, setFormActionAuthUser] = useState("");
+  const [formActionAuthPass, setFormActionAuthPass] = useState("");
+  const [formActionPayloadTemplate, setFormActionPayloadTemplate] = useState("");
+  const [formActionUseCustomPayload, setFormActionUseCustomPayload] = useState(false);
+  const [formPayloadError, setFormPayloadError] = useState("");
   const [formCooldown, setFormCooldown] = useState("300");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -141,8 +190,18 @@ export default function RulesPage() {
     setFormCondConfidence("any");
     setFormActionType("notify");
     setFormActionUrl("");
+    setFormActionMethod("POST");
     setFormActionMessage("");
     setFormActionSeverity("info");
+    setFormActionAuthType("none");
+    setFormActionAuthToken("");
+    setFormActionAuthHeader("X-API-Key");
+    setFormActionAuthKey("");
+    setFormActionAuthUser("");
+    setFormActionAuthPass("");
+    setFormActionPayloadTemplate("");
+    setFormActionUseCustomPayload(false);
+    setFormPayloadError("");
     setFormCooldown("300");
     setFormError("");
   };
@@ -197,8 +256,39 @@ export default function RulesPage() {
     const acts = Array.isArray(r.actions) ? r.actions[0] : r.actions;
     setFormActionType((acts?.type as string) || "notify");
     setFormActionUrl((acts?.url as string) || "");
+    setFormActionMethod((acts?.method as string) || "POST");
     setFormActionMessage((acts?.message as string) || "");
     setFormActionSeverity((acts?.severity as string) || "info");
+
+    // Restore auth config
+    const auth = acts?.auth as Record<string, string> | undefined;
+    if (auth) {
+      setFormActionAuthType(auth.type || "none");
+      setFormActionAuthToken(auth.token || "");
+      setFormActionAuthHeader(auth.header || "X-API-Key");
+      setFormActionAuthKey(auth.key || "");
+      setFormActionAuthUser(auth.username || "");
+      setFormActionAuthPass(auth.password || "");
+    } else {
+      setFormActionAuthType("none");
+      setFormActionAuthToken("");
+      setFormActionAuthHeader("X-API-Key");
+      setFormActionAuthKey("");
+      setFormActionAuthUser("");
+      setFormActionAuthPass("");
+    }
+
+    // Restore payload template
+    const pt = acts?.payload_template;
+    if (pt) {
+      setFormActionUseCustomPayload(true);
+      setFormActionPayloadTemplate(JSON.stringify(pt, null, 2));
+    } else {
+      setFormActionUseCustomPayload(false);
+      setFormActionPayloadTemplate("");
+    }
+    setFormPayloadError("");
+
     setFormCooldown(String(r.cooldown_seconds));
     setFormError("");
     setShowModal(true);
@@ -240,7 +330,43 @@ export default function RulesPage() {
     }
 
     const action: Record<string, unknown> = { type: formActionType };
-    if (formActionType === "webhook") action.url = formActionUrl;
+    if (formActionType === "webhook" || formActionType === "api_call") {
+      action.url = formActionUrl;
+      if (formActionType === "api_call") {
+        action.method = formActionMethod;
+      }
+
+      // Auth config
+      if (formActionAuthType !== "none") {
+        const auth: Record<string, string> = { type: formActionAuthType };
+        if (formActionAuthType === "bearer") auth.token = formActionAuthToken;
+        if (formActionAuthType === "api_key") {
+          auth.header = formActionAuthHeader;
+          auth.key = formActionAuthKey;
+        }
+        if (formActionAuthType === "basic") {
+          auth.username = formActionAuthUser;
+          auth.password = formActionAuthPass;
+        }
+        action.auth = auth;
+      }
+
+      // Custom payload template
+      if (formActionUseCustomPayload && formActionPayloadTemplate.trim()) {
+        try {
+          action.payload_template = JSON.parse(formActionPayloadTemplate);
+        } catch {
+          // Will be caught by validation
+        }
+      }
+    }
+    if (formActionType === "broadcast" && formActionUseCustomPayload && formActionPayloadTemplate.trim()) {
+      try {
+        action.payload_template = JSON.parse(formActionPayloadTemplate);
+      } catch {
+        // Will be caught by validation
+      }
+    }
     if (formActionType === "notify") {
       action.message = formActionMessage || "Rule '{rule_name}' triggered";
       action.severity = formActionSeverity;
@@ -261,9 +387,17 @@ export default function RulesPage() {
       setFormError("Name is required");
       return;
     }
-    if (formActionType === "webhook" && !formActionUrl.trim()) {
-      setFormError("Webhook URL is required");
+    if ((formActionType === "webhook" || formActionType === "api_call") && !formActionUrl.trim()) {
+      setFormError("URL is required");
       return;
+    }
+    if (formActionUseCustomPayload && formActionPayloadTemplate.trim()) {
+      try {
+        JSON.parse(formActionPayloadTemplate);
+      } catch {
+        setFormError("Payload template is not valid JSON");
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -834,7 +968,7 @@ export default function RulesPage() {
               </fieldset>
 
               {/* Action */}
-              <fieldset className="border border-border rounded-md p-3 space-y-2">
+              <fieldset className="border border-border rounded-md p-3 space-y-3">
                 <legend className="text-xs font-medium text-muted-foreground px-1">
                   Action
                 </legend>
@@ -850,16 +984,240 @@ export default function RulesPage() {
                   ))}
                 </select>
 
-                {formActionType === "webhook" && (
-                  <input
-                    type="url"
-                    value={formActionUrl}
-                    onChange={(e) => setFormActionUrl(e.target.value)}
-                    className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    placeholder="https://your-webhook.com/endpoint"
-                  />
+                {/* Webhook / API Call fields */}
+                {(formActionType === "webhook" || formActionType === "api_call") && (
+                  <div className="space-y-3">
+                    {/* Method selector for API call */}
+                    {formActionType === "api_call" && (
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">HTTP Method</label>
+                        <div className="flex gap-1">
+                          {HTTP_METHODS.map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setFormActionMethod(m)}
+                              className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                                formActionMethod === m
+                                  ? "border-accent bg-accent/10 text-accent"
+                                  : "border-border hover:bg-muted"
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* URL */}
+                    <input
+                      type="url"
+                      value={formActionUrl}
+                      onChange={(e) => setFormActionUrl(e.target.value)}
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                      placeholder="https://api.example.com/endpoint"
+                    />
+
+                    {/* Authentication */}
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1.5">Authentication</label>
+                      <div className="flex gap-1 mb-2">
+                        {AUTH_TYPES.map((at) => (
+                          <button
+                            key={at.value}
+                            type="button"
+                            onClick={() => setFormActionAuthType(at.value)}
+                            className={`px-2 py-1.5 text-xs rounded border transition-colors ${
+                              formActionAuthType === at.value
+                                ? "border-accent bg-accent/10 text-accent"
+                                : "border-border hover:bg-muted"
+                            }`}
+                          >
+                            {at.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {formActionAuthType === "bearer" && (
+                        <input
+                          type="password"
+                          value={formActionAuthToken}
+                          onChange={(e) => setFormActionAuthToken(e.target.value)}
+                          className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                          placeholder="Bearer token"
+                        />
+                      )}
+
+                      {formActionAuthType === "api_key" && (
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={formActionAuthHeader}
+                            onChange={(e) => setFormActionAuthHeader(e.target.value)}
+                            className="w-1/3 px-3 py-2 rounded-md bg-background border border-border text-sm"
+                            placeholder="Header name"
+                          />
+                          <input
+                            type="password"
+                            value={formActionAuthKey}
+                            onChange={(e) => setFormActionAuthKey(e.target.value)}
+                            className="flex-1 px-3 py-2 rounded-md bg-background border border-border text-sm"
+                            placeholder="API key value"
+                          />
+                        </div>
+                      )}
+
+                      {formActionAuthType === "basic" && (
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={formActionAuthUser}
+                            onChange={(e) => setFormActionAuthUser(e.target.value)}
+                            className="flex-1 px-3 py-2 rounded-md bg-background border border-border text-sm"
+                            placeholder="Username"
+                          />
+                          <input
+                            type="password"
+                            value={formActionAuthPass}
+                            onChange={(e) => setFormActionAuthPass(e.target.value)}
+                            className="flex-1 px-3 py-2 rounded-md bg-background border border-border text-sm"
+                            placeholder="Password"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Custom payload toggle + editor */}
+                    <div>
+                      <label className="flex items-center gap-2 cursor-pointer mb-2">
+                        <input
+                          type="checkbox"
+                          checked={formActionUseCustomPayload}
+                          onChange={(e) => {
+                            setFormActionUseCustomPayload(e.target.checked);
+                            if (e.target.checked && !formActionPayloadTemplate) {
+                              setFormActionPayloadTemplate(DEFAULT_PAYLOAD_TEMPLATE);
+                            }
+                            setFormPayloadError("");
+                          }}
+                          className="accent-green-500"
+                        />
+                        <span className="text-xs">Custom payload template</span>
+                      </label>
+
+                      {formActionUseCustomPayload && (
+                        <div className="space-y-2">
+                          <textarea
+                            value={formActionPayloadTemplate}
+                            onChange={(e) => {
+                              setFormActionPayloadTemplate(e.target.value);
+                              setFormPayloadError("");
+                              try {
+                                if (e.target.value.trim()) JSON.parse(e.target.value);
+                              } catch {
+                                setFormPayloadError("Invalid JSON");
+                              }
+                            }}
+                            rows={8}
+                            className="w-full px-3 py-2 rounded-md bg-background border border-border text-xs font-mono focus:outline-none focus:border-accent resize-y"
+                            placeholder={DEFAULT_PAYLOAD_TEMPLATE}
+                            spellCheck={false}
+                          />
+                          {formPayloadError && (
+                            <div className="text-[10px] text-red-400">{formPayloadError}</div>
+                          )}
+                          <div>
+                            <div className="text-[10px] text-muted-foreground mb-1">
+                              Available variables (click to insert)
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {TEMPLATE_VARIABLES.map((v) => (
+                                <button
+                                  key={v.key}
+                                  type="button"
+                                  title={v.desc}
+                                  onClick={() => {
+                                    setFormActionPayloadTemplate(
+                                      (prev) => prev + `"{{${v.key}}}"`
+                                    );
+                                  }}
+                                  className="px-1.5 py-0.5 text-[10px] rounded border border-border hover:bg-muted text-muted-foreground font-mono transition-colors"
+                                >
+                                  {`{{${v.key}}}`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
 
+                {/* Broadcast custom payload */}
+                {formActionType === "broadcast" && (
+                  <div>
+                    <label className="flex items-center gap-2 cursor-pointer mb-2">
+                      <input
+                        type="checkbox"
+                        checked={formActionUseCustomPayload}
+                        onChange={(e) => {
+                          setFormActionUseCustomPayload(e.target.checked);
+                          if (e.target.checked && !formActionPayloadTemplate) {
+                            setFormActionPayloadTemplate(DEFAULT_PAYLOAD_TEMPLATE);
+                          }
+                          setFormPayloadError("");
+                        }}
+                        className="accent-green-500"
+                      />
+                      <span className="text-xs">Custom broadcast payload</span>
+                    </label>
+
+                    {formActionUseCustomPayload && (
+                      <div className="space-y-2">
+                        <textarea
+                          value={formActionPayloadTemplate}
+                          onChange={(e) => {
+                            setFormActionPayloadTemplate(e.target.value);
+                            setFormPayloadError("");
+                            try {
+                              if (e.target.value.trim()) JSON.parse(e.target.value);
+                            } catch {
+                              setFormPayloadError("Invalid JSON");
+                            }
+                          }}
+                          rows={6}
+                          className="w-full px-3 py-2 rounded-md bg-background border border-border text-xs font-mono focus:outline-none focus:border-accent resize-y"
+                          placeholder={DEFAULT_PAYLOAD_TEMPLATE}
+                          spellCheck={false}
+                        />
+                        {formPayloadError && (
+                          <div className="text-[10px] text-red-400">{formPayloadError}</div>
+                        )}
+                        <div className="flex flex-wrap gap-1">
+                          {TEMPLATE_VARIABLES.map((v) => (
+                            <button
+                              key={v.key}
+                              type="button"
+                              title={v.desc}
+                              onClick={() => {
+                                setFormActionPayloadTemplate(
+                                  (prev) => prev + `"{{${v.key}}}"`
+                                );
+                              }}
+                              className="px-1.5 py-0.5 text-[10px] rounded border border-border hover:bg-muted text-muted-foreground font-mono transition-colors"
+                            >
+                              {`{{${v.key}}}`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Notify fields */}
                 {formActionType === "notify" && (
                   <>
                     <input

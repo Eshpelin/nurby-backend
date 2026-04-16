@@ -294,3 +294,103 @@ class SystemStatus(BaseModel):
     cameras_online: int
     cameras_recording: int
     uptime_seconds: float
+
+
+# -- User schemas --
+
+class UserCreate(BaseModel):
+    email: str
+    display_name: str | None = None
+    password: str
+    invite_key: str
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class AdminSetup(BaseModel):
+    email: str
+    display_name: str | None = None
+    password: str
+
+
+# -- Invite key schemas --
+
+class InviteKeyCreate(BaseModel):
+    role: str = "viewer"
+    camera_ids: list[uuid.UUID] | None = None
+    max_uses: int = 1
+    expires_at: datetime | None = None
+
+
+class InviteKeyResponse(BaseModel):
+    id: uuid.UUID
+    key: str
+    role: str
+    camera_ids: list[uuid.UUID] | None
+    max_uses: int
+    use_count: int
+    expires_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# -- Camera access schemas --
+
+class UserCameraAccessResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    camera_id: uuid.UUID
+    granted_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CameraShareRequest(BaseModel):
+    user_ids: list[uuid.UUID]
+
+
+class SetCameraAccessRequest(BaseModel):
+    camera_ids: list[uuid.UUID]
+
+
+# -- Digest entry schemas --
+
+class DigestEntryResponse(BaseModel):
+    id: uuid.UUID
+    camera_id: uuid.UUID | None
+    period: str
+    summary: str
+    highlights: list[str] | None
+    stats: dict | None
+    total_observations: int
+    generated_at: datetime
+
+    model_config = {"from_attributes": True}

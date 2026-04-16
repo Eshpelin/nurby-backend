@@ -9,13 +9,55 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select, and_, or_, func, cast, String, Float
+from sqlalchemy import select, and_, or_, func, cast, String, Float, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.models import Observation, Camera, Person
-from services.search.embeddings import generate_embedding, get_embedding_provider
+from services.search.embeddings import generate_embedding, get_embedding_provider, EMBEDDING_DIM
 
 logger = logging.getLogger("nurby.search.query")
+
+
+async def _embed_query(text: str) -> list[float] | None:
+    """Try to generate an embedding for a search query.
+
+    Returns None if embedding generation fails or no provider is available.
+    """
+    try:
+        provider = await get_embedding_provider()
+        embedding = await generate_embedding(text, provider)
+        # Check that we got a real embedding, not all zeros
+        if any(v != 0.0 for v in embedding):
+            return embedding
+    except Exception:
+        logger.debug("Embedding generation failed for query, falling back to ILIKE")
+    return None
+
+
+def _build_observation_dict(obs, camera_map: dict) -> dict:
+    """Convert an Observation ORM object to a response dict."""
+    result = {
+        "id": str(obs.id),
+        "camera_id": str(obs.camera_id),
+        "camera_name": camera_map.get(obs.camera_id, "Unknown"),
+        "started_at": obs.started_at.isoformat(),
+        "object_detections": obs.object_detections,
+        "person_detections": obs.person_detections,
+        "vlm_description": obs.vlm_description,
+        "confidence": obs.confidence,
+        "thumbnail_path": obs.thumbnail_path,
+    }
+    return result
+
+
+async def _resolve_camera_names(db: AsyncSession, camera_ids: set) -> dict:
+    """Fetch camera display names for a set of camera IDs."""
+    if not camera_ids:
+        return {}
+    cam_result = await db.execute(
+        select(Camera).where(Camera.id.in_(camera_ids))
+    )
+    return {c.id: c.name for c in cam_result.scalars().all()}
 
 
 async def search_observations(
@@ -29,10 +71,11 @@ async def search_observations(
     limit: int = 30,
     offset: int = 0,
 ) -> list[dict]:
-    """Search observations with structured filters and text matching.
+    """Search observations with structured filters and vector similarity.
 
-    Combines SQL filters with text search on VLM descriptions
-    and detection metadata.
+    When a text query is provided, generates an embedding and uses pgvector
+    cosine distance to find semantically similar observations. Falls back
+    to ILIKE keyword matching if embedding generation fails.
     """
     filters = []
 
@@ -58,49 +101,58 @@ async def search_observations(
             cast(Observation.person_detections, String).ilike(f"%{person_name}%")
         )
 
-    # Text query. search VLM description and detection labels
+    use_vector = False
+    query_embedding = None
+
     if query:
-        text_filter = or_(
-            Observation.vlm_description.ilike(f"%{query}%"),
-            cast(Observation.object_detections, String).ilike(f"%{query}%"),
-            cast(Observation.person_detections, String).ilike(f"%{query}%"),
+        query_embedding = await _embed_query(query)
+        if query_embedding is not None:
+            use_vector = True
+
+    if use_vector and query_embedding is not None:
+        # Vector similarity search. Order by cosine distance (ascending).
+        # Only consider observations that have an embedding.
+        filters.append(Observation.description_embedding.isnot(None))
+
+        cosine_distance = Observation.description_embedding.cosine_distance(query_embedding)
+
+        stmt = (
+            select(Observation, cosine_distance.label("distance"))
+            .where(and_(*filters) if filters else True)
+            .order_by(cosine_distance.asc())
+            .limit(limit)
+            .offset(offset)
         )
-        filters.append(text_filter)
 
-    stmt = (
-        select(Observation)
-        .where(and_(*filters) if filters else True)
-        .order_by(Observation.started_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+        result = await db.execute(stmt)
+        rows = result.all()
+        observations = [row[0] for row in rows]
+    else:
+        # ILIKE fallback when no embedding is available
+        if query:
+            text_filter = or_(
+                Observation.vlm_description.ilike(f"%{query}%"),
+                cast(Observation.object_detections, String).ilike(f"%{query}%"),
+                cast(Observation.person_detections, String).ilike(f"%{query}%"),
+            )
+            filters.append(text_filter)
 
-    result = await db.execute(stmt)
-    observations = result.scalars().all()
+        stmt = (
+            select(Observation)
+            .where(and_(*filters) if filters else True)
+            .order_by(Observation.started_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
+        result = await db.execute(stmt)
+        observations = result.scalars().all()
 
     # Build response with camera names
-    camera_ids = {obs.camera_id for obs in observations}
-    camera_map = {}
-    if camera_ids:
-        cam_result = await db.execute(
-            select(Camera).where(Camera.id.in_(camera_ids))
-        )
-        camera_map = {c.id: c.name for c in cam_result.scalars().all()}
+    camera_ids_set = {obs.camera_id for obs in observations}
+    camera_map = await _resolve_camera_names(db, camera_ids_set)
 
-    return [
-        {
-            "id": str(obs.id),
-            "camera_id": str(obs.camera_id),
-            "camera_name": camera_map.get(obs.camera_id, "Unknown"),
-            "started_at": obs.started_at.isoformat(),
-            "object_detections": obs.object_detections,
-            "person_detections": obs.person_detections,
-            "vlm_description": obs.vlm_description,
-            "confidence": obs.confidence,
-            "thumbnail_path": obs.thumbnail_path,
-        }
-        for obs in observations
-    ]
+    return [_build_observation_dict(obs, camera_map) for obs in observations]
 
 
 async def answer_question(

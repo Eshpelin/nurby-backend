@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -148,6 +148,22 @@ class Observation(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     clip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    description_embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
+
+
+class DigestEntry(Base):
+    __tablename__ = "digest_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    camera_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    period: Mapped[str] = mapped_column(String(10), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    highlights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    total_observations: Mapped[int] = mapped_column(Integer, default=0)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Rule(Base):
@@ -187,3 +203,49 @@ class Provider(Base):
     default_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="viewer")  # admin, viewer
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InviteKey(Base):
+    __tablename__ = "invite_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(50), default="viewer")  # role assigned to users who redeem this key
+    camera_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # list of camera UUIDs to grant on redeem
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserCameraAccess(Base):
+    __tablename__ = "user_camera_access"
+    __table_args__ = (UniqueConstraint("user_id", "camera_id", name="uq_user_camera"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    camera_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False
+    )
+    granted_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

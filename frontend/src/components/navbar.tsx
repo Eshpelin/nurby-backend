@@ -5,11 +5,9 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 const NAV_ITEMS = [
-  { label: "Cameras", href: "/" },
-  { label: "Timeline", href: "/timeline" },
+  { label: "Dashboard", href: "/" },
   { label: "People", href: "/people" },
   { label: "Rules", href: "/rules" },
-  { label: "Search", href: "/search" },
   { label: "Settings", href: "/settings" },
 ];
 

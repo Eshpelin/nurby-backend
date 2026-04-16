@@ -19,6 +19,7 @@ from shared.models import Camera, Observation, Provider
 from services.perception.detector import ObjectDetector
 from services.perception.faces import FaceRecognizer
 from services.perception.vlm import VLMClient, get_active_provider
+from services.search.embeddings import generate_embedding, get_embedding_provider
 from services.events.engine import RuleEngine
 from sqlalchemy import select
 
@@ -271,7 +272,18 @@ class PerceptionPipeline:
             thumbnail_path=thumbnail_path,
         )
 
-        # Step 6. Evaluate rules against this observation
+        # Step 6. Generate description embedding asynchronously
+        if observation_id and vlm_description:
+            asyncio.ensure_future(
+                self._generate_and_store_embedding(
+                    observation_id=observation_id,
+                    vlm_description=vlm_description,
+                    detections=detections,
+                    person_detections=person_detections,
+                )
+            )
+
+        # Step 7. Evaluate rules against this observation
         rule_data = {
             "observation_id": str(observation_id) if observation_id else None,
             "camera_id": camera_id,
@@ -375,3 +387,59 @@ class PerceptionPipeline:
         except Exception:
             logger.exception("Failed to store observation")
             return None
+
+    async def _generate_and_store_embedding(
+        self,
+        observation_id: uuid.UUID,
+        vlm_description: str,
+        detections: list[dict],
+        person_detections: dict | None = None,
+    ) -> None:
+        """Generate a description embedding and update the observation record.
+
+        Combines VLM description, object detection summary, and person names
+        into a single text for richer embeddings. Runs asynchronously so the
+        main pipeline is not blocked. Failures are logged but never crash
+        the pipeline.
+        """
+        try:
+            # Build combined text for embedding
+            parts = []
+            if vlm_description:
+                parts.append(vlm_description)
+
+            # Add object detection summary
+            if detections:
+                labels = [d["label"] for d in detections]
+                parts.append("Objects detected. " + ", ".join(labels))
+
+            # Add person names from face detections
+            if person_detections and person_detections.get("faces"):
+                named = [
+                    f["person_name"]
+                    for f in person_detections["faces"]
+                    if f.get("person_name")
+                ]
+                if named:
+                    parts.append("People present. " + ", ".join(named))
+
+            embed_text = ". ".join(parts)
+
+            provider = await get_embedding_provider()
+            embedding = await generate_embedding(embed_text, provider)
+
+            async with async_session() as db:
+                obs = await db.get(Observation, observation_id)
+                if obs:
+                    obs.description_embedding = embedding
+                    await db.commit()
+                    logger.debug(
+                        "Stored description embedding for observation %s",
+                        observation_id,
+                    )
+        except Exception:
+            logger.warning(
+                "Failed to generate embedding for observation %s. "
+                "Search will fall back to keyword matching.",
+                observation_id,
+            )
