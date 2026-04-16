@@ -197,6 +197,12 @@ class PerceptionPipeline:
                     camera_id, len(faces), len(matched),
                 )
 
+            # Cluster unknown faces for auto-discovery
+            if faces:
+                for face in faces:
+                    if not face.get("person_id"):
+                        await self._face.cluster_unknown_face(face, camera_id, frame)
+
         # Step 3. Save thumbnail
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
 

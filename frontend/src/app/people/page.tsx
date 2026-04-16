@@ -11,6 +11,29 @@ interface Person {
   created_at: string;
 }
 
+interface FaceSuggestion {
+  id: string;
+  sample_thumbnail_path: string | null;
+  sighting_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  first_camera_id: string | null;
+  status: string;
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "unknown";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 export default function PeoplePage() {
   const [persons, setPersons] = useState<Person[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -29,6 +52,12 @@ export default function PeoplePage() {
   const [faceMessage, setFaceMessage] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Suggestions state
+  const [suggestions, setSuggestions] = useState<FaceSuggestion[]>([]);
+  const [nameInputs, setNameInputs] = useState<Record<string, string>>({});
+  const [relationshipInputs, setRelationshipInputs] = useState<Record<string, string>>({});
+  const [namingSubmitting, setNamingSubmitting] = useState<string | null>(null);
+
   const fetchPersons = useCallback(async () => {
     try {
       const res = await fetch("/api/persons");
@@ -40,9 +69,19 @@ export default function PeoplePage() {
     }
   }, []);
 
+  const fetchSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/persons/suggestions?min_sightings=2");
+      if (res.ok) setSuggestions(await res.json());
+    } catch {
+      /* silently fail */
+    }
+  }, []);
+
   useEffect(() => {
     fetchPersons();
-  }, [fetchPersons]);
+    fetchSuggestions();
+  }, [fetchPersons, fetchSuggestions]);
 
   const openAdd = () => {
     setEditPerson(null);
@@ -138,146 +177,284 @@ export default function PeoplePage() {
     }
   };
 
+  const handleNameSuggestion = async (clusterId: string) => {
+    const name = nameInputs[clusterId]?.trim();
+    if (!name) return;
+
+    setNamingSubmitting(clusterId);
+    try {
+      const res = await fetch(`/api/persons/suggestions/${clusterId}/name`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_name: name,
+          relationship: relationshipInputs[clusterId]?.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        fetchSuggestions();
+        fetchPersons();
+      }
+    } catch {
+      /* silently fail */
+    } finally {
+      setNamingSubmitting(null);
+    }
+  };
+
+  const handleIgnoreSuggestion = async (clusterId: string) => {
+    try {
+      await fetch(`/api/persons/suggestions/${clusterId}/ignore`, {
+        method: "POST",
+      });
+      setSuggestions((prev) => prev.filter((s) => s.id !== clusterId));
+    } catch {
+      /* silently fail */
+    }
+  };
+
   return (
     <div className="px-6 py-6">
-      <div className="flex items-baseline justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">People</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {persons.length} person{persons.length !== 1 ? "s" : ""} registered
-          </p>
-        </div>
-        <button
-          onClick={openAdd}
-          className="px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90"
-        >
-          + Add person
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="text-sm text-muted-foreground py-20 text-center">
-          Loading.
-        </div>
-      ) : persons.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-16 h-16 rounded-full border border-border flex items-center justify-center mb-4 text-muted-foreground text-2xl">
-            ?
+      {/* Suggestions section */}
+      {suggestions.length > 0 && (
+        <div className="mb-10">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold">Who are these people?</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              {suggestions.length} unknown{" "}
+              {suggestions.length === 1 ? "person" : "people"} discovered from
+              your camera feeds
+            </p>
           </div>
-          <p className="text-muted-foreground text-sm mb-4">
-            No people registered yet. Add people and upload face photos
-            to enable face recognition on camera feeds.
-          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {suggestions.map((s) => (
+              <div
+                key={s.id}
+                className="rounded-lg border border-accent/30 bg-card p-4 space-y-3"
+              >
+                <div className="flex items-start gap-3">
+                  {/* Face thumbnail */}
+                  <img
+                    src={`/api/persons/suggestions/${s.id}/thumbnail`}
+                    alt="Unknown face"
+                    className="w-16 h-16 rounded-full object-cover border-2 border-accent/30"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">Unknown person</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Seen {s.sighting_count} time
+                      {s.sighting_count !== 1 ? "s" : ""}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      First seen {timeAgo(s.first_seen_at)} · Last{" "}
+                      {timeAgo(s.last_seen_at)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Naming form */}
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={nameInputs[s.id] || ""}
+                    onChange={(e) =>
+                      setNameInputs((prev) => ({
+                        ...prev,
+                        [s.id]: e.target.value,
+                      }))
+                    }
+                    placeholder="Who is this?"
+                    className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleNameSuggestion(s.id);
+                    }}
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={relationshipInputs[s.id] || ""}
+                      onChange={(e) =>
+                        setRelationshipInputs((prev) => ({
+                          ...prev,
+                          [s.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Relationship (optional)"
+                      className="flex-1 px-3 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                    <button
+                      onClick={() => handleNameSuggestion(s.id)}
+                      disabled={
+                        !nameInputs[s.id]?.trim() ||
+                        namingSubmitting === s.id
+                      }
+                      className="px-3 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    >
+                      {namingSubmitting === s.id ? "Saving" : "Name"}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => handleIgnoreSuggestion(s.id)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Not a person / Ignore
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Named people section */}
+      <div>
+        <div className="flex items-baseline justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {suggestions.length > 0 ? "Named People" : "People"}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {persons.length} person{persons.length !== 1 ? "s" : ""}{" "}
+              registered
+            </p>
+          </div>
           <button
             onClick={openAdd}
             className="px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90"
           >
-            + Add first person
+            + Add person
           </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {persons.map((p) => (
-            <div
-              key={p.id}
-              className="rounded-lg border border-border bg-card p-4 space-y-3"
+
+        {loading ? (
+          <div className="text-sm text-muted-foreground py-20 text-center">
+            Loading.
+          </div>
+        ) : persons.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-16 h-16 rounded-full border border-border flex items-center justify-center mb-4 text-muted-foreground text-2xl">
+              ?
+            </div>
+            <p className="text-muted-foreground text-sm mb-4">
+              No people identified yet. When cameras detect faces, suggestions
+              will appear here automatically.
+            </p>
+            <button
+              onClick={openAdd}
+              className="px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  {p.photo_path ? (
-                    <img
-                      src={`/api/persons/${p.id}/photo`}
-                      alt={p.display_name}
-                      className="w-12 h-12 rounded-full object-cover border border-border"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-lg font-medium">
-                      {p.display_name.charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <div className="font-medium">{p.display_name}</div>
-                    {p.relationship && (
-                      <div className="text-xs text-muted-foreground">
-                        {p.relationship}
+              + Add first person
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {persons.map((p) => (
+              <div
+                key={p.id}
+                className="rounded-lg border border-border bg-card p-4 space-y-3"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    {p.photo_path ? (
+                      <img
+                        src={`/api/persons/${p.id}/photo`}
+                        alt={p.display_name}
+                        className="w-12 h-12 rounded-full object-cover border border-border"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-lg font-medium">
+                        {p.display_name.charAt(0).toUpperCase()}
                       </div>
                     )}
+                    <div>
+                      <div className="font-medium">{p.display_name}</div>
+                      {p.relationship && (
+                        <div className="text-xs text-muted-foreground">
+                          {p.relationship}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => openEdit(p)}
+                      className="px-2 py-1 text-xs rounded border border-border hover:bg-muted transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p.id)}
+                      className="px-2 py-1 text-xs rounded border border-red-800 text-red-400 hover:bg-red-900/30 transition-colors"
+                    >
+                      Del
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-1">
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      p.consent_given ? "bg-green-500" : "bg-yellow-500"
+                    }`}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {p.consent_given
+                      ? "Consent given for face recognition"
+                      : "No consent for face recognition"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFaceUpload(p.id, file);
+                      e.target.value = "";
+                    }}
+                  />
                   <button
-                    onClick={() => openEdit(p)}
-                    className="px-2 py-1 text-xs rounded border border-border hover:bg-muted transition-colors"
+                    onClick={() => {
+                      setUploadingFace(p.id);
+                      // Trigger file input
+                      const input = document.createElement("input");
+                      input.type = "file";
+                      input.accept = "image/*";
+                      input.onchange = (e) => {
+                        const file = (e.target as HTMLInputElement)
+                          .files?.[0];
+                        if (file) handleFaceUpload(p.id, file);
+                      };
+                      input.click();
+                    }}
+                    disabled={uploadingFace === p.id}
+                    className="px-2 py-1 text-xs rounded border border-border hover:bg-muted transition-colors disabled:opacity-50"
                   >
-                    Edit
+                    {uploadingFace === p.id
+                      ? "Uploading."
+                      : p.photo_path
+                      ? "Update face photo"
+                      : "Upload face photo"}
                   </button>
-                  <button
-                    onClick={() => handleDelete(p.id)}
-                    className="px-2 py-1 text-xs rounded border border-red-800 text-red-400 hover:bg-red-900/30 transition-colors"
-                  >
-                    Del
-                  </button>
+
+                  {faceMessage[p.id] && (
+                    <span className="text-xs text-muted-foreground">
+                      {faceMessage[p.id]}
+                    </span>
+                  )}
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    p.consent_given ? "bg-green-500" : "bg-yellow-500"
-                  }`}
-                />
-                <span className="text-xs text-muted-foreground">
-                  {p.consent_given
-                    ? "Consent given for face recognition"
-                    : "No consent for face recognition"}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFaceUpload(p.id, file);
-                    e.target.value = "";
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    setUploadingFace(p.id);
-                    // Trigger file input
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = "image/*";
-                    input.onchange = (e) => {
-                      const file = (e.target as HTMLInputElement).files?.[0];
-                      if (file) handleFaceUpload(p.id, file);
-                    };
-                    input.click();
-                  }}
-                  disabled={uploadingFace === p.id}
-                  className="px-2 py-1 text-xs rounded border border-border hover:bg-muted transition-colors disabled:opacity-50"
-                >
-                  {uploadingFace === p.id
-                    ? "Uploading."
-                    : p.photo_path
-                    ? "Update face photo"
-                    : "Upload face photo"}
-                </button>
-
-                {faceMessage[p.id] && (
-                  <span className="text-xs text-muted-foreground">
-                    {faceMessage[p.id]}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Add/Edit Modal */}
       {showModal && (

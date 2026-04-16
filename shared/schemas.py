@@ -256,6 +256,36 @@ class ProviderResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Face cluster schemas ──
+
+class FaceClusterResponse(BaseModel):
+    id: uuid.UUID
+    sample_thumbnail_path: str | None
+    sighting_count: int
+    first_seen_at: datetime
+    last_seen_at: datetime
+    first_camera_id: uuid.UUID | None
+    person_id: uuid.UUID | None
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class FaceClusterSampleResponse(BaseModel):
+    id: uuid.UUID
+    cluster_id: uuid.UUID
+    camera_id: uuid.UUID
+    thumbnail_path: str | None
+    captured_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class NameClusterRequest(BaseModel):
+    display_name: str
+    relationship: str | None = None
+
+
 # ── System schemas ──
 
 class SystemStatus(BaseModel):
