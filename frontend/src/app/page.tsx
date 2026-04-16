@@ -1264,32 +1264,9 @@ function DashboardContent() {
   const grouped: Record<string, TimelineEntry[]> = {};
   for (const e of entries) { const k = formatDate(e.timestamp); if (!grouped[k]) grouped[k] = []; grouped[k].push(e); }
 
-  const totalCount = entries.length;
 
   return (
     <div className="px-4 py-4 h-[calc(100vh-3.5rem)] flex flex-col">
-      {/* Top bar */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {cameras.length} camera{cameras.length !== 1 ? "s" : ""}
-              {" · "}
-              {searchActive ? `${totalCount} results` : `${totalCount} events`}
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-green-500 pulse-dot" : "bg-red-500"}`} />
-            <span className="text-muted-foreground font-mono">{wsConnected ? "live" : "disconnected"}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setModalOpen(true)} className="px-3 py-1.5 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90">
-            + Add camera
-          </button>
-        </div>
-      </div>
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* LEFT. Camera feeds */}
@@ -1298,7 +1275,18 @@ function DashboardContent() {
         }`}>
           {/* Camera list header with layout toggle */}
           <div className="flex items-center justify-between mb-2 flex-shrink-0">
-            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Cameras</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Cameras</span>
+              {cameras.length > 0 && (
+                <button onClick={() => setModalOpen(true)}
+                  className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title="Add camera">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M12 5v14" /><path d="M5 12h14" />
+                  </svg>
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-0.5 p-0.5 rounded bg-muted/50 border border-border">
               {/* Single column */}
               <button onClick={() => { setCameraLayout("single"); localStorage.setItem("nurby-camera-layout", "single"); }}
