@@ -15,12 +15,31 @@ import numpy as np
 
 logger = logging.getLogger("nurby.perception.detector")
 
-# COCO classes we care about for home security
-RELEVANT_CLASSES = {
+# Default classes for home security when no label_filter is set.
+# Models with a custom label_filter bypass this entirely.
+DEFAULT_CLASSES = {
     "person", "bicycle", "car", "motorcycle", "bus", "truck",
     "cat", "dog", "bird",
     "backpack", "umbrella", "handbag", "suitcase",
     "cell phone", "laptop",
+}
+
+# Full COCO class set for reference (YOLOv8 supports all 80)
+COCO_CLASSES = {
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus",
+    "train", "truck", "boat", "traffic light", "fire hydrant",
+    "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+    "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+    "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat",
+    "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
+    "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+    "hot dog", "pizza", "donut", "cake", "chair", "couch",
+    "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+    "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
+    "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
 }
 
 DEFAULT_CONFIDENCE = 0.35
@@ -166,12 +185,10 @@ class ObjectDetector:
                 label = model.names[cls_id]
                 conf_val = float(boxes.conf[i])
 
-                # Filter to relevant classes
-                if label not in RELEVANT_CLASSES:
-                    continue
-
-                # Apply per-model label filter if specified
-                if label_filter and label not in label_filter:
+                # Apply label filter. Per-model filter takes priority,
+                # otherwise fall back to default security-relevant classes
+                allowed = set(label_filter) if label_filter else DEFAULT_CLASSES
+                if label not in allowed:
                     continue
 
                 x1, y1, x2, y2 = boxes.xyxy[i].tolist()

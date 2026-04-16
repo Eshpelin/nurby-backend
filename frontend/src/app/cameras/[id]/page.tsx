@@ -23,6 +23,8 @@ interface Camera {
   detect_objects: boolean;
   detect_faces: boolean;
   object_confidence: number;
+  vlm_trigger: string;
+  vlm_trigger_objects: string[] | null;
   digest_enabled: boolean;
   digest_period: string;
   digest_provider_id: string | null;
@@ -181,6 +183,8 @@ export default function CameraConfigPage() {
   const [vlmPrompt, setVlmPrompt] = useState("");
   const [vlmInterval, setVlmInterval] = useState(0);
   const [vlmMaxTokens, setVlmMaxTokens] = useState(200);
+  const [vlmTrigger, setVlmTrigger] = useState("always");
+  const [vlmTriggerObjects, setVlmTriggerObjects] = useState<string[]>([]);
   const [detectObjects, setDetectObjects] = useState(true);
   const [detectFaces, setDetectFaces] = useState(true);
   const [objectConfidence, setObjectConfidence] = useState(0.35);
@@ -227,6 +231,8 @@ export default function CameraConfigPage() {
       setVlmPrompt(cam.vlm_prompt || "");
       setVlmInterval(cam.vlm_interval ?? 0);
       setVlmMaxTokens(cam.vlm_max_tokens ?? 200);
+      setVlmTrigger(cam.vlm_trigger ?? "always");
+      setVlmTriggerObjects(cam.vlm_trigger_objects ?? []);
       setDetectObjects(cam.detect_objects ?? true);
       setDetectFaces(cam.detect_faces ?? true);
       setObjectConfidence(cam.object_confidence ?? 0.35);
@@ -269,6 +275,8 @@ export default function CameraConfigPage() {
         vlm_prompt: vlmPrompt.trim() || null,
         vlm_interval: vlmInterval,
         vlm_max_tokens: vlmMaxTokens,
+        vlm_trigger: vlmTrigger,
+        vlm_trigger_objects: vlmTriggerObjects.length > 0 ? vlmTriggerObjects : null,
         detect_objects: detectObjects,
         detect_faces: detectFaces,
         object_confidence: objectConfidence,
@@ -571,6 +579,113 @@ export default function CameraConfigPage() {
                 : `Wait at least ${formatInterval(vlmInterval)} between VLM calls`}
             </p>
           </FieldRow>
+
+          <FieldRow label="Trigger Condition" hint="When to send frames to VLM">
+            <div className="flex gap-1.5 mb-2">
+              {([
+                { value: "always", label: "Always", desc: "Time-based, using frequency above" },
+                { value: "on_object", label: "On Detection", desc: "Only when specific objects are detected" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setVlmTrigger(opt.value)}
+                  className={`px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
+                    vlmTrigger === opt.value
+                      ? "border-accent bg-accent/10 text-accent-foreground"
+                      : "border-border hover:border-muted-foreground text-muted-foreground"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {vlmTrigger === "always"
+                ? "VLM runs on every keyframe (respecting frequency limit above)"
+                : vlmTriggerObjects.length > 0
+                  ? `VLM only runs when ${vlmTriggerObjects.join(", ")} detected by object detection`
+                  : "VLM only runs when any object is detected"}
+            </p>
+          </FieldRow>
+
+          {vlmTrigger === "on_object" && (
+            <FieldRow label="Trigger Objects" hint="Type a label and press Enter. Works with any model's classes.">
+              <div>
+                {/* Selected tags */}
+                {vlmTriggerObjects.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {vlmTriggerObjects.map((label) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md border border-accent bg-accent/10 text-accent-foreground"
+                      >
+                        {label}
+                        <button
+                          type="button"
+                          onClick={() => setVlmTriggerObjects(vlmTriggerObjects.filter((l) => l !== label))}
+                          className="text-accent-foreground/60 hover:text-accent-foreground ml-0.5"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tag input */}
+                <input
+                  type="text"
+                  placeholder="Type object label and press Enter"
+                  className={`${inputClass} text-xs`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const val = (e.target as HTMLInputElement).value.trim().toLowerCase();
+                      if (val && !vlmTriggerObjects.includes(val)) {
+                        setVlmTriggerObjects([...vlmTriggerObjects, val]);
+                        (e.target as HTMLInputElement).value = "";
+                      }
+                    }
+                  }}
+                />
+
+                {/* Quick-add suggestions */}
+                <details className="mt-2">
+                  <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                    Common labels
+                  </summary>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {[
+                      "person", "car", "truck", "bus", "motorcycle", "bicycle",
+                      "cat", "dog", "bird", "horse", "sheep", "cow",
+                      "backpack", "suitcase", "umbrella", "handbag",
+                      "cell phone", "laptop", "tv", "chair", "couch", "bed",
+                      "bottle", "cup", "knife", "scissors",
+                      "fire hydrant", "stop sign", "traffic light",
+                      "skateboard", "surfboard", "sports ball", "kite",
+                      "teddy bear", "clock", "book", "potted plant",
+                    ].filter((l) => !vlmTriggerObjects.includes(l)).map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setVlmTriggerObjects([...vlmTriggerObjects, label])}
+                        className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:border-accent hover:text-accent-foreground transition-colors"
+                      >
+                        + {label}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+
+                {vlmTriggerObjects.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    No objects selected. VLM will trigger on any detection.
+                  </p>
+                )}
+              </div>
+            </FieldRow>
+          )}
 
           <FieldRow label="Max Tokens" hint="Response length limit">
             <div className="flex items-center gap-3">

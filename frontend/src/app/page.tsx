@@ -32,6 +32,97 @@ interface Digest {
   highlights: string[];
 }
 
+interface Observation {
+  id: string;
+  camera_id: string;
+  started_at: string;
+  object_detections: { objects: { label: string; confidence: number }[]; count: number } | null;
+  person_detections: { faces: { person_name: string | null; person_id: string | null }[]; count: number } | null;
+  vlm_description: string | null;
+}
+
+interface ActivityEvent {
+  id: string;
+  timestamp: string;
+  summary: string;
+  icon: "person" | "object" | "scene";
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function observationToEvents(obs: Observation): ActivityEvent[] {
+  const events: ActivityEvent[] = [];
+
+  // Named people first
+  if (obs.person_detections?.faces) {
+    const named = obs.person_detections.faces.filter((f) => f.person_name);
+    const unnamed = obs.person_detections.faces.filter((f) => !f.person_name);
+
+    for (const face of named) {
+      events.push({
+        id: `${obs.id}-person-${face.person_name}`,
+        timestamp: obs.started_at,
+        summary: `${face.person_name} spotted`,
+        icon: "person",
+      });
+    }
+
+    if (unnamed.length > 0 && named.length === 0) {
+      events.push({
+        id: `${obs.id}-unknown-persons`,
+        timestamp: obs.started_at,
+        summary: unnamed.length === 1 ? "Unknown person detected" : `${unnamed.length} unknown people detected`,
+        icon: "person",
+      });
+    }
+  }
+
+  // Object detections (grouped by label)
+  if (obs.object_detections?.objects && obs.object_detections.objects.length > 0) {
+    const counts: Record<string, number> = {};
+    for (const obj of obs.object_detections.objects) {
+      counts[obj.label] = (counts[obj.label] || 0) + 1;
+    }
+
+    // Only show top 2 object types to keep it compact
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 2);
+    const parts = sorted.map(([label, count]) => count === 1 ? label : `${count} ${label}s`);
+
+    // Skip if we already have person events from this observation
+    if (events.length === 0 && parts.length > 0) {
+      events.push({
+        id: `${obs.id}-objects`,
+        timestamp: obs.started_at,
+        summary: parts.join(", ") + " detected",
+        icon: "object",
+      });
+    }
+  }
+
+  // VLM scene description as fallback
+  if (events.length === 0 && obs.vlm_description) {
+    // Truncate to first sentence, max 60 chars
+    let desc = obs.vlm_description.split(/\.\s/)[0];
+    if (desc.length > 60) desc = desc.slice(0, 57) + "...";
+    events.push({
+      id: `${obs.id}-scene`,
+      timestamp: obs.started_at,
+      summary: desc,
+      icon: "scene",
+    });
+  }
+
+  return events;
+}
+
 const STREAM_TYPES: { value: StreamType; label: string; hint: string; placeholder: string }[] = [
   { value: "rtsp", label: "RTSP", hint: "IP cameras, NVRs, most security cameras", placeholder: "rtsp://192.168.1.100:554/stream1" },
   { value: "http_mjpeg", label: "HTTP MJPEG", hint: "Motion JPEG over HTTP. Webcams, ESP32-CAM", placeholder: "http://192.168.1.100:8080/video" },
@@ -69,11 +160,78 @@ function StatusBadge({ status }: { status: Camera["status"] }) {
   );
 }
 
-function CameraCard({ camera, digest, digestLoading, onRefreshDigest }: {
+function ActivityTicker({ events }: { events: ActivityEvent[] }) {
+  if (events.length === 0) return null;
+
+  const iconMap = {
+    person: (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+    ),
+    object: (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="2" width="20" height="20" rx="2" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
+    scene: (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
+  };
+
+  return (
+    <div className="border-t border-border">
+      <div className="px-3 py-1.5 flex items-center gap-1.5">
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider shrink-0">
+          Activity
+        </span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+      <div className="overflow-x-auto scrollbar-thin pb-2 px-3">
+        <div className="flex gap-0 min-w-max relative">
+          {/* Timeline line */}
+          <div className="absolute top-[9px] left-0 right-0 h-px bg-border" />
+
+          {events.map((evt, i) => (
+            <div key={evt.id} className="relative flex flex-col items-start min-w-[120px] max-w-[160px] pr-3">
+              {/* Timeline dot */}
+              <div className={`relative z-10 w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center ${
+                evt.icon === "person"
+                  ? "border-green-500 bg-green-500/10 text-green-400"
+                  : evt.icon === "object"
+                    ? "border-blue-400 bg-blue-400/10 text-blue-400"
+                    : "border-muted-foreground bg-muted/50 text-muted-foreground"
+              }`}>
+                {iconMap[evt.icon]}
+              </div>
+              {/* Content */}
+              <div className="mt-1.5 pl-0.5">
+                <p className="text-[11px] leading-tight text-foreground/80">
+                  {evt.summary}
+                </p>
+                <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
+                  {timeAgo(evt.timestamp)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CameraCard({ camera, digest, digestLoading, onRefreshDigest, activityEvents }: {
   camera: Camera;
   digest: Digest | null;
   digestLoading: boolean;
   onRefreshDigest: () => void;
+  activityEvents: ActivityEvent[];
 }) {
   const streamName = extractStreamName(camera.stream_url);
   const iframeSrc = `${WEBRTC_URL}/${streamName}/`;
@@ -150,8 +308,11 @@ function CameraCard({ camera, digest, digestLoading, onRefreshDigest }: {
         )}
       </div>
 
-      {/* Activity digest */}
-      {(camera.digest_enabled ?? true) && (
+      {/* Activity ticker */}
+      <ActivityTicker events={activityEvents} />
+
+      {/* Activity digest. Hidden when no observations in period */}
+      {(camera.digest_enabled ?? true) && digest && digest.total_observations > 0 && (
         <div className="border-t border-border px-3 py-2.5">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -170,29 +331,21 @@ function CameraCard({ camera, digest, digestLoading, onRefreshDigest }: {
               </button>
             </div>
           </div>
-          {digest ? (
-            <div>
-              <p className="text-xs leading-relaxed text-foreground/80">
-                {digest.summary}
-              </p>
-              {digest.highlights.length > 0 && (
-                <div className="mt-1.5 space-y-0.5">
-                  {digest.highlights.slice(0, 2).map((h, i) => (
-                    <div key={i} className="text-[11px] text-muted-foreground">
-                      {h}
-                    </div>
-                  ))}
+          <p className="text-xs leading-relaxed text-foreground/80">
+            {digest.summary}
+          </p>
+          {digest.highlights.length > 0 && (
+            <div className="mt-1.5 space-y-0.5">
+              {digest.highlights.slice(0, 2).map((h, i) => (
+                <div key={i} className="text-[11px] text-muted-foreground">
+                  {h}
                 </div>
-              )}
-              <div className="text-[10px] text-muted-foreground font-mono mt-1">
-                {digest.total_observations} observations · {digest.period_label}
-              </div>
+              ))}
             </div>
-          ) : (
-            <p className="text-[11px] text-muted-foreground">
-              {digestLoading ? "Generating digest..." : "No digest yet"}
-            </p>
           )}
+          <div className="text-[10px] text-muted-foreground font-mono mt-1">
+            {digest.total_observations} observations · {digest.period_label}
+          </div>
         </div>
       )}
     </div>
@@ -491,6 +644,7 @@ export default function CamerasPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [digests, setDigests] = useState<Record<string, Digest>>({});
   const [digestLoading, setDigestLoading] = useState<Record<string, boolean>>({});
+  const [activityEvents, setActivityEvents] = useState<Record<string, ActivityEvent[]>>({});
 
   const fetchCameras = useCallback(async () => {
     try {
@@ -503,6 +657,19 @@ export default function CamerasPage() {
       // Silently handle fetch errors. The UI shows the current state.
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchActivity = useCallback(async (cameraId: string) => {
+    try {
+      const res = await fetch(`/api/observations?camera_id=${cameraId}&limit=15`);
+      if (res.ok) {
+        const observations: Observation[] = await res.json();
+        const events = observations.flatMap(observationToEvents).slice(0, 10);
+        setActivityEvents((prev) => ({ ...prev, [cameraId]: events }));
+      }
+    } catch {
+      /* silent */
     }
   }, []);
 
@@ -534,16 +701,28 @@ export default function CamerasPage() {
     return () => clearInterval(interval);
   }, [fetchCameras]);
 
-  // Auto-fetch digests when cameras load
+  // Auto-fetch activity and digests when cameras load
   useEffect(() => {
     if (cameras.length > 0) {
       cameras.forEach((cam) => {
+        if (!activityEvents[cam.id]) {
+          fetchActivity(cam.id);
+        }
         if (!digests[cam.id] && !digestLoading[cam.id]) {
           fetchDigest(cam);
         }
       });
     }
   }, [cameras]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh activity every 15 seconds
+  useEffect(() => {
+    if (cameras.length === 0) return;
+    const interval = setInterval(() => {
+      cameras.forEach((cam) => fetchActivity(cam.id));
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [cameras, fetchActivity]);
 
   function handleAddSuccess() {
     setModalOpen(false);
@@ -588,6 +767,7 @@ export default function CamerasPage() {
             digest={digests[camera.id] || null}
             digestLoading={digestLoading[camera.id] || false}
             onRefreshDigest={() => fetchDigest(camera)}
+            activityEvents={activityEvents[camera.id] || []}
           />
         ))}
 

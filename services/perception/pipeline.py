@@ -189,12 +189,29 @@ class PerceptionPipeline:
         # Step 3. Save thumbnail
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
 
-        # Step 4. Call VLM for scene description (respecting per-camera interval and provider)
+        # Step 4. Call VLM for scene description (respecting trigger, interval, and provider)
         vlm_description = None
         vlm_provider_name = None
         confidence = None
 
-        if self._should_call_vlm(camera_id, cam):
+        # Check VLM trigger condition
+        vlm_triggered = True
+        if cam and cam.vlm_trigger == "on_object":
+            trigger_labels = cam.vlm_trigger_objects or []
+            if trigger_labels:
+                detected_labels = {d["label"] for d in detections}
+                vlm_triggered = bool(detected_labels & set(trigger_labels))
+            else:
+                # on_object mode with empty list means "any detection"
+                vlm_triggered = len(detections) > 0
+
+            if not vlm_triggered:
+                logger.debug(
+                    "VLM skipped for camera %s. No matching trigger objects in detections",
+                    camera_id,
+                )
+
+        if vlm_triggered and self._should_call_vlm(camera_id, cam):
             import time as _time
             provider = await self._get_provider_for_camera(cam)
             if provider:

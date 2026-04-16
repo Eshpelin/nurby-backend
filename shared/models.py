@@ -32,6 +32,9 @@ class Camera(Base):
     detect_objects: Mapped[bool] = mapped_column(Boolean, default=True)
     detect_faces: Mapped[bool] = mapped_column(Boolean, default=True)
     object_confidence: Mapped[float] = mapped_column(Float, default=0.35)  # YOLO confidence threshold
+    # VLM trigger config
+    vlm_trigger: Mapped[str] = mapped_column(String(16), default="always")  # always, on_object
+    vlm_trigger_objects: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # e.g. ["person", "cat"]
     # Multi-model detection config
     detection_models: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # list of {"model", "confidence", "enabled", "label_filter"}
     detection_merge: Mapped[str] = mapped_column(String(16), default="any")  # any, consensus, best
