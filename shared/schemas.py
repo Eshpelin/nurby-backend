@@ -91,8 +91,7 @@ class CameraResponse(BaseModel):
     stream_type: str
     snapshot_url: str | None
     location_label: str | None
-    username: str | None
-    auth_token: str | None
+    has_credentials: bool = False
     snapshot_interval: float
     motion_sensitivity: float
     recording_enabled: bool

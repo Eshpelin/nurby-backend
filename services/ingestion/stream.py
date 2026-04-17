@@ -118,7 +118,16 @@ class StreamWorker:
     async def _process_stream(self):
         loop = asyncio.get_event_loop()
 
-        cap = await loop.run_in_executor(None, self._open_capture)
+        try:
+            cap = await asyncio.wait_for(
+                loop.run_in_executor(None, self._open_capture),
+                timeout=30.0,  # prevent OpenCV from hanging indefinitely on bad URLs
+            )
+        except asyncio.TimeoutError:
+            logger.error("Timed out connecting to camera %s (30s)", self.camera_id)
+            await self._update_camera_status("offline", "connection timed out")
+            return
+
         if cap is None:
             await self._update_camera_status("offline", "failed to open stream")
             return

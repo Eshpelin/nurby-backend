@@ -5,6 +5,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
+import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -18,9 +20,24 @@ from services.discovery.onvif import (
     ptz_stop,
 )
 from shared.auth import get_current_user, require_admin
+from shared.config import settings
 from shared.database import get_db
 from shared.models import Camera, CameraStatusLog, User
 from shared.schemas import CameraCreate, CameraResponse, CameraStatusLogResponse, CameraUpdate
+
+# Redis key prefix for signaling stream restart to manager
+RESTART_KEY_PREFIX = "nurby:stream_restart:"
+
+
+def _camera_to_response(camera: Camera) -> dict:
+    """Convert Camera model to response dict, masking credentials."""
+    data = {c.name: getattr(camera, c.name) for c in Camera.__table__.columns}
+    data["has_credentials"] = bool(camera.username or camera.auth_token)
+    # Never expose raw credentials in API responses
+    data.pop("username", None)
+    data.pop("password", None)
+    data.pop("auth_token", None)
+    return data
 
 router = APIRouter()
 
@@ -220,19 +237,120 @@ async def list_status_logs(
     return result.scalars().all()
 
 
-@router.get("", response_model=list[CameraResponse])
+@router.get("")
 async def list_cameras(_current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Camera).order_by(Camera.created_at))
-    return result.scalars().all()
+    return [_camera_to_response(c) for c in result.scalars().all()]
 
 
-@router.post("", response_model=CameraResponse, status_code=201)
+@router.post("", status_code=201)
 async def create_camera(body: CameraCreate, _current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     camera = Camera(**body.model_dump())
     db.add(camera)
     await db.commit()
     await db.refresh(camera)
-    return camera
+    return _camera_to_response(camera)
+
+
+# ---------------------------------------------------------------------------
+# Test connection endpoint (must be before /{camera_id} catch-all)
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionRequest(BaseModel):
+    stream_url: str
+    stream_type: str = "rtsp"
+    username: str | None = None
+    password: str | None = None
+    auth_token: str | None = None
+
+
+def _test_stream_connection(url: str, stream_type: str) -> dict:
+    """Probe a camera stream. Runs in thread pool. Returns status dict."""
+    import cv2
+
+    if stream_type == "usb":
+        try:
+            source = int(url)
+        except ValueError:
+            source = url
+    elif stream_type == "hls":
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            return {"ok": False, "error": "Failed to open HLS stream"}
+        ret, _ = cap.read()
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        cap.release()
+        if not ret:
+            return {"ok": False, "error": "Connected but failed to read frame"}
+        return {"ok": True, "width": w, "height": h, "fps": round(fps, 1)}
+    else:
+        source = url
+
+    cap = cv2.VideoCapture(source)
+    if not cap.isOpened():
+        return {"ok": False, "error": "Failed to open stream. Check URL and credentials."}
+    ret, _ = cap.read()
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0
+    cap.release()
+    if not ret:
+        return {"ok": False, "error": "Connected but failed to read frame"}
+    return {"ok": True, "width": w, "height": h, "fps": round(fps, 1)}
+
+
+@router.post("/test-connection")
+async def test_camera_connection(
+    body: TestConnectionRequest,
+    _current_user: User = Depends(get_current_user),
+):
+    """Test camera connectivity before creating. Returns resolution and FPS on success."""
+    from services.ingestion.stream import build_auth_url
+
+    # Build authed URL
+    if body.stream_type == "http_snapshot":
+        # Snapshot streams use httpx, not OpenCV
+        import httpx
+        headers = {}
+        auth = None
+        if body.auth_token:
+            headers["Authorization"] = f"Bearer {body.auth_token}"
+        elif body.username:
+            auth = httpx.BasicAuth(body.username, body.password or "")
+        try:
+            async with httpx.AsyncClient(timeout=10, auth=auth, headers=headers) as client:
+                resp = await client.get(body.stream_url)
+                resp.raise_for_status()
+                img_array = np.frombuffer(resp.content, dtype=np.uint8)
+                frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                if frame is None:
+                    return {"ok": False, "error": "Got response but could not decode as image"}
+                h, w = frame.shape[:2]
+                return {"ok": True, "width": w, "height": h, "fps": round(1.0 / 2.0, 1)}
+        except httpx.TimeoutException:
+            return {"ok": False, "error": "Connection timed out after 10 seconds"}
+        except httpx.HTTPStatusError as exc:
+            return {"ok": False, "error": f"HTTP {exc.response.status_code}"}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    url = build_auth_url(body.stream_url, body.username, body.password)
+    if body.auth_token and body.stream_type in ("http_mjpeg", "hls"):
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}token={body.auth_token}"
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(_device_probe_pool, _test_stream_connection, url, body.stream_type),
+            timeout=15.0,
+        )
+        return result
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "Connection timed out after 15 seconds"}
 
 
 # ---------------------------------------------------------------------------
@@ -367,15 +485,25 @@ async def ptz_goto(
     return {"status": "moving_to_preset"}
 
 
-@router.get("/{camera_id}", response_model=CameraResponse)
+@router.get("/{camera_id}")
 async def get_camera(camera_id: uuid.UUID, _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     camera = await db.get(Camera, camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
-    return camera
+    # Include latest status reason from status log
+    latest_log = await db.execute(
+        select(CameraStatusLog)
+        .where(CameraStatusLog.camera_id == camera_id)
+        .order_by(CameraStatusLog.timestamp.desc())
+        .limit(1)
+    )
+    log_entry = latest_log.scalar_one_or_none()
+    resp = _camera_to_response(camera)
+    resp["status_reason"] = log_entry.reason if log_entry else None
+    return resp
 
 
-@router.patch("/{camera_id}", response_model=CameraResponse)
+@router.patch("/{camera_id}")
 async def update_camera(
     camera_id: uuid.UUID, body: CameraUpdate, _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
@@ -384,12 +512,32 @@ async def update_camera(
         raise HTTPException(status_code=404, detail="Camera not found")
 
     updates = body.model_dump(exclude_unset=True)
+
+    # Track if stream-affecting fields changed
+    stream_fields = {"stream_url", "stream_type", "username", "password", "auth_token", "snapshot_interval"}
+    stream_changed = any(
+        field in updates and getattr(camera, field) != value
+        for field, value in updates.items()
+        if field in stream_fields
+    )
+
     for field, value in updates.items():
         setattr(camera, field, value)
 
     await db.commit()
     await db.refresh(camera)
-    return camera
+
+    # Signal stream restart if connection params changed
+    if stream_changed:
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url)
+            await r.setex(f"{RESTART_KEY_PREFIX}{camera_id}", 30, "1")
+            await r.aclose()
+        except Exception:
+            pass  # best-effort signal
+
+    return _camera_to_response(camera)
 
 
 @router.delete("/{camera_id}", status_code=204)

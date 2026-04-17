@@ -179,7 +179,7 @@ function summarizeDetections(obs: Observation): string {
       parts.push(f.person_name!);
     }
     if (unnamed.length > 0) {
-      parts.push(unnamed.length === 1 ? "unknown person" : `${unnamed.length} unknown people`);
+      parts.push(unnamed.length === 1 ? "Unknown person" : `${unnamed.length} unknown people`);
     }
   }
 
@@ -1620,7 +1620,7 @@ function DashboardContent() {
                                           <div className="flex flex-wrap items-center gap-1">
                                             {srNamed.map((f, i) => <span key={`n${i}`} className="text-xs font-medium text-green-400">{f.person_name}</span>)}
                                             {srNamed.length > 0 && srUnknown.length > 0 && <span className="text-[10px] text-muted-foreground">+</span>}
-                                            {srUnknown.length > 0 && <span className="text-xs text-yellow-400">{srUnknown.length === 1 ? "unknown person" : `${srUnknown.length} unknown`}</span>}
+                                            {srUnknown.length > 0 && <span className="text-xs text-yellow-400">{srUnknown.length === 1 ? "Unknown person" : `${srUnknown.length} unknown`}</span>}
                                           </div>
                                         ) : (
                                           <p className="text-xs font-medium line-clamp-1">
@@ -1734,7 +1734,7 @@ function DashboardContent() {
                                           ))}
                                           {namedFaces.length > 0 && unknownFaces.length > 0 && <span className="text-[10px] text-muted-foreground">+</span>}
                                           {unknownFaces.length > 0 && (
-                                            <span className="text-xs text-yellow-400">{unknownFaces.length === 1 ? "unknown person" : `${unknownFaces.length} unknown`}</span>
+                                            <span className="text-xs text-yellow-400">{unknownFaces.length === 1 ? "Unknown person" : `${unknownFaces.length} unknown`}</span>
                                           )}
                                         </div>
                                       ) : (

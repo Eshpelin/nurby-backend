@@ -11,6 +11,7 @@ from shared.database import get_db
 from shared.email import send_email
 from shared.models import Camera, Observation, Recording, User
 from shared.schemas import CameraStorageStats, StorageResponse, SystemStatus
+from services.perception.vlm_queue import get_vlm_stats
 
 router = APIRouter()
 
@@ -89,6 +90,12 @@ async def get_storage_stats(_current_user: User = Depends(get_current_user), db:
         total_recording_bytes=total_bytes,
         total_observations=total_obs,
     )
+
+
+@router.get("/vlm-stats")
+async def get_vlm_queue_stats(_current_user: User = Depends(get_current_user)):
+    """Get VLM processing stats per camera. Latency, queue depth, errors."""
+    return get_vlm_stats()
 
 
 @router.get("/smtp")

@@ -20,6 +20,7 @@ from services.perception.detector import ObjectDetector
 from services.perception.faces import FaceRecognizer
 from services.perception.plates import detect_plates
 from services.perception.vlm import VLMClient, get_active_provider
+from services.perception.vlm_queue import VLMQueue, VLMJob
 from services.search.embeddings import generate_embedding, get_embedding_provider
 from services.events.engine import RuleEngine
 from sqlalchemy import select
@@ -39,6 +40,7 @@ class PerceptionPipeline:
         self._detector = ObjectDetector()
         self._face = FaceRecognizer()
         self._vlm = VLMClient()
+        self._vlm_queue = VLMQueue(self._vlm)
         self._rule_engine = RuleEngine()
         self._camera_cache: dict[str, Camera] = {}
         self._camera_cache_time: float = 0
@@ -52,6 +54,13 @@ class PerceptionPipeline:
 
     async def run(self):
         """Main loop. Consume from Redis stream and process each keyframe."""
+        # Wire WebSocket broadcast for VLM status updates
+        try:
+            from services.api.ws import broadcast
+            self._vlm_queue.set_broadcast(broadcast)
+        except ImportError:
+            logger.warning("WebSocket broadcast not available for VLM status")
+
         r = await self._get_redis()
 
         # Create consumer group if it doesn't exist
@@ -230,45 +239,7 @@ class PerceptionPipeline:
         # Step 3. Save thumbnail
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
 
-        # Step 4. Call VLM for scene description (respecting trigger, interval, and provider)
-        vlm_description = None
-        vlm_provider_name = None
-        confidence = None
-
-        # Check VLM trigger condition
-        vlm_triggered = True
-        if cam and cam.vlm_trigger == "on_object":
-            trigger_labels = cam.vlm_trigger_objects or []
-            if trigger_labels:
-                detected_labels = {d["label"] for d in detections}
-                vlm_triggered = bool(detected_labels & set(trigger_labels))
-            else:
-                # on_object mode with empty list means "any detection"
-                vlm_triggered = len(detections) > 0
-
-            if not vlm_triggered:
-                logger.debug(
-                    "VLM skipped for camera %s. No matching trigger objects in detections",
-                    camera_id,
-                )
-
-        if vlm_triggered and self._should_call_vlm(camera_id, cam):
-            import time as _time
-            provider = await self._get_provider_for_camera(cam)
-            if provider:
-                custom_prompt = cam.vlm_prompt if cam else None
-                max_tokens = cam.vlm_max_tokens if cam else 200
-                vlm_description = await self._vlm.describe(
-                    frame, detections, provider,
-                    system_prompt=custom_prompt,
-                    max_tokens=max_tokens,
-                )
-                vlm_provider_name = provider.name
-                confidence = 0.8  # placeholder until VLM returns confidence
-                self._vlm_last_call[camera_id] = _time.monotonic()
-                logger.info("VLM description for camera %s. %s", camera_id, vlm_description)
-
-        # Step 5. Store observation in database
+        # Step 4. Store observation in database (immediately, without waiting for VLM)
         person_detections = None
         if faces:
             person_detections = {
@@ -289,18 +260,44 @@ class PerceptionPipeline:
             timestamp=timestamp,
             detections=detections,
             person_detections=person_detections,
-            vlm_description=vlm_description,
-            vlm_provider=vlm_provider_name,
-            confidence=confidence,
+            vlm_description=None,  # VLM patches this async
+            vlm_provider=None,
+            confidence=None,
             thumbnail_path=thumbnail_path,
         )
 
-        # Step 6. Generate description embedding asynchronously
-        if observation_id and (vlm_description or detections):
+        # Step 5. Queue VLM call async (non-blocking)
+        vlm_triggered = True
+        if cam and cam.vlm_trigger == "on_object":
+            trigger_labels = cam.vlm_trigger_objects or []
+            if trigger_labels:
+                detected_labels = {d["label"] for d in detections}
+                vlm_triggered = bool(detected_labels & set(trigger_labels))
+            else:
+                vlm_triggered = len(detections) > 0
+
+        if vlm_triggered and self._should_call_vlm(camera_id, cam) and observation_id:
+            import time as _time
+            provider = await self._get_provider_for_camera(cam)
+            if provider:
+                self._vlm_last_call[camera_id] = _time.monotonic()
+                await self._vlm_queue.enqueue(VLMJob(
+                    camera_id=camera_id,
+                    observation_id=observation_id,
+                    frame=frame.copy(),  # copy since frame may be reused
+                    detections=detections,
+                    provider=provider,
+                    system_prompt=cam.vlm_prompt if cam else None,
+                    max_tokens=cam.vlm_max_tokens if cam else 200,
+                    timestamp=timestamp,
+                ))
+
+        # Step 6. Generate description embedding for detections (VLM embedding added later by queue)
+        if observation_id and detections:
             asyncio.ensure_future(
                 self._generate_and_store_embedding(
                     observation_id=observation_id,
-                    vlm_description=vlm_description or "",
+                    vlm_description="",
                     detections=detections,
                     person_detections=person_detections,
                 )
@@ -320,8 +317,8 @@ class PerceptionPipeline:
                 "count": len(detections),
             },
             "person_detections": person_detections,
-            "vlm_description": vlm_description,
-            "confidence": confidence,
+            "vlm_description": None,  # VLM runs async, not available at rule eval time
+            "confidence": None,
         }
         try:
             await self._rule_engine.evaluate(rule_data)
