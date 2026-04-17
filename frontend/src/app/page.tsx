@@ -145,6 +145,26 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
+function hourBucketKey(iso: string): string {
+  const d = new Date(iso);
+  d.setMinutes(0, 0, 0);
+  return d.toISOString();
+}
+
+function formatHourBucket(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const bucketDay = new Date(d); bucketDay.setHours(0, 0, 0, 0);
+  const hr = d.toLocaleTimeString([], { hour: "numeric", hour12: true });
+  let day = "";
+  if (bucketDay.getTime() === today.getTime()) day = "Today";
+  else if (bucketDay.getTime() === yesterday.getTime()) day = "Yesterday";
+  else day = d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  return `${day} \u00b7 ${hr}`;
+}
+
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "0s";
   const m = Math.floor(seconds / 60);
@@ -1061,6 +1081,9 @@ function DashboardContent() {
   // Filter modal state
   const [filterModalOpen, setFilterModalOpen] = useState(false);
 
+  // Hourly digest bucket expand state
+  const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set());
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -1170,6 +1193,12 @@ function DashboardContent() {
       if (res.ok) setDigest(await res.json());
     } catch { /* silent */ }
     finally { setDigestLoading(false); }
+  }, [digestPeriod, selectedCamera, authFetch]);
+
+  // Auto-refetch digest when period or camera changes (only if already visible)
+  useEffect(() => {
+    if (digest) fetchDigest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [digestPeriod, selectedCamera]);
 
   // Search
@@ -1261,8 +1290,58 @@ function DashboardContent() {
   }
 
   entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const grouped: Record<string, TimelineEntry[]> = {};
-  for (const e of entries) { const k = formatDate(e.timestamp); if (!grouped[k]) grouped[k] = []; grouped[k].push(e); }
+
+  // Group by hour bucket for digest-style view
+  const hourGroups: { key: string; entries: TimelineEntry[] }[] = [];
+  const hourMap: Record<string, TimelineEntry[]> = {};
+  for (const e of entries) {
+    const k = searchActive ? "search" : hourBucketKey(e.timestamp);
+    if (!hourMap[k]) { hourMap[k] = []; hourGroups.push({ key: k, entries: hourMap[k] }); }
+    hourMap[k].push(e);
+  }
+
+  // Build a lightweight digest for a bucket's entries
+  function bucketDigest(bucketEntries: TimelineEntry[]) {
+    let obsCount = 0, recCount = 0, statusCount = 0;
+    const persons = new Set<string>();
+    let unknownFaces = 0;
+    const objectCounts: Record<string, number> = {};
+    const camCounts: Record<string, number> = {};
+    let plateCount = 0;
+    for (const e of bucketEntries) {
+      camCounts[e.camera_id] = (camCounts[e.camera_id] || 0) + 1;
+      if (e.type === "recording") recCount++;
+      else if (e.type === "status") statusCount++;
+      else if (e.type === "observation" || e.type === "search_result") {
+        obsCount++;
+        const o = e.data as Observation;
+        for (const f of o.person_detections?.faces || []) {
+          if (f.person_name) persons.add(f.person_name); else unknownFaces++;
+        }
+        for (const d of o.object_detections?.objects || []) {
+          if (d.label === "license_plate") plateCount++;
+          else if (d.label !== "person") objectCounts[d.label] = (objectCounts[d.label] || 0) + 1;
+        }
+      }
+    }
+    const topObjects = Object.entries(objectCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const topCams = Object.entries(camCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([id, n]) => ({ name: cameraMap[id]?.name || "Unknown", n }));
+    const bits: string[] = [];
+    if (persons.size) bits.push(`${Array.from(persons).join(", ")} seen`);
+    if (unknownFaces) bits.push(`${unknownFaces} unknown ${unknownFaces === 1 ? "face" : "faces"}`);
+    if (topObjects.length) bits.push(topObjects.map(([l, n]) => `${n} ${l}${n > 1 ? "s" : ""}`).join(", "));
+    if (plateCount) bits.push(`${plateCount} plate${plateCount > 1 ? "s" : ""}`);
+    if (recCount) bits.push(`${recCount} recording${recCount > 1 ? "s" : ""}`);
+    return {
+      total: bucketEntries.length,
+      obsCount, recCount, statusCount,
+      summary: bits.length ? bits.join(" \u00b7 ") : `${bucketEntries.length} event${bucketEntries.length > 1 ? "s" : ""}`,
+      topCams,
+      persons: Array.from(persons),
+      unknownFaces,
+    };
+  }
 
 
   return (
@@ -1530,13 +1609,29 @@ function DashboardContent() {
             )}
           </div>
 
-          {/* Digest button */}
+          {/* Digest controls */}
           {!searchActive && (
-            <div className="flex items-center justify-end mb-3 flex-shrink-0">
+            <div className="flex items-center justify-end gap-1 mb-3 flex-shrink-0">
+              <div className="flex rounded border border-border overflow-hidden">
+                <button onClick={() => setDigestPeriod("hourly")}
+                  className={`px-2 py-1 text-[10px] ${digestPeriod === "hourly" ? "bg-accent/20 text-accent" : "text-muted-foreground hover:bg-muted"}`}>
+                  Hourly
+                </button>
+                <button onClick={() => setDigestPeriod("daily")}
+                  className={`px-2 py-1 text-[10px] border-l border-border ${digestPeriod === "daily" ? "bg-accent/20 text-accent" : "text-muted-foreground hover:bg-muted"}`}>
+                  24h
+                </button>
+              </div>
               <button onClick={fetchDigest} disabled={digestLoading}
                 className="px-2 py-1 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted disabled:opacity-50">
-                {digestLoading ? "..." : "Digest"}
+                {digestLoading ? "..." : digest ? "Refresh" : "Generate"}
               </button>
+              {digest && (
+                <button onClick={() => setDigest(null)}
+                  className="px-2 py-1 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted">
+                  Hide
+                </button>
+              )}
             </div>
           )}
 
@@ -1544,7 +1639,9 @@ function DashboardContent() {
           {digest && digest.total_observations > 0 && !searchActive && (
             <div className="rounded-md border border-border bg-card/50 p-3 mb-3 flex-shrink-0">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Activity Digest</span>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  {digestPeriod === "hourly" ? "Last Hour" : "Last 24h"} Digest{selectedCamera && cameraMap[selectedCamera] ? ` \u00b7 ${cameraMap[selectedCamera].name}` : " \u00b7 All Cameras"}
+                </span>
                 <span className="text-[10px] text-muted-foreground font-mono">{digest.period_label}</span>
               </div>
               <p className="text-xs leading-relaxed">{digest.summary}</p>
@@ -1587,11 +1684,45 @@ function DashboardContent() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-5">
-                {Object.entries(grouped).map(([date, dateEntries]) => (
-                  <div key={date}>
-                    <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 bg-background/80 backdrop-blur-sm py-1 z-10">{date}</div>
-                    <div className="space-y-1.5">
+              <div className="space-y-3">
+                {hourGroups.map(({ key: bucketKey, entries: dateEntries }) => {
+                  const d = searchActive ? null : bucketDigest(dateEntries);
+                  const isExpanded = searchActive || expandedBuckets.has(bucketKey);
+                  return (
+                  <div key={bucketKey}>
+                    {!searchActive && d && (
+                      <button
+                        onClick={() => {
+                          setExpandedBuckets((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(bucketKey)) next.delete(bucketKey); else next.add(bucketKey);
+                            return next;
+                          });
+                        }}
+                        className={`w-full text-left rounded-lg border p-3 mb-1.5 transition-colors ${isExpanded ? "border-accent/50 bg-card" : "border-border bg-card/50 hover:border-accent/40 hover:bg-card"}`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs font-semibold">{formatHourBucket(bucketKey)}</span>
+                            <span className="text-[10px] text-muted-foreground">{d.total} event{d.total > 1 ? "s" : ""}</span>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">{isExpanded ? "\u25BC hide" : "\u25B6 show"}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{d.summary}</p>
+                        {d.topCams.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                            {d.topCams.map((c, i) => (
+                              <span key={i} className="px-1 py-0.5 text-[9px] rounded bg-muted/50 text-muted-foreground">{c.name} ({c.n})</span>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                    )}
+                    {searchActive && (
+                      <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 bg-background/80 backdrop-blur-sm py-1 z-10">Search Results</div>
+                    )}
+                    {isExpanded && (
+                    <div className="space-y-1.5 pl-2 border-l border-border/50">
                       {dateEntries.map((entry) => {
                         const cam = cameraMap[entry.camera_id];
                         const isActive = activeEntry === entry.id;
@@ -1659,13 +1790,45 @@ function DashboardContent() {
                         if (entry.type === "status") {
                           const log = entry.data as StatusLog;
                           const isOnline = log.status === "live" || log.status === "recording";
-                          return (
-                            <div key={entry.id} className="px-3 py-2 rounded-lg border border-border/50 flex items-center justify-between">
+                          // Match recording status log to nearest Recording (same cam, within 30s)
+                          let matchedRec: Recording | null = null;
+                          if (log.status === "recording") {
+                            const logTs = new Date(log.timestamp).getTime();
+                            let best = Infinity;
+                            for (const r of recordings) {
+                              if (r.camera_id !== log.camera_id) continue;
+                              const d = Math.abs(new Date(r.started_at).getTime() - logTs);
+                              if (d < best && d <= 30000) { best = d; matchedRec = r; }
+                            }
+                          }
+                          const row = (
+                            <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <div className={`w-1.5 h-1.5 rounded-full ${statusColor(log.status)}`} />
                                 <span className="text-xs"><span className="font-medium">{cam?.name || "Unknown"}</span><span className="mx-1 text-muted-foreground">{log.status === "recording" ? "started" : log.status === "offline" ? "went" : "is"}</span><span className={isOnline ? "text-green-400" : "text-muted-foreground"}>{log.status === "recording" ? "recording" : statusLabel(log.status).toLowerCase()}</span></span>
                               </div>
                               <span className="text-[10px] text-muted-foreground font-mono">{formatTime(log.timestamp)}</span>
+                            </div>
+                          );
+                          if (!matchedRec) {
+                            return (
+                              <div key={entry.id} className="px-3 py-2 rounded-lg border border-border/50">
+                                {row}
+                              </div>
+                            );
+                          }
+                          const rec = matchedRec;
+                          return (
+                            <div key={entry.id}>
+                              <button onClick={() => setActiveEntry(isActive ? null : entry.id)}
+                                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${isActive ? "border-accent bg-card" : "border-border/50 hover:border-accent/50 hover:bg-card/50"}`}>
+                                {row}
+                              </button>
+                              {isActive && (
+                                <div className="mt-1.5 rounded-lg overflow-hidden border border-border bg-black">
+                                  <video controls autoPlay className="w-full aspect-video" src={`/api/recordings/${rec.id}/stream`} />
+                                </div>
+                              )}
                             </div>
                           );
                         }
@@ -1771,8 +1934,10 @@ function DashboardContent() {
                         );
                       })}
                     </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
