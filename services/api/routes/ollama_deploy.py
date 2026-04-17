@@ -26,6 +26,28 @@ router = APIRouter()
 
 OLLAMA_URL = "http://localhost:11434"
 
+# Fallback install paths for macOS/Linux when Ollama is installed but not on PATH.
+# Common case. user installed Ollama.app on macOS but never launched it to create
+# the /usr/local/bin symlink.
+_OLLAMA_FALLBACK_PATHS = [
+    "/Applications/Ollama.app/Contents/Resources/ollama",
+    "/usr/local/bin/ollama",
+    "/opt/homebrew/bin/ollama",
+    "/usr/bin/ollama",
+]
+
+
+def _find_ollama_binary() -> str | None:
+    """Locate the ollama binary. Checks PATH first, then common install paths."""
+    on_path = shutil.which("ollama")
+    if on_path:
+        return on_path
+    import os
+    for path in _OLLAMA_FALLBACK_PATHS:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
 # Curated list of vision-capable models with RAM requirements.
 # Ollama has no public catalog API, so we maintain this list.
 # Sorted by quality descending within each family.
@@ -125,7 +147,8 @@ async def _get_installed_models() -> list[str]:
 @router.get("/status", response_model=OllamaStatus)
 async def get_ollama_status(_current_user: User = Depends(require_admin)):
     """Check Ollama installation status and recommend a model."""
-    installed = shutil.which("ollama") is not None
+    ollama_path = _find_ollama_binary()
+    installed = ollama_path is not None
     running = await _is_ollama_running()
     models = await _get_installed_models() if running else []
     ram_gb = _get_system_ram_gb()
@@ -159,17 +182,18 @@ async def deploy_model(
         return DeployStatus(stage="error", message="Invalid model name")
 
     # Step 1. Check if Ollama is installed
-    if not shutil.which("ollama"):
+    ollama_path = _find_ollama_binary()
+    if not ollama_path:
         return DeployStatus(
             stage="error",
-            message="Ollama is not installed. Install it from https://ollama.com/download then try again.",
+            message="Ollama not found. Install from https://ollama.com/download. If already installed via Ollama.app, launch it once to finish setup.",
         )
 
     # Step 2. Start Ollama if not running
     if not await _is_ollama_running():
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ollama", "serve",
+                ollama_path, "serve",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -189,7 +213,7 @@ async def deploy_model(
         # Pull the model
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ollama", "pull", model_name,
+                ollama_path, "pull", model_name,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
