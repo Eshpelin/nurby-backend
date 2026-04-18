@@ -30,7 +30,15 @@ from datetime import datetime, timezone
 from shared.database import async_session
 from shared.models import Event, Rule
 from services.events.actions import execute_action
+from services.perception.spatial_events import (
+    _point_in_polygon,
+    _segments_cross,
+    _cross_direction,
+)
 from sqlalchemy import select
+
+def _centroid(b):
+    return ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
 
 logger = logging.getLogger("nurby.events.engine")
 
@@ -41,6 +49,8 @@ class RuleEngine:
         self._last_load = 0.0
         self._cooldowns: dict[uuid.UUID, float] = {}
         self._cache_ttl = 30  # reload rules every 30s
+        # Per-(rule_id, track_id) entry timestamp for inline-geometry loiter rules.
+        self._loiter_entry: dict[tuple[uuid.UUID, int], float] = {}
 
     async def evaluate(self, observation_data: dict):
         """Evaluate an observation against all active rules."""
@@ -57,7 +67,7 @@ class RuleEngine:
                 continue
 
             # Match trigger
-            if not self._match_trigger(rule.trigger_pattern, observation_data):
+            if not self._match_trigger(rule.trigger_pattern, observation_data, rule.id):
                 continue
 
             # Check conditions
@@ -100,8 +110,7 @@ class RuleEngine:
         except Exception:
             logger.exception("Failed to load rules")
 
-    @staticmethod
-    def _match_trigger(pattern: dict, data: dict) -> bool:
+    def _match_trigger(self, pattern: dict, data: dict, rule_id: uuid.UUID | None = None) -> bool:
         """Check if observation data matches trigger pattern."""
         trigger_type = pattern.get("type")
 
@@ -150,11 +159,42 @@ class RuleEngine:
             return float(ev.get("score", 0)) >= float(min_score)
 
         elif trigger_type == "loitering":
+            # Inline geometry mode. trigger carries its own polygon.
+            pts = pattern.get("points")
+            if pts and len(pts) >= 3:
+                pcam = pattern.get("camera_id")
+                if pcam and pcam != data.get("camera_id"):
+                    return False
+                threshold = float(pattern.get("threshold_seconds", 30))
+                want_label = pattern.get("label")
+                tracks = data.get("tracks") or []
+                now = time.monotonic()
+                fired = False
+                for tr in tracks:
+                    if want_label and tr.get("label") != want_label:
+                        continue
+                    tid = tr.get("track_id")
+                    if tid is None:
+                        continue
+                    inside = _point_in_polygon(_centroid(tr["bbox"]), pts)
+                    key = (rule_id, tid)
+                    entry = self._loiter_entry.get(key)
+                    if inside:
+                        if entry is None:
+                            self._loiter_entry[key] = now
+                        elif now - entry >= threshold:
+                            fired = True
+                            self._loiter_entry[key] = now  # re-arm
+                    else:
+                        self._loiter_entry.pop(key, None)
+                return fired
+
+            # Legacy zone_name mode. relies on pipeline-precomputed events.
             events = data.get("loitering_events") or []
             if not events:
                 return False
             want_zone = pattern.get("zone_name")
-            want_label = pattern.get("label")  # e.g. "person"
+            want_label = pattern.get("label")
             for ev in events:
                 if want_zone and ev.get("zone_name") != want_zone:
                     continue
@@ -164,6 +204,33 @@ class RuleEngine:
             return False
 
         elif trigger_type == "line_cross":
+            # Inline geometry mode. trigger carries the line segment.
+            pts = pattern.get("points")
+            if pts and len(pts) == 2:
+                pcam = pattern.get("camera_id")
+                if pcam and pcam != data.get("camera_id"):
+                    return False
+                want_dir = pattern.get("direction", "any")
+                want_label = pattern.get("label")
+                a, b = pts[0], pts[1]
+                tracks = data.get("tracks") or []
+                for tr in tracks:
+                    if want_label and tr.get("label") != want_label:
+                        continue
+                    prev = tr.get("prev_bbox")
+                    if not prev:
+                        continue
+                    prev_c = _centroid(prev)
+                    cur_c = _centroid(tr["bbox"])
+                    if not _segments_cross(prev_c, cur_c, a, b):
+                        continue
+                    direction = _cross_direction(prev_c, cur_c, a, b)
+                    if want_dir != "any" and direction != want_dir:
+                        continue
+                    return True
+                return False
+
+            # Legacy zone_name mode.
             events = data.get("line_cross_events") or []
             if not events:
                 return False
