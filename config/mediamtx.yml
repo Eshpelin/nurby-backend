@@ -19,7 +19,7 @@ authInternalUsers:
 
 rtsp: yes
 rtspAddress: ":8554"
-rtspTransports: [tcp, udp]
+rtspTransports: [ tcp, udp ]
 
 webrtc: yes
 webrtcAddress: ":8889"

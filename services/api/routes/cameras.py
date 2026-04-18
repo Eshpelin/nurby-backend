@@ -23,7 +23,7 @@ from shared.auth import get_current_user, require_admin
 from shared.config import settings
 from shared.database import get_db
 from shared.models import Camera, CameraStatusLog, User
-from shared.schemas import CameraCreate, CameraResponse, CameraStatusLogResponse, CameraUpdate
+from shared.schemas import CameraCreate, CameraStatusLogResponse, CameraUpdate
 
 # Redis key prefix for signaling stream restart to manager
 RESTART_KEY_PREFIX = "nurby:stream_restart:"
@@ -38,6 +38,7 @@ def _camera_to_response(camera: Camera) -> dict:
     data.pop("password", None)
     data.pop("auth_token", None)
     return data
+
 
 router = APIRouter()
 
@@ -93,7 +94,9 @@ def _probe_device(index: int, path: str) -> DiscoveredDevice | None:
             cap.release()
 
 
-async def _probe_with_timeout(index: int, path: str, timeout: float = 2.0) -> DiscoveredDevice | None:
+async def _probe_with_timeout(
+    index: int, path: str, timeout: float = 2.0
+) -> DiscoveredDevice | None:
     """Run the blocking probe in a thread pool with a timeout."""
     loop = asyncio.get_running_loop()
     try:
@@ -161,7 +164,8 @@ class DiscoveredOnvifDevice(BaseModel):
 @router.get("/discover", response_model=list[DiscoveredOnvifDevice])
 async def discover_onvif(
     timeout: int = Query(default=5, ge=1, le=15),
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Scan the local network for ONVIF-compatible IP cameras.
 
@@ -227,7 +231,8 @@ async def discover_onvif(
 async def list_status_logs(
     camera_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=100, le=500),
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Fetch camera online/offline status change history."""
     query = select(CameraStatusLog).order_by(CameraStatusLog.timestamp.desc()).limit(limit)
@@ -238,13 +243,19 @@ async def list_status_logs(
 
 
 @router.get("")
-async def list_cameras(_current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_cameras(
+    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
     result = await db.execute(select(Camera).order_by(Camera.created_at))
     return [_camera_to_response(c) for c in result.scalars().all()]
 
 
 @router.post("", status_code=201)
-async def create_camera(body: CameraCreate, _current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+async def create_camera(
+    body: CameraCreate,
+    _current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
     camera = Camera(**body.model_dump())
     db.add(camera)
     await db.commit()
@@ -314,6 +325,7 @@ async def test_camera_connection(
     if body.stream_type == "http_snapshot":
         # Snapshot streams use httpx, not OpenCV
         import httpx
+
         headers = {}
         auth = None
         if body.auth_token:
@@ -345,7 +357,9 @@ async def test_camera_connection(
     loop = asyncio.get_running_loop()
     try:
         result = await asyncio.wait_for(
-            loop.run_in_executor(_device_probe_pool, _test_stream_connection, url, body.stream_type),
+            loop.run_in_executor(
+                _device_probe_pool, _test_stream_connection, url, body.stream_type
+            ),
             timeout=15.0,
         )
         return result
@@ -381,9 +395,7 @@ def _extract_ip_port(stream_url: str) -> tuple[str, int]:
     return ip, port
 
 
-async def _get_camera_for_ptz(
-    camera_id: uuid.UUID, db: AsyncSession
-) -> Camera:
+async def _get_camera_for_ptz(camera_id: uuid.UUID, db: AsyncSession) -> Camera:
     """Load a camera by ID and verify it supports PTZ (RTSP only)."""
     camera = await db.get(Camera, camera_id)
     if not camera:
@@ -397,7 +409,8 @@ async def _get_camera_for_ptz(
 async def ptz_move(
     camera_id: uuid.UUID,
     body: PTZMoveRequest,
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Start continuous PTZ movement on a camera."""
     camera = await _get_camera_for_ptz(camera_id, db)
@@ -422,7 +435,8 @@ async def ptz_move(
 @router.post("/{camera_id}/ptz/stop")
 async def ptz_stop_movement(
     camera_id: uuid.UUID,
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Stop all PTZ movement on a camera."""
     camera = await _get_camera_for_ptz(camera_id, db)
@@ -444,7 +458,8 @@ async def ptz_stop_movement(
 @router.get("/{camera_id}/ptz/presets", response_model=list[PTZPresetResponse])
 async def ptz_list_presets(
     camera_id: uuid.UUID,
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """List saved PTZ presets for a camera."""
     camera = await _get_camera_for_ptz(camera_id, db)
@@ -465,7 +480,8 @@ async def ptz_list_presets(
 async def ptz_goto(
     camera_id: uuid.UUID,
     body: PTZGotoRequest,
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Move the camera to a saved preset position."""
     camera = await _get_camera_for_ptz(camera_id, db)
@@ -486,7 +502,11 @@ async def ptz_goto(
 
 
 @router.get("/{camera_id}")
-async def get_camera(camera_id: uuid.UUID, _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_camera(
+    camera_id: uuid.UUID,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     camera = await db.get(Camera, camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
@@ -505,7 +525,10 @@ async def get_camera(camera_id: uuid.UUID, _current_user: User = Depends(get_cur
 
 @router.patch("/{camera_id}")
 async def update_camera(
-    camera_id: uuid.UUID, body: CameraUpdate, _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    camera_id: uuid.UUID,
+    body: CameraUpdate,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     camera = await db.get(Camera, camera_id)
     if not camera:
@@ -514,7 +537,14 @@ async def update_camera(
     updates = body.model_dump(exclude_unset=True)
 
     # Track if stream-affecting fields changed
-    stream_fields = {"stream_url", "stream_type", "username", "password", "auth_token", "snapshot_interval"}
+    stream_fields = {
+        "stream_url",
+        "stream_type",
+        "username",
+        "password",
+        "auth_token",
+        "snapshot_interval",
+    }
     stream_changed = any(
         field in updates and getattr(camera, field) != value
         for field, value in updates.items()
@@ -531,6 +561,7 @@ async def update_camera(
     if stream_changed:
         try:
             import redis.asyncio as aioredis
+
             r = aioredis.from_url(settings.redis_url)
             await r.setex(f"{RESTART_KEY_PREFIX}{camera_id}", 30, "1")
             await r.aclose()
@@ -541,7 +572,11 @@ async def update_camera(
 
 
 @router.delete("/{camera_id}", status_code=204)
-async def delete_camera(camera_id: uuid.UUID, _current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+async def delete_camera(
+    camera_id: uuid.UUID,
+    _current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
     camera = await db.get(Camera, camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")

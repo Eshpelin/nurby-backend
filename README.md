@@ -39,6 +39,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 ## Features
 
 ### Camera Management
+
 - Multi-protocol camera support (RTSP, HTTP MJPEG, HTTP snapshot, HLS, USB, file)
 - ONVIF auto-discovery with network scanning
 - USB and local device probing
@@ -46,6 +47,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Camera status logging and health monitoring
 
 ### Live Dashboard
+
 - Real-time camera grid with configurable layouts (single, 2x2, 3x3)
 - Activity timeline with recordings, AI observations, and status events
 - Time range filtering (today, 7 days, 30 days)
@@ -53,6 +55,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Camera-specific activity feeds with auto-refresh
 
 ### AI Perception Pipeline
+
 - YOLO object detection with multi-model support and consensus modes
 - Face detection and recognition with 128-dim embeddings (pgvector)
 - VLM integration for scene descriptions (OpenAI, Anthropic, Google Gemini, Ollama)
@@ -62,6 +65,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Description embedding generation for vector search
 
 ### People Management
+
 - Named person profiles with relationship tags (Family, Neighbor, Delivery, etc.)
 - Face photo upload and embedding generation
 - Activity feed with per-person observation timeline
@@ -70,12 +74,14 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Consent tracking per person
 
 ### PTZ Camera Control
+
 - ONVIF SOAP-based pan/tilt/zoom via directional pad UI
 - Adjustable speed control
 - Preset positions with save and goto
 - Per-camera PTZ panel on config page
 
 ### Smart Recording
+
 - Recording modes per camera (always, motion-triggered, object-triggered)
 - Configurable pre/post clip buffers
 - Dedicated recordings browser with camera and date filters
@@ -83,6 +89,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Per-camera retention policies (time-based or size-based)
 
 ### Rules Engine
+
 - Trigger/condition/action rule builder
 - Object detection and person recognition triggers
 - Cooldown periods to prevent alert spam
@@ -91,6 +98,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Rule event history
 
 ### Notification Center
+
 - Persistent in-app notifications stored in Postgres
 - Bell icon with unread count badge in navbar
 - Mark individual or all notifications as read
@@ -98,6 +106,7 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Linked to rules, cameras, and observations
 
 ### Search and QA
+
 - Three-strategy search. keyword label matching, vector similarity (pgvector cosine distance), broad regex fallback
 - Synonym expansion for common terms (bike to bicycle, car to vehicle, dog to puppy, etc.)
 - PostgreSQL word boundary regex to prevent substring false positives
@@ -107,18 +116,21 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Rotating search hint placeholders (30 example queries)
 
 ### Digest Scheduling
+
 - Background scheduler checks cameras every 60 seconds
 - Configurable digest periods per camera (1h, 6h, 12h, 24h, 48h, 7d)
 - Auto-generates observation summaries with person sightings and object counts
 - Digest entries stored in DB and accessible via API
 
 ### Storage Dashboard
+
 - Per-camera disk usage visualization
 - Recording count and byte totals
 - Retention policy display per camera
 - System-wide storage overview
 
 ### Authentication and Access Control
+
 - JWT-based authentication with bcrypt password hashing
 - Admin setup flow for first-time installation
 - Invite key system for user registration with role assignment and camera access grants
@@ -127,12 +139,14 @@ Nurby uses a three-layer architecture with six services running in a single Dock
 - Login/setup pages with navbar hidden on public routes
 
 ### Theme Support
+
 - Dark and light mode toggle
 - System preference detection
 - Theme persistence via localStorage
 - Inline init script to prevent flash of wrong theme
 
 ### VLM Provider Support
+
 - OpenAI (GPT-4o, GPT-4o-mini, text-embedding-3-small)
 - Anthropic (Claude Sonnet, Claude Haiku)
 - Google Gemini (Gemini 2.0 Flash, Gemini Pro)
@@ -200,13 +214,13 @@ docker compose up --build
 
 The services will be available at these addresses.
 
-| Service   | URL                    |
-|-----------|------------------------|
-| Frontend  | http://localhost:3000   |
-| API       | http://localhost:8000   |
-| API docs  | http://localhost:8000/docs |
-| WebRTC    | http://localhost:8889   |
-| RTSP      | rtsp://localhost:8554   |
+| Service  | URL                        |
+| -------- | -------------------------- |
+| Frontend | http://localhost:3000      |
+| API      | http://localhost:8000      |
+| API docs | http://localhost:8000/docs |
+| WebRTC   | http://localhost:8889      |
+| RTSP     | rtsp://localhost:8554      |
 
 ### Local development
 
@@ -254,41 +268,41 @@ alembic revision --autogenerate -m "description"
 
 All endpoints except `/api/auth/*` require a valid JWT in the Authorization header.
 
-| Endpoint                          | Methods         | Auth     | Description                    |
-|-----------------------------------|-----------------|----------|--------------------------------|
-| `/api/auth/setup`                 | POST            | Public   | Create first admin account     |
-| `/api/auth/login`                 | POST            | Public   | Get JWT token                  |
-| `/api/auth/register`              | POST            | Public   | Register with invite key       |
-| `/api/auth/me`                    | GET             | User     | Current user profile           |
-| `/api/status`                     | GET             | User     | System health and camera counts|
-| `/api/cameras`                    | GET, POST       | User/Admin | List and add cameras        |
-| `/api/cameras/{id}`               | GET, PATCH, DEL | User/Admin | Manage individual cameras   |
-| `/api/cameras/{id}/ptz/*`         | POST            | User     | PTZ move, stop, presets, goto  |
-| `/api/cameras/discover`           | GET             | User     | ONVIF network scan             |
-| `/api/cameras/devices`            | GET             | User     | USB device probe               |
-| `/api/recordings`                 | GET             | User     | Browse recorded segments       |
-| `/api/observations`               | GET             | User     | Browse AI observations         |
-| `/api/persons`                    | GET, POST       | User     | People management              |
-| `/api/persons/activity/summary`   | GET             | User     | All persons with sighting counts|
-| `/api/persons/activity/{id}`      | GET             | User     | Person observation timeline    |
-| `/api/rules`                      | GET, POST       | User     | List and create rules          |
-| `/api/rules/{id}`                 | GET, PATCH, DEL | User/Admin | Manage individual rules     |
-| `/api/events`                     | GET             | User     | Browse fired events            |
-| `/api/events/{id}/acknowledge`    | POST            | User     | Acknowledge an alert           |
-| `/api/notifications`              | GET             | User     | List notifications             |
-| `/api/notifications/count`        | GET             | User     | Unread notification count      |
-| `/api/notifications/read-all`     | POST            | User     | Mark all as read               |
-| `/api/providers`                  | GET, POST       | User/Admin | Manage VLM providers        |
-| `/api/providers/{id}/test`        | POST            | User     | Test provider connectivity     |
-| `/api/search`                     | GET             | User     | Search observations            |
-| `/api/search/ask`                 | POST            | User     | Natural language QA via RAG    |
-| `/api/search/digest`              | GET             | User     | Generate on-demand digest      |
-| `/api/search/backfill`            | POST            | Admin    | Backfill vector embeddings     |
-| `/api/digests`                    | GET             | User     | List digest entries            |
-| `/api/invites`                    | GET, POST, DEL  | Admin    | Manage invite keys             |
-| `/api/users`                      | GET, PATCH      | Admin    | User management                |
-| `/api/storage`                    | GET             | User     | Storage stats per camera       |
-| `WS /ws`                         |                 | User     | Real-time event stream         |
+| Endpoint                        | Methods         | Auth       | Description                      |
+| ------------------------------- | --------------- | ---------- | -------------------------------- |
+| `/api/auth/setup`               | POST            | Public     | Create first admin account       |
+| `/api/auth/login`               | POST            | Public     | Get JWT token                    |
+| `/api/auth/register`            | POST            | Public     | Register with invite key         |
+| `/api/auth/me`                  | GET             | User       | Current user profile             |
+| `/api/status`                   | GET             | User       | System health and camera counts  |
+| `/api/cameras`                  | GET, POST       | User/Admin | List and add cameras             |
+| `/api/cameras/{id}`             | GET, PATCH, DEL | User/Admin | Manage individual cameras        |
+| `/api/cameras/{id}/ptz/*`       | POST            | User       | PTZ move, stop, presets, goto    |
+| `/api/cameras/discover`         | GET             | User       | ONVIF network scan               |
+| `/api/cameras/devices`          | GET             | User       | USB device probe                 |
+| `/api/recordings`               | GET             | User       | Browse recorded segments         |
+| `/api/observations`             | GET             | User       | Browse AI observations           |
+| `/api/persons`                  | GET, POST       | User       | People management                |
+| `/api/persons/activity/summary` | GET             | User       | All persons with sighting counts |
+| `/api/persons/activity/{id}`    | GET             | User       | Person observation timeline      |
+| `/api/rules`                    | GET, POST       | User       | List and create rules            |
+| `/api/rules/{id}`               | GET, PATCH, DEL | User/Admin | Manage individual rules          |
+| `/api/events`                   | GET             | User       | Browse fired events              |
+| `/api/events/{id}/acknowledge`  | POST            | User       | Acknowledge an alert             |
+| `/api/notifications`            | GET             | User       | List notifications               |
+| `/api/notifications/count`      | GET             | User       | Unread notification count        |
+| `/api/notifications/read-all`   | POST            | User       | Mark all as read                 |
+| `/api/providers`                | GET, POST       | User/Admin | Manage VLM providers             |
+| `/api/providers/{id}/test`      | POST            | User       | Test provider connectivity       |
+| `/api/search`                   | GET             | User       | Search observations              |
+| `/api/search/ask`               | POST            | User       | Natural language QA via RAG      |
+| `/api/search/digest`            | GET             | User       | Generate on-demand digest        |
+| `/api/search/backfill`          | POST            | Admin      | Backfill vector embeddings       |
+| `/api/digests`                  | GET             | User       | List digest entries              |
+| `/api/invites`                  | GET, POST, DEL  | Admin      | Manage invite keys               |
+| `/api/users`                    | GET, PATCH      | Admin      | User management                  |
+| `/api/storage`                  | GET             | User       | Storage stats per camera         |
+| `WS /ws`                        |                 | User       | Real-time event stream           |
 
 Full interactive docs available at `/docs` when the API is running.
 

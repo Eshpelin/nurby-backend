@@ -12,10 +12,10 @@ import uuid
 import redis.asyncio as aioredis
 from sqlalchemy import select
 
+from services.ingestion.stream import StreamWorker
 from shared.config import settings
 from shared.database import async_session
 from shared.models import Camera
-from services.ingestion.stream import StreamWorker
 
 logger = logging.getLogger("nurby.ingestion.manager")
 
@@ -120,7 +120,9 @@ class CameraManager:
 
             if restart_signaled or config_changed:
                 reason = "restart signal" if restart_signaled else "config change"
-                logger.info("Restarting stream worker for camera %s (%s). %s", cam.name, cam_id, reason)
+                logger.info(
+                    "Restarting stream worker for camera %s (%s). %s", cam.name, cam_id, reason
+                )
                 self._stop_worker(cam_id)
                 self._create_worker(cam_id, cam)
 

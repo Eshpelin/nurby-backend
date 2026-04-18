@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import {
   createContext,
@@ -7,8 +7,8 @@ import {
   useEffect,
   useMemo,
   useState,
-} from "react";
-import { useRouter, usePathname } from "next/navigation";
+} from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 
 export interface User {
   id: string;
@@ -22,7 +22,7 @@ export interface User {
 
 interface TokenResponse {
   access_token: string;
-  token_type: "bearer";
+  token_type: 'bearer';
   user: User;
 }
 
@@ -32,20 +32,16 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
-  register: (
-    email: string,
-    password: string,
-    displayName: string
-  ) => Promise<void>;
+  register: (email: string, password: string, displayName: string) => Promise<void>;
   authFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const TOKEN_KEY = "nurby_token";
-const USER_KEY = "nurby_user";
+const TOKEN_KEY = 'nurby_token';
+const USER_KEY = 'nurby_user';
 
-const PUBLIC_PATHS = ["/login", "/setup"];
+const PUBLIC_PATHS = ['/login', '/setup'];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -67,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!token && !PUBLIC_PATHS.includes(pathname)) {
-      router.replace("/login");
+      router.replace('/login');
     }
   }, [loading, token, pathname, router]);
 
@@ -80,27 +76,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.detail || "Login failed");
+        throw new Error(body?.detail || 'Login failed');
       }
       const data: TokenResponse = await res.json();
       saveAuth(data);
-      router.replace("/");
+      router.replace('/');
     },
     [saveAuth, router]
   );
 
   const register = useCallback(
     async (email: string, password: string, displayName: string) => {
-      const res = await fetch("/api/auth/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
           password,
@@ -109,11 +105,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.detail || "Setup failed");
+        throw new Error(body?.detail || 'Setup failed');
       }
       const data: TokenResponse = await res.json();
       saveAuth(data);
-      router.replace("/");
+      router.replace('/');
     },
     [saveAuth, router]
   );
@@ -123,14 +119,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    router.replace("/login");
+    router.replace('/login');
   }, [router]);
 
   const authFetch = useCallback(
     async (url: string, init?: RequestInit): Promise<Response> => {
       const headers = new Headers(init?.headers);
       if (token) {
-        headers.set("Authorization", `Bearer ${token}`);
+        headers.set('Authorization', `Bearer ${token}`);
       }
       return fetch(url, { ...init, headers });
     },
@@ -148,7 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return ctx;
 }

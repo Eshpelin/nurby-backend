@@ -1,16 +1,31 @@
 import asyncio
 import time
-
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from fastapi.responses import JSONResponse
 
-from shared.config import settings
-from services.api.routes import auth, cameras, digests, events, invites, notifications, observations, ollama_deploy, persons, providers, recordings, rules, search, system, users
-from services.digest.scheduler import run_digest_loop
+from services.api.routes import (
+    auth,
+    cameras,
+    digests,
+    events,
+    invites,
+    notifications,
+    observations,
+    ollama_deploy,
+    persons,
+    providers,
+    recordings,
+    rules,
+    search,
+    system,
+    users,
+)
 from services.api.ws import router as ws_router
+from services.digest.scheduler import run_digest_loop
+from shared.config import settings
 
 START_TIME = time.time()
 
@@ -51,8 +66,10 @@ app.add_middleware(
 async def health_check():
     """Basic health check for monitoring."""
     from shared.database import async_session
+
     try:
         from sqlalchemy import text
+
         async with async_session() as db:
             await db.execute(text("SELECT 1"))
         db_ok = True
@@ -62,8 +79,13 @@ async def health_check():
     code = 200 if db_ok else 503
     return JSONResponse(
         status_code=code,
-        content={"status": status, "database": db_ok, "uptime_seconds": round(time.time() - START_TIME, 1)},
+        content={
+            "status": status,
+            "database": db_ok,
+            "uptime_seconds": round(time.time() - START_TIME, 1),
+        },
     )
+
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
