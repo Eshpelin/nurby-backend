@@ -139,6 +139,47 @@ class RuleEngine:
             min_score = pattern.get("min_score", 0.01)
             return data.get("motion_score", 0) >= min_score
 
+        elif trigger_type == "audio_event":
+            ev = data.get("audio_event") or {}
+            if not ev:
+                return False
+            want_label = pattern.get("label")  # baby_cry, scream, speech, etc
+            min_score = pattern.get("min_score", 0.3)
+            if want_label and ev.get("label") != want_label:
+                return False
+            return float(ev.get("score", 0)) >= float(min_score)
+
+        elif trigger_type == "loitering":
+            events = data.get("loitering_events") or []
+            if not events:
+                return False
+            want_zone = pattern.get("zone_name")
+            want_label = pattern.get("label")  # e.g. "person"
+            for ev in events:
+                if want_zone and ev.get("zone_name") != want_zone:
+                    continue
+                if want_label and ev.get("label") != want_label:
+                    continue
+                return True
+            return False
+
+        elif trigger_type == "line_cross":
+            events = data.get("line_cross_events") or []
+            if not events:
+                return False
+            want_zone = pattern.get("zone_name")
+            want_dir = pattern.get("direction", "any")
+            want_label = pattern.get("label")
+            for ev in events:
+                if want_zone and ev.get("zone_name") != want_zone:
+                    continue
+                if want_label and ev.get("label") != want_label:
+                    continue
+                if want_dir != "any" and ev.get("direction") != want_dir:
+                    continue
+                return True
+            return False
+
         elif trigger_type == "any":
             return True
 

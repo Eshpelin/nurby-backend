@@ -38,7 +38,21 @@ const TRIGGER_TYPES = [
   { value: "face_recognized", label: "Face recognized" },
   { value: "face_unknown", label: "Unknown face" },
   { value: "motion", label: "Motion" },
+  { value: "audio_event", label: "Audio event (cry, scream, alarm)" },
+  { value: "loitering", label: "Loitering in zone" },
+  { value: "line_cross", label: "Tripwire crossed" },
   { value: "any", label: "Any observation" },
+];
+
+const AUDIO_LABELS = [
+  { value: "baby_cry", label: "Baby cry" },
+  { value: "crying", label: "Crying / sobbing" },
+  { value: "scream", label: "Scream / shout" },
+  { value: "speech", label: "Speech" },
+  { value: "glass_break", label: "Glass break" },
+  { value: "alarm", label: "Alarm / siren" },
+  { value: "bark", label: "Dog bark" },
+  { value: "gunshot", label: "Gunshot / explosion" },
 ];
 
 const OBJECT_LABELS = [
@@ -100,6 +114,21 @@ function describeTrigger(pattern: Record<string, unknown>): string {
   if (t === "motion") {
     const ms = pattern.min_score as number | undefined;
     return ms ? `When motion score >= ${ms}` : "When motion detected";
+  }
+  if (t === "audio_event") {
+    const label = pattern.label as string | undefined;
+    const match = AUDIO_LABELS.find((a) => a.value === label);
+    return label ? `When ${match?.label || label} heard` : "When any audio event";
+  }
+  if (t === "loitering") {
+    const zone = pattern.zone_name as string | undefined;
+    return zone ? `When someone loiters in "${zone}"` : "When anyone loiters";
+  }
+  if (t === "line_cross") {
+    const zone = pattern.zone_name as string | undefined;
+    const dir = pattern.direction as string | undefined;
+    const dirText = dir && dir !== "any" ? ` (${dir})` : "";
+    return zone ? `When tripwire "${zone}" crossed${dirText}` : `When any tripwire crossed${dirText}`;
   }
   if (t === "any") return "On every observation";
   return "Unknown trigger";
@@ -218,6 +247,10 @@ export default function RulesPage() {
   const [formTriggerLabel, setFormTriggerLabel] = useState("");
   const [formTriggerPersonId, setFormTriggerPersonId] = useState("");
   const [formTriggerSensitivity, setFormTriggerSensitivity] = useState("medium");
+  const [formTriggerAudioLabel, setFormTriggerAudioLabel] = useState("baby_cry");
+  const [formTriggerAudioMinScore, setFormTriggerAudioMinScore] = useState("0.35");
+  const [formTriggerZoneName, setFormTriggerZoneName] = useState("");
+  const [formTriggerLineDirection, setFormTriggerLineDirection] = useState("any");
   const [formCondCameras, setFormCondCameras] = useState<string[]>([]);
   const [formScheduleMode, setFormScheduleMode] = useState<"always" | "custom">("always");
   const [formCondDays, setFormCondDays] = useState<string[]>([]);
@@ -300,6 +333,10 @@ export default function RulesPage() {
     setFormTriggerLabel("");
     setFormTriggerPersonId("");
     setFormTriggerSensitivity("medium");
+    setFormTriggerAudioLabel("baby_cry");
+    setFormTriggerAudioMinScore("0.35");
+    setFormTriggerZoneName("");
+    setFormTriggerLineDirection("any");
     setFormCondCameras([]);
     setFormScheduleMode("always");
     setFormCondDays([]);
@@ -342,6 +379,10 @@ export default function RulesPage() {
     setFormTriggerType((tp.type as string) || "any");
     setFormTriggerLabel((tp.label as string) || "");
     setFormTriggerPersonId((tp.person_id as string) || "");
+    setFormTriggerAudioLabel((tp.label as string) || "baby_cry");
+    setFormTriggerAudioMinScore(tp.min_score != null ? String(tp.min_score) : "0.35");
+    setFormTriggerZoneName((tp.zone_name as string) || "");
+    setFormTriggerLineDirection((tp.direction as string) || "any");
     // Map min_score back to sensitivity level
     const ms = tp.min_score as number | undefined;
     if (ms != null) {
@@ -425,6 +466,15 @@ export default function RulesPage() {
     if (formTriggerType === "object_detected" && formTriggerLabel) triggerPattern.label = formTriggerLabel;
     if (formTriggerType === "face_recognized" && formTriggerPersonId) triggerPattern.person_id = formTriggerPersonId;
     if (formTriggerType === "motion") triggerPattern.min_score = 0.08;
+    if (formTriggerType === "audio_event") {
+      triggerPattern.label = formTriggerAudioLabel;
+      triggerPattern.min_score = parseFloat(formTriggerAudioMinScore) || 0.3;
+    }
+    if (formTriggerType === "loitering" && formTriggerZoneName) triggerPattern.zone_name = formTriggerZoneName;
+    if (formTriggerType === "line_cross") {
+      if (formTriggerZoneName) triggerPattern.zone_name = formTriggerZoneName;
+      if (formTriggerLineDirection !== "any") triggerPattern.direction = formTriggerLineDirection;
+    }
 
     const action: Record<string, unknown> = { type: formActionType };
     if (formActionType === "webhook" || formActionType === "api_call") {
@@ -465,6 +515,17 @@ export default function RulesPage() {
         low: 0.2,
       };
       trigger_pattern.min_score = sensitivityMap[formTriggerSensitivity] ?? 0.08;
+    }
+    if (formTriggerType === "audio_event") {
+      trigger_pattern.label = formTriggerAudioLabel;
+      trigger_pattern.min_score = parseFloat(formTriggerAudioMinScore) || 0.3;
+    }
+    if (formTriggerType === "loitering" && formTriggerZoneName) {
+      trigger_pattern.zone_name = formTriggerZoneName;
+    }
+    if (formTriggerType === "line_cross") {
+      if (formTriggerZoneName) trigger_pattern.zone_name = formTriggerZoneName;
+      if (formTriggerLineDirection !== "any") trigger_pattern.direction = formTriggerLineDirection;
     }
 
     const conditions: Record<string, unknown> = {};
@@ -984,6 +1045,86 @@ export default function RulesPage() {
                           <div className="font-medium">{s.label}</div>
                         </button>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {formTriggerType === "audio_event" && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Sound type</label>
+                      <select
+                        value={formTriggerAudioLabel}
+                        onChange={(e) => setFormTriggerAudioLabel(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                      >
+                        {AUDIO_LABELS.map((a) => (
+                          <option key={a.value} value={a.value}>{a.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">
+                        Confidence threshold (0.1 low, 0.7 strict)
+                      </label>
+                      <input
+                        type="number" min="0.05" max="0.95" step="0.05"
+                        value={formTriggerAudioMinScore}
+                        onChange={(e) => setFormTriggerAudioMinScore(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                      />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Detection runs locally on each camera&apos;s audio track. Needs an RTSP stream that publishes audio.
+                    </p>
+                  </div>
+                )}
+
+                {formTriggerType === "loitering" && (
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground block mb-1">
+                      Zone name (configure in Cameras → Motion zones, set loiter_threshold_seconds)
+                    </label>
+                    <input
+                      type="text"
+                      value={formTriggerZoneName}
+                      onChange={(e) => setFormTriggerZoneName(e.target.value)}
+                      placeholder="e.g. crib_area"
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                    />
+                  </div>
+                )}
+
+                {formTriggerType === "line_cross" && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">
+                        Tripwire zone name (type=&quot;tripwire&quot; with 2 points)
+                      </label>
+                      <input
+                        type="text"
+                        value={formTriggerZoneName}
+                        onChange={(e) => setFormTriggerZoneName(e.target.value)}
+                        placeholder="e.g. driveway_entry"
+                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Direction</label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {["any", "in", "out"].map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setFormTriggerLineDirection(d)}
+                            className={`px-2 py-2 text-xs rounded border transition-colors capitalize ${
+                              formTriggerLineDirection === d
+                                ? "border-accent bg-accent/10 text-accent"
+                                : "border-border hover:bg-muted"
+                            }`}
+                          >{d}</button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from shared.config import settings
 from shared.database import async_session
 from shared.models import Camera
+from services.ingestion.audio_worker import AudioWorker, set_main_loop as set_audio_main_loop
 from services.ingestion.stream import StreamWorker
 
 logger = logging.getLogger("nurby.ingestion.manager")
@@ -40,8 +41,15 @@ class CameraManager:
     def __init__(self):
         self._workers: dict[uuid.UUID, StreamWorker] = {}
         self._tasks: dict[uuid.UUID, asyncio.Task] = {}
+        self._audio_workers: dict[uuid.UUID, AudioWorker] = {}
+        self._audio_tasks: dict[uuid.UUID, asyncio.Task] = {}
         self._config_hashes: dict[uuid.UUID, str] = {}
         self._redis = None
+        # Audio worker threads use run_coroutine_threadsafe. register the loop.
+        try:
+            set_audio_main_loop(asyncio.get_event_loop())
+        except RuntimeError:
+            pass
 
     async def _get_redis(self):
         if self._redis is None:
@@ -77,6 +85,14 @@ class CameraManager:
         self._tasks[cam_id] = asyncio.create_task(worker.run())
         self._config_hashes[cam_id] = _stream_config_hash(cam)
 
+        # Audio listener. Only RTSP/HLS streams are likely to carry audio.
+        if cam.stream_type in ("rtsp", "hls") and cam.stream_url:
+            from services.ingestion.stream import build_auth_url
+            authed = build_auth_url(cam.stream_url, cam.username, cam.password)
+            aw = AudioWorker(cam_id, authed)
+            self._audio_workers[cam_id] = aw
+            self._audio_tasks[cam_id] = asyncio.create_task(aw.run())
+
     def _stop_worker(self, cam_id: uuid.UUID):
         """Stop and clean up a stream worker."""
         if cam_id in self._workers:
@@ -86,6 +102,12 @@ class CameraManager:
         self._workers.pop(cam_id, None)
         self._tasks.pop(cam_id, None)
         self._config_hashes.pop(cam_id, None)
+        if cam_id in self._audio_workers:
+            self._audio_workers[cam_id].stop()
+        if cam_id in self._audio_tasks:
+            self._audio_tasks[cam_id].cancel()
+        self._audio_workers.pop(cam_id, None)
+        self._audio_tasks.pop(cam_id, None)
 
     async def _check_restart_signal(self, cam_id: uuid.UUID) -> bool:
         """Check if a restart was signaled via Redis (from PATCH endpoint)."""

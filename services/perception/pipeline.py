@@ -46,6 +46,10 @@ class PerceptionPipeline:
         self._camera_cache_time: float = 0
         self._camera_cache_lock = asyncio.Lock()
         self._vlm_last_call: dict[str, float] = {}  # camera_id -> last VLM call timestamp
+        # Per-camera object trackers for loitering / line-cross.
+        from services.perception.tracker import ObjectTracker
+        self._trackers: dict[str, ObjectTracker] = {}
+        self._ObjectTracker = ObjectTracker
 
     async def _get_redis(self):
         if self._redis is None:
@@ -306,6 +310,17 @@ class PerceptionPipeline:
                 )
             )
 
+        # Step 6b. Update per-camera tracker and evaluate spatial events.
+        tracker = self._trackers.get(camera_id)
+        if tracker is None:
+            tracker = self._ObjectTracker()
+            self._trackers[camera_id] = tracker
+        tracker.update(detections)
+        from services.perception.spatial_events import evaluate as eval_spatial
+        loitering_events, line_cross_events = eval_spatial(
+            tracker, cam.motion_zones if cam else None
+        )
+
         # Step 7. Evaluate rules against this observation
         rule_data = {
             "observation_id": str(observation_id) if observation_id else None,
@@ -314,12 +329,19 @@ class PerceptionPipeline:
             "motion_score": motion_score,
             "object_detections": {
                 "objects": [
-                    {"label": d["label"], "confidence": d["confidence"], "bbox": d["bbox"]}
+                    {
+                        "label": d["label"],
+                        "confidence": d["confidence"],
+                        "bbox": d["bbox"],
+                        "tracker_id": d.get("tracker_id"),
+                    }
                     for d in detections
                 ],
                 "count": len(detections),
             },
             "person_detections": person_detections,
+            "loitering_events": loitering_events,
+            "line_cross_events": line_cross_events,
             "vlm_description": None,  # VLM runs async, not available at rule eval time
             "confidence": None,
         }

@@ -24,6 +24,8 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "aiosmtplib>=3.0.0",
     "nudenet>=3.4.0",
+    "panns_inference>=0.1.0",
+    "librosa>=0.10.0",
 ]
 
 [project.optional-dependencies]
