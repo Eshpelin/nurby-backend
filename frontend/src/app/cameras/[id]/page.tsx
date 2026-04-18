@@ -216,20 +216,49 @@ function LabelPicker({
   loading,
   onChange,
   placeholder,
+  activeModels,
+  onAddModel,
 }: {
   selected: string[];
   available: string[];
   loading: boolean;
   onChange: (labels: string[]) => void;
   placeholder?: string;
+  activeModels?: string[];
+  onAddModel?: (model: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const remaining = available.filter((l) => !selected.includes(l));
   const filtered = q ? remaining.filter((l) => l.toLowerCase().includes(q)) : remaining;
 
+  const needsModel = (activeModels?.length || 0) === 0;
+
   return (
     <div>
+      {activeModels && activeModels.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          <span className="text-[10px] text-muted-foreground self-center">Labels sourced from.</span>
+          {activeModels.map((m) => (
+            <span key={m} className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-border bg-muted/30 text-muted-foreground">
+              {m}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {needsModel && onAddModel && (
+        <div className="mb-2 rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-2.5">
+          <p className="text-[11px] text-amber-300 mb-1.5">
+            Pick a detection model first. Labels come from whichever model you choose.
+          </p>
+          <DetectionModelSelect
+            value="yolov8n.pt"
+            onChange={(v) => { if (v) onAddModel(v); }}
+          />
+        </div>
+      )}
+
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">
           {selected.map((label) => (
@@ -268,7 +297,9 @@ function LabelPicker({
           <p className="text-[11px] text-muted-foreground px-1 py-2">Loading labels from model.</p>
         ) : available.length === 0 ? (
           <p className="text-[11px] text-muted-foreground px-1 py-2">
-            No class list available for this model. Type a label and press Enter.
+            {needsModel
+              ? "Pick a model above to see its labels."
+              : "Model loaded no classes. First-run download may still be in progress, or the model is open-vocabulary. Type a label and press Enter."}
           </p>
         ) : filtered.length === 0 ? (
           <p className="text-[11px] text-muted-foreground px-1 py-2">
@@ -1268,6 +1299,14 @@ export default function CameraConfigPage() {
                 loading={modelClassesLoading}
                 onChange={setRecordingTriggerObjects}
                 placeholder="Search labels or press Enter for custom"
+                activeModels={detectionModels.map((m) => m.model)}
+                onAddModel={(model) => {
+                  if (detectionModels.some((m) => m.model === model)) return;
+                  setDetectionModels([
+                    ...detectionModels,
+                    { model, confidence: 0.35, enabled: true, label_filter: [] },
+                  ]);
+                }}
               />
               {recordingTriggerObjects.length === 0 && (
                 <p className="text-[11px] text-muted-foreground mt-1.5">
@@ -1464,6 +1503,14 @@ export default function CameraConfigPage() {
                 loading={modelClassesLoading}
                 onChange={setVlmTriggerObjects}
                 placeholder="Search labels or press Enter for custom"
+                activeModels={detectionModels.map((m) => m.model)}
+                onAddModel={(model) => {
+                  if (detectionModels.some((m) => m.model === model)) return;
+                  setDetectionModels([
+                    ...detectionModels,
+                    { model, confidence: 0.35, enabled: true, label_filter: [] },
+                  ]);
+                }}
               />
               {vlmTriggerObjects.length === 0 && (
                 <p className="text-[11px] text-muted-foreground mt-1.5">

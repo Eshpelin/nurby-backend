@@ -4,6 +4,7 @@ show a dynamic label picker tied to whichever model the camera uses.
 Loaded models are cached via the shared ObjectDetector cache, so
 asking for class names does not re-download weights."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -43,7 +44,7 @@ def _load_names(model_name: str) -> list[str]:
 
 
 @router.get("/classes")
-def get_classes(
+async def get_classes(
     model: list[str] = Query(default_factory=list),
     _current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -57,8 +58,10 @@ def get_classes(
 
     per_model: dict[str, list[str]] = {}
     union: set[str] = set()
+    loop = asyncio.get_event_loop()
     for m in model:
-        names = _load_names(m)
+        # Run in thread pool so first-run model downloads do not block the loop.
+        names = await loop.run_in_executor(None, _load_names, m)
         per_model[m] = names
         union.update(names)
 
