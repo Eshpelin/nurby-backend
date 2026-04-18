@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from shared.config import settings
-from services.api.routes import auth, cameras, digests, events, invites, notifications, observations, ollama_deploy, persons, providers, recordings, rules, search, system, users
+from services.api.routes import auth, cameras, detection_models, digests, events, invites, notifications, observations, ollama_deploy, persons, providers, recordings, rules, search, system, users
 from services.digest.scheduler import run_digest_loop
 from services.api.ws import router as ws_router
 
@@ -70,6 +70,7 @@ app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(invites.router, prefix="/api/invites", tags=["invites"])
 app.include_router(system.router, prefix="/api", tags=["system"])
 app.include_router(cameras.router, prefix="/api/cameras", tags=["cameras"])
+app.include_router(detection_models.router, prefix="/api/detection-models", tags=["detection-models"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
 app.include_router(observations.router, prefix="/api/observations", tags=["observations"])
 app.include_router(persons.router, prefix="/api/persons", tags=["persons"])

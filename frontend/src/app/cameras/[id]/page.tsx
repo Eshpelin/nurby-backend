@@ -210,6 +210,95 @@ function DetectionModelSelect({
   );
 }
 
+function LabelPicker({
+  selected,
+  available,
+  loading,
+  onChange,
+  placeholder,
+}: {
+  selected: string[];
+  available: string[];
+  loading: boolean;
+  onChange: (labels: string[]) => void;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const remaining = available.filter((l) => !selected.includes(l));
+  const filtered = q ? remaining.filter((l) => l.toLowerCase().includes(q)) : remaining;
+
+  return (
+    <div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selected.map((label) => (
+            <span
+              key={label}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md border border-accent bg-accent/10 text-accent-foreground"
+            >
+              {label}
+              <button
+                type="button"
+                onClick={() => onChange(selected.filter((l) => l !== label))}
+                className="text-accent-foreground/60 hover:text-accent-foreground ml-0.5"
+              >×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={placeholder || "Search labels."}
+        className="w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background focus:outline-none focus:border-accent"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && q) {
+            e.preventDefault();
+            const exact = available.find((l) => l.toLowerCase() === q);
+            const pick = exact || q;
+            if (!selected.includes(pick)) onChange([...selected, pick]);
+            setQuery("");
+          }
+        }}
+      />
+      <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-border bg-background/40 p-1.5">
+        {loading ? (
+          <p className="text-[11px] text-muted-foreground px-1 py-2">Loading labels from model.</p>
+        ) : available.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground px-1 py-2">
+            No class list available for this model. Type a label and press Enter.
+          </p>
+        ) : filtered.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground px-1 py-2">
+            {q ? "No matches. Press Enter to add as custom." : "All labels added."}
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {filtered.slice(0, 80).map((label) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onChange([...selected, label])}
+                className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:border-accent hover:text-accent-foreground transition-colors"
+              >+ {label}</button>
+            ))}
+            {filtered.length > 80 && (
+              <span className="text-[10px] text-muted-foreground self-center px-1">
+                +{filtered.length - 80} more. keep typing to narrow.
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-1">
+        {available.length > 0 ? `${available.length} labels from selected model${available.length === 1 ? "" : "s"}.` : ""}
+      </p>
+    </div>
+  );
+}
+
 function StatusDot({ status }: { status: string }) {
   const color =
     status === "recording"
@@ -823,6 +912,8 @@ export default function CameraConfigPage() {
   const [objectConfidence, setObjectConfidence] = useState(0.35);
   const [detectionModels, setDetectionModels] = useState<{model: string; confidence: number; enabled: boolean; label_filter: string[]}[]>([]);
   const [detectionMerge, setDetectionMerge] = useState("any");
+  const [modelClasses, setModelClasses] = useState<string[]>([]);
+  const [modelClassesLoading, setModelClassesLoading] = useState(false);
   const [detectionConsensusMin, setDetectionConsensusMin] = useState(2);
   const [digestEnabled, setDigestEnabled] = useState(true);
   const [digestPeriod, setDigestPeriod] = useState("24h");
@@ -896,6 +987,30 @@ export default function CameraConfigPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Fetch class names from the selected detection models. Falls back to
+  // yolov8n.pt when the list is empty (matches backend fallback).
+  useEffect(() => {
+    const models = detectionModels.length > 0
+      ? detectionModels.map((m) => m.model).filter(Boolean)
+      : ["yolov8n.pt"];
+    const params = models.map((m) => `model=${encodeURIComponent(m)}`).join("&");
+    let cancelled = false;
+    setModelClassesLoading(true);
+    (async () => {
+      try {
+        const res = await authFetch(`/api/detection-models/classes?${params}`);
+        if (!res.ok) throw new Error("fetch failed");
+        const data = await res.json();
+        if (!cancelled) setModelClasses(Array.isArray(data.classes) ? data.classes : []);
+      } catch {
+        if (!cancelled) setModelClasses([]);
+      } finally {
+        if (!cancelled) setModelClassesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [detectionModels, authFetch]);
 
   async function handleSave() {
     setSaving(true);
@@ -1141,74 +1256,24 @@ export default function CameraConfigPage() {
                     ? "Start recording when motion is detected. Stop after motion ends."
                     : recordingMode === "on_object"
                       ? "Record only when specific objects are detected by the AI pipeline."
-                      : "Save short clips around AI observations with pre and post buffers."}
+                      : "Save bounded clips around AI observations with pre and post buffers. Best for rare, labelled triggers. Use Continuous if triggers fire constantly."}
             </p>
           </FieldRow>
 
           {recordingMode === "on_object" && (
-            <FieldRow label="Record When Detected" hint="Which objects trigger recording. Type a label and press Enter.">
-              <div>
-                {recordingTriggerObjects.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {recordingTriggerObjects.map((label) => (
-                      <span
-                        key={label}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md border border-accent bg-accent/10 text-accent-foreground"
-                      >
-                        {label}
-                        <button
-                          type="button"
-                          onClick={() => setRecordingTriggerObjects(recordingTriggerObjects.filter((l) => l !== label))}
-                          className="text-accent-foreground/60 hover:text-accent-foreground ml-0.5"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <input
-                  type="text"
-                  placeholder="Type object label and press Enter"
-                  className={`${inputClass} text-xs`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      const val = (e.target as HTMLInputElement).value.trim().toLowerCase();
-                      if (val && !recordingTriggerObjects.includes(val)) {
-                        setRecordingTriggerObjects([...recordingTriggerObjects, val]);
-                        (e.target as HTMLInputElement).value = "";
-                      }
-                    }
-                  }}
-                />
-                <details className="mt-2">
-                  <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                    Common labels
-                  </summary>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {[
-                      "person", "car", "truck", "bus", "motorcycle", "bicycle",
-                      "cat", "dog", "bird", "horse", "sheep", "cow",
-                      "backpack", "suitcase", "umbrella",
-                    ].filter((l) => !recordingTriggerObjects.includes(l)).map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setRecordingTriggerObjects([...recordingTriggerObjects, label])}
-                        className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:border-accent hover:text-accent-foreground transition-colors"
-                      >
-                        + {label}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-                {recordingTriggerObjects.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-1.5">
-                    No objects selected. Recording triggers on any detection.
-                  </p>
-                )}
-              </div>
+            <FieldRow label="Record When Detected" hint="Which objects trigger recording. Labels come from the detection model.">
+              <LabelPicker
+                selected={recordingTriggerObjects}
+                available={modelClasses}
+                loading={modelClassesLoading}
+                onChange={setRecordingTriggerObjects}
+                placeholder="Search labels or press Enter for custom"
+              />
+              {recordingTriggerObjects.length === 0 && (
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  No objects selected. Recording triggers on any detection.
+                </p>
+              )}
             </FieldRow>
           )}
 
@@ -1392,80 +1457,19 @@ export default function CameraConfigPage() {
           </FieldRow>
 
           {vlmTrigger === "on_object" && (
-            <FieldRow label="Trigger Objects" hint="Type a label and press Enter. Works with any model's classes.">
-              <div>
-                {/* Selected tags */}
-                {vlmTriggerObjects.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {vlmTriggerObjects.map((label) => (
-                      <span
-                        key={label}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md border border-accent bg-accent/10 text-accent-foreground"
-                      >
-                        {label}
-                        <button
-                          type="button"
-                          onClick={() => setVlmTriggerObjects(vlmTriggerObjects.filter((l) => l !== label))}
-                          className="text-accent-foreground/60 hover:text-accent-foreground ml-0.5"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Tag input */}
-                <input
-                  type="text"
-                  placeholder="Type object label and press Enter"
-                  className={`${inputClass} text-xs`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      const val = (e.target as HTMLInputElement).value.trim().toLowerCase();
-                      if (val && !vlmTriggerObjects.includes(val)) {
-                        setVlmTriggerObjects([...vlmTriggerObjects, val]);
-                        (e.target as HTMLInputElement).value = "";
-                      }
-                    }
-                  }}
-                />
-
-                {/* Quick-add suggestions */}
-                <details className="mt-2">
-                  <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                    Common labels
-                  </summary>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {[
-                      "person", "car", "truck", "bus", "motorcycle", "bicycle",
-                      "cat", "dog", "bird", "horse", "sheep", "cow",
-                      "backpack", "suitcase", "umbrella", "handbag",
-                      "cell phone", "laptop", "tv", "chair", "couch", "bed",
-                      "bottle", "cup", "knife", "scissors",
-                      "fire hydrant", "stop sign", "traffic light",
-                      "skateboard", "surfboard", "sports ball", "kite",
-                      "teddy bear", "clock", "book", "potted plant",
-                    ].filter((l) => !vlmTriggerObjects.includes(l)).map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setVlmTriggerObjects([...vlmTriggerObjects, label])}
-                        className="px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground hover:border-accent hover:text-accent-foreground transition-colors"
-                      >
-                        + {label}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-
-                {vlmTriggerObjects.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-1.5">
-                    No objects selected. VLM will trigger on any detection.
-                  </p>
-                )}
-              </div>
+            <FieldRow label="Trigger Objects" hint="Labels come from the detection model. Type to search or add a custom label.">
+              <LabelPicker
+                selected={vlmTriggerObjects}
+                available={modelClasses}
+                loading={modelClassesLoading}
+                onChange={setVlmTriggerObjects}
+                placeholder="Search labels or press Enter for custom"
+              />
+              {vlmTriggerObjects.length === 0 && (
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  No objects selected. VLM will trigger on any detection.
+                </p>
+              )}
             </FieldRow>
           )}
 
