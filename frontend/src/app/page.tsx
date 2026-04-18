@@ -479,6 +479,80 @@ function DetectionOverlay({ cameraId, visible, frameWidth, frameHeight }: {
   );
 }
 
+// ── Mini PTZ hover control ──
+
+function MiniPTZ({ cameraId, onClose }: { cameraId: string; onClose: () => void }) {
+  const { authFetch } = useAuth();
+  const holdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const send = useCallback(async (pan: number, tilt: number, zoom: number) => {
+    try {
+      await authFetch(`/api/cameras/${cameraId}/ptz/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pan, tilt, zoom }),
+      });
+    } catch { /* silent */ }
+  }, [authFetch, cameraId]);
+
+  const stop = useCallback(async () => {
+    try { await authFetch(`/api/cameras/${cameraId}/ptz/stop`, { method: "POST" }); } catch { /* silent */ }
+  }, [authFetch, cameraId]);
+
+  const startHold = useCallback((pan: number, tilt: number, zoom: number) => {
+    send(pan, tilt, zoom);
+    holdRef.current = setInterval(() => send(pan, tilt, zoom), 250);
+  }, [send]);
+
+  const stopHold = useCallback(() => {
+    if (holdRef.current) { clearInterval(holdRef.current); holdRef.current = null; }
+    stop();
+  }, [stop]);
+
+  useEffect(() => () => { if (holdRef.current) clearInterval(holdRef.current); }, []);
+
+  const SPD = 0.5;
+  const ZSPD = 0.5;
+  const arrowBtn =
+    "w-7 h-7 flex items-center justify-center rounded-sm bg-white/10 hover:bg-white/25 text-white/90 text-xs border border-white/10 transition-colors select-none";
+
+  const mk = (pan: number, tilt: number, zoom: number) => ({
+    onMouseDown: (e: React.MouseEvent) => { e.stopPropagation(); startHold(pan, tilt, zoom); },
+    onMouseUp: (e: React.MouseEvent) => { e.stopPropagation(); stopHold(); },
+    onMouseLeave: () => { if (holdRef.current) stopHold(); },
+    onTouchStart: (e: React.TouchEvent) => { e.stopPropagation(); startHold(pan, tilt, zoom); },
+    onTouchEnd: (e: React.TouchEvent) => { e.stopPropagation(); stopHold(); },
+  });
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="absolute bottom-10 right-1.5 z-20 rounded-md bg-black/80 backdrop-blur-sm border border-white/15 p-1.5 shadow-lg"
+    >
+      <div className="flex items-center gap-2">
+        {/* Direction pad */}
+        <div className="grid grid-cols-3 grid-rows-3 gap-0.5 w-[5.5rem]">
+          <span />
+          <button {...mk(0, SPD, 0)} className={arrowBtn}>↑</button>
+          <span />
+          <button {...mk(-SPD, 0, 0)} className={arrowBtn}>←</button>
+          <button onClick={(e) => { e.stopPropagation(); stop(); }} className={arrowBtn + " opacity-60"} title="Stop">■</button>
+          <button {...mk(SPD, 0, 0)} className={arrowBtn}>→</button>
+          <span />
+          <button {...mk(0, -SPD, 0)} className={arrowBtn}>↓</button>
+          <span />
+        </div>
+        {/* Zoom */}
+        <div className="flex flex-col gap-0.5">
+          <button {...mk(0, 0, ZSPD)} className={arrowBtn} title="Zoom in">+</button>
+          <button {...mk(0, 0, -ZSPD)} className={arrowBtn} title="Zoom out">−</button>
+          <button onClick={(e) => { e.stopPropagation(); onClose(); }} className={arrowBtn + " opacity-60"} title="Close">×</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Camera sidebar card (compact) ──
 
 type CameraLayout = "single" | "double" | "list";
@@ -497,6 +571,8 @@ function CameraSidebarCard({
   layout: CameraLayout;
 }) {
   const [overlayVisible, setOverlayVisible] = useState(true);
+  const [ptzOpen, setPtzOpen] = useState(false);
+  const ptzCapable = camera.stream_type === "rtsp";
   const streamName = extractStreamName(camera.stream_url);
   const iframeSrc = `${WEBRTC_URL}/${streamName}/`;
   const latestEvent = activityEvents[0];
@@ -593,6 +669,31 @@ function CameraSidebarCard({
               </svg>
             )}
           </button>
+        )}
+
+        {/* PTZ toggle (only shown for PTZ-capable RTSP cameras) */}
+        {ptzCapable && camera.status !== "offline" && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setPtzOpen((v) => !v); }}
+            className={`absolute top-1.5 right-[4.25rem] z-10 w-6 h-6 rounded-md backdrop-blur-sm border border-white/10 flex items-center justify-center transition-colors ${
+              ptzOpen ? "bg-accent text-black opacity-100" : "bg-black/60 text-white/70 hover:text-white hover:bg-black/80 opacity-0 group-hover:opacity-100"
+            }`}
+            title="PTZ control"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="5 9 2 12 5 15" />
+              <polyline points="9 5 12 2 15 5" />
+              <polyline points="15 19 12 22 9 19" />
+              <polyline points="19 9 22 12 19 15" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <line x1="12" y1="2" x2="12" y2="22" />
+            </svg>
+          </button>
+        )}
+
+        {/* Mini PTZ panel */}
+        {ptzCapable && ptzOpen && camera.status !== "offline" && (
+          <MiniPTZ cameraId={camera.id} onClose={() => setPtzOpen(false)} />
         )}
 
         {/* Settings gear */}
