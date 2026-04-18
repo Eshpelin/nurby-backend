@@ -32,6 +32,47 @@ interface Person {
   display_name: string;
 }
 
+interface PersonSummary {
+  person_id: string;
+  display_name: string;
+  relationship: string | null;
+  photo_path: string | null;
+  total_sightings: number;
+  sightings_1h: number;
+  sightings_24h: number;
+  last_seen_at: string | null;
+  last_seen_camera: string | null;
+  first_seen_at: string | null;
+}
+
+interface ClusterSummary {
+  cluster_id: string;
+  auto_label: string;
+  auto_label_number: number | null;
+  appearance_description: string | null;
+  appearance_description_status: string;
+  sample_thumbnail_path: string | null;
+  sighting_count: number;
+  sightings_1h: number;
+  sightings_24h: number;
+  last_seen_at: string | null;
+  last_seen_camera: string | null;
+  first_seen_at: string | null;
+}
+
+interface PersonActivityItem {
+  observation_id: string;
+  camera_id: string;
+  camera_name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  vlm_description: string | null;
+  thumbnail_path: string | null;
+  person_name: string | null;
+  match_distance: number | null;
+  object_detections: { objects?: { label: string; confidence: number }[] } | null;
+}
+
 interface Recording {
   id: string;
   camera_id: string;
@@ -773,6 +814,164 @@ function NetworkScanPanel({ onSelectDevice }: { onSelectDevice: (dev: Discovered
   );
 }
 
+function PersonActivityModal({ personId, personName, onClose, mode = "person" }: { personId: string; personName: string; onClose: () => void; mode?: "person" | "cluster" }) {
+  const { authFetch } = useAuth();
+  const [items, setItems] = useState<PersonActivityItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [cameraMap, setCameraMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const activityUrl = mode === "cluster"
+          ? `/api/persons/clusters/activity/${personId}?limit=200`
+          : `/api/persons/activity/${personId}?limit=200`;
+        const [actRes, camRes] = await Promise.all([
+          authFetch(activityUrl),
+          authFetch(`/api/cameras`),
+        ]);
+        if (cancelled) return;
+        if (actRes.ok) {
+          const all: PersonActivityItem[] = await actRes.json();
+          // Filter to last 24h
+          const cutoff = Date.now() - 24 * 3600 * 1000;
+          setItems(all.filter((i) => i.started_at && new Date(i.started_at).getTime() >= cutoff));
+        }
+        if (camRes.ok) {
+          const cams: Camera[] = await camRes.json();
+          setCameraMap(Object.fromEntries(cams.map((c) => [c.id, c.name])));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [personId, authFetch, mode]);
+
+  // Build per-visit sessions (gap > 10 min = new visit)
+  const sessions: { start: string; end: string; cameras: Set<string>; items: PersonActivityItem[] }[] = [];
+  const sortedAsc = [...items].sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+  const SESSION_GAP_MS = 10 * 60 * 1000;
+  for (const item of sortedAsc) {
+    const t = new Date(item.started_at).getTime();
+    const last = sessions[sessions.length - 1];
+    if (!last || t - new Date(last.end).getTime() > SESSION_GAP_MS) {
+      sessions.push({ start: item.started_at, end: item.ended_at || item.started_at, cameras: new Set([item.camera_id]), items: [item] });
+    } else {
+      last.end = item.ended_at || item.started_at;
+      last.cameras.add(item.camera_id);
+      last.items.push(item);
+    }
+  }
+  sessions.reverse(); // show most recent first
+
+  const totalEvents = items.length;
+  const totalCams = new Set(items.map((i) => i.camera_id)).size;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-2xl mx-4 rounded-xl border border-border bg-card-elevated shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-full overflow-hidden border border-border bg-muted flex-shrink-0">
+              <img src={`/api/persons/${personId}/photo`} alt={personName} className="w-full h-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold truncate">{personName}</h2>
+              <div className="text-[11px] text-muted-foreground">Activity in the last 24 hours</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none">&times;</button>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">Loading activity.</div>
+        ) : sessions.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-sm text-muted-foreground">No sightings of {personName} in the last 24 hours.</p>
+          </div>
+        ) : (
+          <div className="overflow-y-auto scrollbar-thin">
+            {/* Stats strip */}
+            <div className="grid grid-cols-3 gap-2 px-5 py-3 border-b border-border bg-card/30">
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Visits</div>
+                <div className="text-sm font-semibold">{sessions.length}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Events</div>
+                <div className="text-sm font-semibold">{totalEvents}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Cameras</div>
+                <div className="text-sm font-semibold">{totalCams}</div>
+              </div>
+            </div>
+
+            {/* Visits / sessions */}
+            <div className="p-5 space-y-4">
+              {sessions.map((s, i) => {
+                const start = new Date(s.start);
+                const end = new Date(s.end);
+                const durMin = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
+                const camNames = Array.from(s.cameras).map((id) => cameraMap[id] || "Unknown");
+                return (
+                  <div key={i} className="rounded-lg border border-border bg-card/50 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-border/50 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold">
+                          {start.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}
+                          {" \u2192 "}
+                          {end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {durMin} min \u00b7 {camNames.join(", ")}
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{s.items.length} event{s.items.length > 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="divide-y divide-border/50">
+                      {s.items.slice().reverse().map((it) => (
+                        <div key={it.observation_id} className="flex gap-3 p-2.5">
+                          {it.thumbnail_path ? (
+                            <img src={`/api/observations/${it.observation_id}/thumbnail`} alt=""
+                              className="w-20 h-14 flex-shrink-0 rounded object-cover bg-black" />
+                          ) : (
+                            <div className="w-20 h-14 flex-shrink-0 rounded bg-muted" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs leading-snug line-clamp-2">
+                                {it.vlm_description || "Motion detected"}
+                              </p>
+                              <span className="text-[10px] text-muted-foreground font-mono flex-shrink-0">
+                                {formatTime(it.started_at)}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              <span className="px-1 py-0.5 text-[9px] rounded bg-muted/50 text-muted-foreground">{it.camera_name || cameraMap[it.camera_id] || "Unknown"}</span>
+                              {(it.object_detections?.objects || []).slice(0, 3).map((d, di) => (
+                                <span key={di} className="px-1 py-0.5 text-[9px] rounded bg-blue-900/30 text-blue-300 border border-blue-800/40">{d.label}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AddCameraModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const { authFetch } = useAuth();
   const { startPublish, attachCameraId, stopPublish } = useWebcamPublisher();
@@ -1235,7 +1434,7 @@ function DashboardContent() {
 
   // Digest
   const [digest, setDigest] = useState<Digest | null>(null);
-  const [digestPeriod, setDigestPeriod] = useState<"daily" | "hourly">("daily");
+  const [digestPeriod, setDigestPeriod] = useState<"daily" | "hourly">("hourly");
   const [digestLoading, setDigestLoading] = useState(false);
 
   // WebSocket
@@ -1292,6 +1491,26 @@ function DashboardContent() {
     } catch { /* silent */ }
   }, []);
 
+  // 24h person digest
+  const [personSummaries, setPersonSummaries] = useState<PersonSummary[]>([]);
+  const [clusterSummaries, setClusterSummaries] = useState<ClusterSummary[]>([]);
+  const [personSummariesLoading, setPersonSummariesLoading] = useState(false);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+
+  const fetchPersonSummaries = useCallback(async () => {
+    setPersonSummariesLoading(true);
+    try {
+      const [personRes, clusterRes] = await Promise.all([
+        authFetch("/api/persons/activity/summary"),
+        authFetch("/api/persons/clusters/activity/summary?hours=24&min_sightings=2"),
+      ]);
+      if (personRes.ok) setPersonSummaries(await personRes.json());
+      if (clusterRes.ok) setClusterSummaries(await clusterRes.json());
+    } catch { /* silent */ }
+    finally { setPersonSummariesLoading(false); }
+  }, [authFetch]);
+
   // Fetch timeline data
   const fetchTimeline = useCallback(async () => {
     try {
@@ -1328,11 +1547,17 @@ function DashboardContent() {
     finally { setDigestLoading(false); }
   }, [digestPeriod, selectedCamera, authFetch]);
 
-  // Auto-refetch digest when period or camera changes (only if already visible)
+  // Always auto-fetch digest on mount and when period/camera changes
   useEffect(() => {
-    if (digest) fetchDigest();
+    fetchDigest();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [digestPeriod, selectedCamera]);
+
+  // Fetch person summaries for the 24h person digest
+  useEffect(() => {
+    if (digestPeriod === "daily") fetchPersonSummaries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [digestPeriod]);
 
   // Search
   const handleSearch = useCallback(async () => {
@@ -1545,11 +1770,35 @@ function DashboardContent() {
             ))}
 
             {cameras.length === 0 && !camerasLoading && (
-              <div onClick={() => setModalOpen(true)}
-                className={`rounded-lg border border-dashed border-border hover:border-accent cursor-pointer flex items-center justify-center py-12 transition-colors ${cameraLayout === "double" ? "col-span-2" : ""}`}>
-                <div className="text-center">
-                  <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center mx-auto mb-2 text-muted-foreground text-sm">+</div>
-                  <div className="text-xs text-muted-foreground">Add camera</div>
+              <div className={`rounded-lg border border-dashed border-border bg-card/30 p-4 ${cameraLayout === "double" ? "col-span-2" : ""}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center text-accent">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold">No cameras yet</div>
+                    <div className="text-[11px] text-muted-foreground leading-tight">Connect a feed to start capturing activity.</div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <button onClick={() => setModalOpen(true)}
+                    className="w-full px-2.5 py-2 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity">
+                    Add a camera
+                  </button>
+                  <button onClick={() => setModalOpen(true)}
+                    className="w-full px-2.5 py-2 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                    Use this device's webcam
+                  </button>
+                </div>
+                <div className="mt-3 pt-3 border-t border-border/50 text-[10px] text-muted-foreground leading-relaxed">
+                  <div className="font-medium text-foreground/70 mb-1">Options</div>
+                  <ul className="space-y-0.5">
+                    <li>RTSP/HTTP from IP cameras and NVRs</li>
+                    <li>ONVIF network auto-discovery</li>
+                    <li>USB or local device testing</li>
+                  </ul>
                 </div>
               </div>
             )}
@@ -1742,45 +1991,130 @@ function DashboardContent() {
             )}
           </div>
 
-          {/* Digest controls */}
+          {/* AI Digest panel. always visible (except in search) */}
           {!searchActive && (
-            <div className="flex items-center justify-end gap-1 mb-3 flex-shrink-0">
-              <div className="flex rounded border border-border overflow-hidden">
-                <button onClick={() => setDigestPeriod("hourly")}
-                  className={`px-2 py-1 text-[10px] ${digestPeriod === "hourly" ? "bg-accent/20 text-accent" : "text-muted-foreground hover:bg-muted"}`}>
-                  Hourly
-                </button>
-                <button onClick={() => setDigestPeriod("daily")}
-                  className={`px-2 py-1 text-[10px] border-l border-border ${digestPeriod === "daily" ? "bg-accent/20 text-accent" : "text-muted-foreground hover:bg-muted"}`}>
-                  24h
-                </button>
+            <div className="rounded-xl border border-accent/30 bg-gradient-to-br from-accent/10 to-card/50 p-4 mb-3 flex-shrink-0 shadow-sm">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center text-accent flex-shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L9.1 8.6 2 9.3l5.5 4.9L5.8 22 12 18l6.2 4-1.7-7.8L22 9.3l-7.1-.7L12 2z"/>
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold">AI Digest</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {selectedCamera && cameraMap[selectedCamera] ? cameraMap[selectedCamera].name : "All Cameras"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {digestPeriod === "hourly" ? "Summary of the last hour" : "Summary of the last 24 hours"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex rounded-md border border-border overflow-hidden">
+                    <button onClick={() => setDigestPeriod("hourly")}
+                      className={`px-2 py-1 text-[10px] transition-colors ${digestPeriod === "hourly" ? "bg-accent text-black font-medium" : "text-muted-foreground hover:bg-muted"}`}>
+                      1h
+                    </button>
+                    <button onClick={() => setDigestPeriod("daily")}
+                      className={`px-2 py-1 text-[10px] border-l border-border transition-colors ${digestPeriod === "daily" ? "bg-accent text-black font-medium" : "text-muted-foreground hover:bg-muted"}`}>
+                      24h
+                    </button>
+                  </div>
+                  <button onClick={fetchDigest} disabled={digestLoading}
+                    title="Regenerate digest"
+                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={digestLoading ? "animate-spin" : ""}>
+                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <button onClick={fetchDigest} disabled={digestLoading}
-                className="px-2 py-1 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted disabled:opacity-50">
-                {digestLoading ? "..." : digest ? "Refresh" : "Generate"}
-              </button>
-              {digest && (
-                <button onClick={() => setDigest(null)}
-                  className="px-2 py-1 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted">
-                  Hide
-                </button>
-              )}
-            </div>
-          )}
 
-          {/* Digest panel */}
-          {digest && digest.total_observations > 0 && !searchActive && (
-            <div className="rounded-md border border-border bg-card/50 p-3 mb-3 flex-shrink-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                  {digestPeriod === "hourly" ? "Last Hour" : "Last 24h"} Digest{selectedCamera && cameraMap[selectedCamera] ? ` \u00b7 ${cameraMap[selectedCamera].name}` : " \u00b7 All Cameras"}
-                </span>
-                <span className="text-[10px] text-muted-foreground font-mono">{digest.period_label}</span>
-              </div>
-              <p className="text-xs leading-relaxed">{digest.summary}</p>
-              {digest.highlights.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {digest.highlights.slice(0, 3).map((h, i) => <div key={i} className="text-[11px] text-muted-foreground">{h}</div>)}
+              {digestLoading && !digest ? (
+                <div className="space-y-1.5 animate-pulse">
+                  <div className="h-2.5 w-5/6 rounded bg-muted/70" />
+                  <div className="h-2.5 w-4/6 rounded bg-muted/70" />
+                  <div className="h-2.5 w-3/6 rounded bg-muted/50" />
+                </div>
+              ) : digest && digest.total_observations > 0 ? (
+                <>
+                  <p className="text-xs leading-relaxed">{digest.summary}</p>
+                  {digest.highlights.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {digest.highlights.slice(0, 4).map((h, i) => (
+                        <span key={i} className="px-2 py-0.5 text-[10px] rounded-full bg-background/60 border border-border text-muted-foreground">{h}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>{digest.total_observations} observation{digest.total_observations > 1 ? "s" : ""} analyzed</span>
+                    <span className="font-mono">{digest.period_label}</span>
+                  </div>
+
+                  {/* 24h person gallery */}
+                  {digestPeriod === "daily" && (
+                    <div className="mt-3 pt-3 border-t border-border/50">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">People seen today</span>
+                        {personSummariesLoading && <span className="text-[10px] text-muted-foreground">loading.</span>}
+                      </div>
+                      {(() => {
+                        const seen = personSummaries.filter((p) => p.sightings_24h > 0);
+                        const unknowns = clusterSummaries.filter((c) => c.sightings_24h > 0);
+                        if (seen.length === 0 && unknowns.length === 0 && !personSummariesLoading) {
+                          return <p className="text-[11px] text-muted-foreground">No faces recognized or grouped in the last 24 hours.</p>;
+                        }
+                        return (
+                          <div className="flex gap-2 overflow-x-auto scrollbar-thin pb-1">
+                            {seen.map((p) => (
+                              <button key={p.person_id} onClick={() => setSelectedPersonId(p.person_id)}
+                                className="flex-shrink-0 w-20 text-center group">
+                                <div className="w-16 h-16 mx-auto rounded-full overflow-hidden border-2 border-border group-hover:border-accent transition-colors bg-muted">
+                                  {p.photo_path ? (
+                                    <img src={`/api/persons/${p.person_id}/photo`} alt={p.display_name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-sm font-semibold text-muted-foreground">
+                                      {p.display_name.charAt(0).toUpperCase()}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="mt-1 text-[11px] font-medium truncate">{p.display_name}</div>
+                                <div className="text-[9px] text-muted-foreground">{p.sightings_24h} visit{p.sightings_24h > 1 ? "s" : ""}</div>
+                              </button>
+                            ))}
+                            {unknowns.map((c) => (
+                              <button key={c.cluster_id} onClick={() => setSelectedClusterId(c.cluster_id)}
+                                className="flex-shrink-0 w-20 text-center group" title={c.appearance_description || ""}>
+                                <div className="w-16 h-16 mx-auto rounded-full overflow-hidden border-2 border-dashed border-amber-500/50 group-hover:border-amber-400 transition-colors bg-muted">
+                                  {c.sample_thumbnail_path ? (
+                                    <img src={`/api/persons/suggestions/${c.cluster_id}/thumbnail`} alt={c.auto_label} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-amber-400/80">?</div>
+                                  )}
+                                </div>
+                                <div className="mt-1 text-[11px] font-medium truncate text-amber-300/90">{c.auto_label}</div>
+                                <div className="text-[9px] text-muted-foreground truncate">
+                                  {c.appearance_description || (c.appearance_description_status === "pending" ? "describing." : `${c.sightings_24h} visit${c.sightings_24h > 1 ? "s" : ""}`)}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-xs text-muted-foreground leading-relaxed">
+                  {cameras.length === 0
+                    ? "Connect a camera to start generating activity summaries."
+                    : digestPeriod === "hourly"
+                      ? "No activity in the last hour. The digest will appear as soon as events are observed."
+                      : "No activity in the last 24 hours. Try adjusting cameras or check back later."}
                 </div>
               )}
             </div>
@@ -1807,15 +2141,89 @@ function DashboardContent() {
           {/* Timeline feed (scrollable) */}
           <div className="flex-1 overflow-y-auto scrollbar-thin pr-1">
             {isSearching ? (
-              <div className="flex items-center justify-center py-20"><div className="text-sm text-muted-foreground">Searching.</div></div>
-            ) : timelineLoading && entries.length === 0 ? (
-              <div className="flex items-center justify-center py-20"><div className="text-sm text-muted-foreground">Loading.</div></div>
-            ) : entries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <p className="text-muted-foreground text-sm">
-                  {searchActive ? "No observations match your search." : "No events in this time range."}
-                </p>
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <svg className="animate-spin h-5 w-5 text-muted-foreground" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <div className="text-xs text-muted-foreground">Searching observations.</div>
               </div>
+            ) : timelineLoading && entries.length === 0 ? (
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="rounded-lg border border-border bg-card/30 p-3 animate-pulse">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="h-3 w-32 rounded bg-muted" />
+                      <div className="h-3 w-16 rounded bg-muted" />
+                    </div>
+                    <div className="h-2.5 w-4/5 rounded bg-muted/70 mb-1.5" />
+                    <div className="h-2.5 w-2/3 rounded bg-muted/70" />
+                  </div>
+                ))}
+              </div>
+            ) : entries.length === 0 ? (
+              cameras.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-card/30 p-8 text-center">
+                  <div className="w-12 h-12 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center mx-auto mb-3 text-accent">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-semibold mb-1">Connect your first camera</h3>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-4 leading-relaxed">
+                    The timeline fills in as motion, faces, and objects are detected. Add any RTSP feed, discover ONVIF cameras on your network, or use this device as a test source.
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <button onClick={() => setModalOpen(true)}
+                      className="px-3 py-1.5 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90">
+                      Add a camera
+                    </button>
+                    <button onClick={() => setModalOpen(true)}
+                      className="px-3 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
+                      Use webcam
+                    </button>
+                  </div>
+                </div>
+              ) : searchActive ? (
+                <div className="rounded-xl border border-dashed border-border bg-card/30 p-8 text-center">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-3 text-muted-foreground">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-semibold mb-1">No matches</h3>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-4">
+                    Nothing matched {searchQuery.trim() ? <>&ldquo;<span className="font-medium text-foreground">{searchQuery.trim()}</span>&rdquo;</> : "these filters"}. Try broadening the time range or removing filters.
+                  </p>
+                  <button onClick={clearAllFilters}
+                    className="px-3 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-card/30 p-8 text-center">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-3 text-muted-foreground">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-semibold mb-1">Nothing happened yet</h3>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-4 leading-relaxed">
+                    {cameras.some((c) => c.status === "offline")
+                      ? "Some cameras are offline. Check their stream URLs or credentials."
+                      : "Cameras are connected and watching. Events will appear here as soon as something moves."}
+                  </p>
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
+                    {activeFilterCount > 0 && (
+                      <button onClick={clearAllFilters}
+                        className="px-3 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
+                        Clear filters ({activeFilterCount})
+                      </button>
+                    )}
+                    <button onClick={() => setTimeRange("30d")}
+                      className="px-3 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
+                      Try last 30 days
+                    </button>
+                  </div>
+                </div>
+              )
             ) : (
               <div className="space-y-3">
                 {hourGroups.map(({ key: bucketKey, entries: dateEntries }) => {
@@ -2078,6 +2486,25 @@ function DashboardContent() {
       </div>
 
       {modalOpen && <AddCameraModal onClose={() => setModalOpen(false)} onSuccess={() => { setModalOpen(false); fetchCameras(); }} />}
+      {selectedPersonId && (
+        <PersonActivityModal
+          personId={selectedPersonId}
+          personName={personSummaries.find((p) => p.person_id === selectedPersonId)?.display_name || "Person"}
+          onClose={() => setSelectedPersonId(null)}
+        />
+      )}
+      {selectedClusterId && (() => {
+        const c = clusterSummaries.find((x) => x.cluster_id === selectedClusterId);
+        const label = c ? (c.appearance_description ? `${c.auto_label}. ${c.appearance_description}` : c.auto_label) : "Unknown";
+        return (
+          <PersonActivityModal
+            personId={selectedClusterId}
+            personName={label}
+            mode="cluster"
+            onClose={() => setSelectedClusterId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
