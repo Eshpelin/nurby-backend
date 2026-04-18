@@ -57,6 +57,10 @@ async def list_suggestions(
             "last_seen_at": c.last_seen_at.isoformat() if c.last_seen_at else None,
             "first_camera_id": str(c.first_camera_id) if c.first_camera_id else None,
             "status": c.status,
+            "auto_label_number": c.auto_label_number,
+            "auto_label": f"Unknown {c.auto_label_number}" if c.auto_label_number else "Unknown",
+            "appearance_description": c.appearance_description,
+            "appearance_description_status": c.appearance_description_status,
         }
         for c in clusters
     ]
@@ -385,6 +389,185 @@ async def person_activity_feed(
             thumbnail_path=obs.thumbnail_path,
             person_name=matching_face.get("person_name"),
             match_distance=matching_face.get("match_distance"),
+            object_detections=obs.object_detections,
+        ))
+
+    return activities
+
+
+# ── Unknown cluster activity endpoints ──
+
+
+class ClusterSummary(PydanticBaseModel):
+    cluster_id: str
+    auto_label: str  # "Unknown 645"
+    auto_label_number: int | None = None
+    appearance_description: str | None = None
+    appearance_description_status: str = "pending"
+    sample_thumbnail_path: str | None = None
+    sighting_count: int = 0
+    sightings_1h: int = 0
+    sightings_24h: int = 0
+    last_seen_at: str | None = None
+    last_seen_camera: str | None = None
+    first_seen_at: str | None = None
+
+
+@router.get("/clusters/activity/summary", response_model=list[ClusterSummary])
+async def cluster_activity_summary(
+    min_sightings: int = Query(default=2, ge=1),
+    hours: int = Query(default=24, ge=1, le=168),
+    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Activity summary for unknown (pending) clusters in a recent window.
+
+    Counts distinct visit sessions per cluster using the same 10-minute gap
+    rule as the named-person summary, so a single visit does not inflate
+    numbers. Only returns clusters still pending (not named or ignored).
+    """
+    from datetime import timedelta, timezone as tz
+
+    clusters_result = await db.execute(
+        select(FaceCluster)
+        .where(FaceCluster.status == "pending")
+        .where(FaceCluster.sighting_count >= min_sightings)
+        .order_by(FaceCluster.last_seen_at.desc())
+    )
+    clusters = clusters_result.scalars().all()
+    if not clusters:
+        return []
+
+    cam_result = await db.execute(select(Camera))
+    cameras = {str(c.id): c.name for c in cam_result.scalars().all()}
+
+    cutoff = datetime.now(tz.utc) - timedelta(hours=hours)
+    obs_result = await db.execute(
+        select(Observation)
+        .where(Observation.person_detections.isnot(None))
+        .where(Observation.started_at >= cutoff)
+        .order_by(Observation.started_at.desc())
+    )
+    observations = obs_result.scalars().all()
+
+    now = datetime.now(tz.utc)
+    cutoff_1h = now - timedelta(hours=1)
+    cutoff_24h = now - timedelta(hours=24)
+    SESSION_GAP = timedelta(minutes=10)
+
+    sightings_by_cluster: dict[str, list[tuple[datetime, str]]] = {}
+    for obs in observations:
+        pd = obs.person_detections
+        if not pd or not pd.get("faces"):
+            continue
+        for face in pd["faces"]:
+            cid = face.get("cluster_id")
+            if not cid or face.get("person_id"):
+                continue
+            sightings_by_cluster.setdefault(cid, []).append((obs.started_at, str(obs.camera_id)))
+
+    summaries: list[ClusterSummary] = []
+    for c in clusters:
+        cid = str(c.id)
+        raw = sightings_by_cluster.get(cid, [])
+        raw.sort(key=lambda x: x[0])
+
+        sessions: list[tuple[datetime, str]] = []
+        prev = None
+        for t, cam in raw:
+            if prev is None or (t - prev) > SESSION_GAP:
+                sessions.append((t, cam))
+            prev = t
+
+        total = len(sessions) or (c.sighting_count if not raw else 0)
+        if not sessions:
+            # No observations in window but cluster has historic sightings.
+            # Still surface it with zeros rather than hide.
+            last_seen = c.last_seen_at
+            first_seen = c.first_seen_at
+            last_cam = cameras.get(str(c.first_camera_id)) if c.first_camera_id else None
+        else:
+            last_seen = sessions[-1][0]
+            first_seen = sessions[0][0]
+            last_cam = cameras.get(sessions[-1][1])
+
+        label_num = c.auto_label_number or 0
+        summaries.append(ClusterSummary(
+            cluster_id=cid,
+            auto_label=f"Unknown {label_num}" if label_num else "Unknown",
+            auto_label_number=c.auto_label_number,
+            appearance_description=c.appearance_description,
+            appearance_description_status=c.appearance_description_status or "pending",
+            sample_thumbnail_path=c.sample_thumbnail_path,
+            sighting_count=c.sighting_count,
+            sightings_1h=sum(1 for t, _ in sessions if t >= cutoff_1h),
+            sightings_24h=sum(1 for t, _ in sessions if t >= cutoff_24h),
+            last_seen_at=last_seen.isoformat() if last_seen else None,
+            last_seen_camera=last_cam,
+            first_seen_at=first_seen.isoformat() if first_seen else None,
+        ))
+
+    return summaries
+
+
+@router.get("/clusters/activity/{cluster_id}", response_model=list[PersonActivity])
+async def cluster_activity_feed(
+    cluster_id: uuid.UUID,
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Activity feed for a single unknown cluster.
+
+    Same shape as the named-person activity feed so the frontend can reuse
+    its session grouping logic.
+    """
+    cluster = await db.get(FaceCluster, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    cam_result = await db.execute(select(Camera))
+    cameras = {str(c.id): c.name for c in cam_result.scalars().all()}
+
+    cid_str = str(cluster_id)
+    label = f"Unknown {cluster.auto_label_number}" if cluster.auto_label_number else "Unknown"
+
+    obs_result = await db.execute(
+        select(Observation)
+        .where(Observation.person_detections.isnot(None))
+        .order_by(Observation.started_at.desc())
+        .limit(limit * 3)
+    )
+    all_obs = obs_result.scalars().all()
+
+    activities: list[PersonActivity] = []
+    for obs in all_obs:
+        if len(activities) >= limit:
+            break
+        pd = obs.person_detections
+        if not pd or not pd.get("faces"):
+            continue
+        matching = None
+        for face in pd["faces"]:
+            if face.get("cluster_id") == cid_str:
+                matching = face
+                break
+        if not matching:
+            continue
+
+        if offset > 0:
+            offset -= 1
+            continue
+
+        activities.append(PersonActivity(
+            observation_id=str(obs.id),
+            camera_id=str(obs.camera_id),
+            camera_name=cameras.get(str(obs.camera_id)),
+            started_at=obs.started_at.isoformat() if obs.started_at else "",
+            ended_at=obs.ended_at.isoformat() if obs.ended_at else None,
+            vlm_description=obs.vlm_description,
+            thumbnail_path=obs.thumbnail_path,
+            person_name=label,
+            match_distance=matching.get("match_distance"),
             object_detections=obs.object_detections,
         ))
 

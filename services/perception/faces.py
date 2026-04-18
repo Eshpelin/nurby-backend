@@ -134,10 +134,12 @@ class FaceRecognizer:
             logger.exception("Failed to load known embeddings")
             return []
 
-    async def cluster_unknown_face(self, face: dict, camera_id: str, frame: np.ndarray | None = None):
+    async def cluster_unknown_face(self, face: dict, camera_id: str, frame: np.ndarray | None = None) -> uuid.UUID | None:
         """Cluster an unmatched face. Either adds to existing cluster or creates new one.
 
         face dict must have 'embedding' and 'bbox' keys.
+        Returns the cluster_id the face was assigned to, so callers can persist
+        it on the observation for later grouping.
         """
         face_emb = np.array(face["embedding"])
 
@@ -162,10 +164,15 @@ class FaceRecognizer:
             # Add to existing cluster
             await self._add_to_cluster(best_cluster_id, face_emb, camera_id, thumbnail_path)
             logger.info("Added face to cluster %s (distance=%.4f)", best_cluster_id, best_distance)
+            return best_cluster_id
         else:
             # Create new cluster
-            cluster_id = await self._create_cluster(face_emb, camera_id, thumbnail_path)
-            logger.info("Created new face cluster %s", cluster_id)
+            new_id = await self._create_cluster(face_emb, camera_id, thumbnail_path)
+            logger.info("Created new face cluster %s", new_id)
+            if new_id:
+                # Fire-and-forget VLM appearance description on the initial crop
+                asyncio.create_task(self._generate_appearance_description(new_id, thumbnail_path))
+            return new_id
 
     def _save_face_crop(self, face: dict, frame: np.ndarray, camera_id: str) -> str | None:
         """Crop face from frame and save as thumbnail."""
@@ -255,12 +262,20 @@ class FaceRecognizer:
         """Create a new face cluster from a single face detection."""
         try:
             from shared.models import FaceCluster, FaceClusterSample
+            from sqlalchemy import text
             async with async_session() as db:
+                # Allocate sequential label number. Sequence guarantees uniqueness
+                # across concurrent inserts.
+                label_row = await db.execute(text("SELECT nextval('face_cluster_label_seq')"))
+                label_num = int(label_row.scalar() or 0)
+
                 cluster = FaceCluster(
                     representative_embedding=embedding.tolist(),
                     sample_thumbnail_path=thumbnail_path,
                     first_camera_id=uuid.UUID(camera_id),
                     sighting_count=1,
+                    auto_label_number=label_num,
+                    appearance_description_status="pending",
                 )
                 db.add(cluster)
                 await db.flush()
@@ -277,6 +292,64 @@ class FaceRecognizer:
         except Exception:
             logger.exception("Failed to create face cluster")
             return None
+
+    async def _generate_appearance_description(self, cluster_id: uuid.UUID, thumbnail_path: str | None):
+        """Run a VLM pass on the face crop to produce a short appearance label.
+
+        Examples. "Caucasian male, 30s, blue jacket". Stored on the cluster so
+        the UI can show a meaningful hint next to "Unknown 645".
+        """
+        if not thumbnail_path:
+            return
+        try:
+            import os
+            import cv2
+            from shared.models import FaceCluster
+            from services.perception.vlm import VLMClient, get_active_provider
+
+            if not os.path.exists(thumbnail_path):
+                return
+            img = cv2.imread(thumbnail_path)
+            if img is None:
+                return
+
+            provider = await get_active_provider()
+            if not provider:
+                async with async_session() as db:
+                    cluster = await db.get(FaceCluster, cluster_id)
+                    if cluster:
+                        cluster.appearance_description_status = "failed"
+                        await db.commit()
+                return
+
+            system_prompt = (
+                "You describe the appearance of a person from a single face crop. "
+                "Return 8 words or fewer. Cover apparent demographics (ethnicity, "
+                "gender, age range) and any obvious clothing or accessories visible. "
+                "No speculation beyond what the image shows. No sentences, just a "
+                "short label. Example. 'Caucasian male, 30s, dark jacket'."
+            )
+            client = VLMClient()
+            desc = await client.describe(
+                frame=img,
+                detections=[],
+                provider=provider,
+                system_prompt=system_prompt,
+                max_tokens=40,
+            )
+
+            async with async_session() as db:
+                cluster = await db.get(FaceCluster, cluster_id)
+                if not cluster:
+                    return
+                if desc:
+                    cluster.appearance_description = desc.strip().strip('"').strip(".")
+                    cluster.appearance_description_status = "done"
+                else:
+                    cluster.appearance_description_status = "failed"
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to generate appearance description for cluster %s", cluster_id)
 
     @staticmethod
     def embed_from_image(image_bytes: bytes) -> list[float] | None:

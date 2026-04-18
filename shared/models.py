@@ -124,6 +124,9 @@ class FaceCluster(Base):
     first_camera_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     person_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)  # linked once named
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending, named, ignored
+    auto_label_number: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)  # "Unknown 645"
+    appearance_description: Mapped[str | None] = mapped_column(Text, nullable=True)  # VLM short demographics/clothing
+    appearance_description_status: Mapped[str] = mapped_column(String(16), default="pending")  # pending, done, failed
 
 
 class FaceClusterSample(Base):

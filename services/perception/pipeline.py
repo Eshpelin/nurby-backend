@@ -234,7 +234,9 @@ class PerceptionPipeline:
             if faces and not is_outdoor:
                 for face in faces:
                     if not face.get("person_id"):
-                        await self._face.cluster_unknown_face(face, camera_id, frame)
+                        cluster_id = await self._face.cluster_unknown_face(face, camera_id, frame)
+                        if cluster_id:
+                            face["cluster_id"] = str(cluster_id)
 
         # Step 3. Save thumbnail
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
@@ -249,6 +251,7 @@ class PerceptionPipeline:
                         "person_id": f.get("person_id"),
                         "person_name": f.get("person_name"),
                         "match_distance": f.get("match_distance"),
+                        "cluster_id": f.get("cluster_id"),
                     }
                     for f in faces
                 ],
