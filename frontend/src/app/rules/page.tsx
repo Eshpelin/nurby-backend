@@ -35,22 +35,73 @@ interface Camera {
 interface TriggerType {
   value: string;
   label: string;
-  icon: string;
+  icon: (props: { className?: string }) => React.ReactElement;
   desc: string;
   accent: string;  // tailwind color root (green, blue, amber, indigo, rose, slate)
   group: "vision" | "faces" | "motion" | "audio" | "spatial" | "any";
 }
 
+// Minimal inline SVGs. 18px, stroke 1.75, currentColor.
+const Icon = {
+  box: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      <path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>
+    </svg>
+  ),
+  user: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+    </svg>
+  ),
+  userCheck: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/>
+    </svg>
+  ),
+  userQ: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      <path d="M17 11a2 2 0 1 1 3 1.7c-.4.3-1 .6-1 1.3"/><path d="M19 17h.01"/>
+    </svg>
+  ),
+  wave: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 12c2 0 2-3 4-3s2 6 4 6 2-9 4-9 2 9 4 9 2-3 4-3"/>
+    </svg>
+  ),
+  speaker: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+    </svg>
+  ),
+  clock: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+    </svg>
+  ),
+  tripwire: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 17 21 7"/><path d="m17 5 4 2-2 4"/><circle cx="6" cy="18" r="1.5"/>
+    </svg>
+  ),
+  spark: ({ className }: { className?: string }) => (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v18"/><path d="M3 12h18"/><path d="m5.6 5.6 12.8 12.8"/><path d="m18.4 5.6-12.8 12.8"/>
+    </svg>
+  ),
+};
+
 const TRIGGER_TYPES: TriggerType[] = [
-  { value: "object_detected", label: "Object detected", icon: "📦", desc: "Person, car, dog, package, or any YOLO class.", accent: "green", group: "vision" },
-  { value: "face_detected",   label: "Face detected",   icon: "👤", desc: "Any face visible in frame, known or not.", accent: "blue", group: "faces" },
-  { value: "face_recognized", label: "Known face",      icon: "🪪", desc: "A specific person in your library.", accent: "blue", group: "faces" },
-  { value: "face_unknown",    label: "Unknown face",    icon: "❓", desc: "Someone not yet matched to a person.", accent: "amber", group: "faces" },
-  { value: "motion",          label: "Motion",          icon: "🌊", desc: "Pixel-level movement above a threshold.", accent: "slate", group: "motion" },
-  { value: "audio_event",     label: "Audio event",     icon: "🔊", desc: "Baby cry, scream, glass, alarm, bark, gunshot.", accent: "rose", group: "audio" },
-  { value: "loitering",       label: "Loitering",       icon: "⏱️", desc: "Someone stays inside a zone too long.", accent: "amber", group: "spatial" },
-  { value: "line_cross",      label: "Tripwire",        icon: "🚧", desc: "A tracked object crosses a line.", accent: "indigo", group: "spatial" },
-  { value: "any",             label: "Any observation", icon: "✳️", desc: "Fire on every processed keyframe.", accent: "slate", group: "any" },
+  { value: "object_detected", label: "Object detected", icon: Icon.box,       desc: "Person, car, dog, package, or any YOLO class.", accent: "green",  group: "vision" },
+  { value: "face_detected",   label: "Face detected",   icon: Icon.user,      desc: "Any face visible in frame, known or not.",       accent: "blue",   group: "faces" },
+  { value: "face_recognized", label: "Known face",      icon: Icon.userCheck, desc: "A specific person in your library.",              accent: "blue",   group: "faces" },
+  { value: "face_unknown",    label: "Unknown face",    icon: Icon.userQ,     desc: "Someone not yet matched to a person.",            accent: "amber",  group: "faces" },
+  { value: "motion",          label: "Motion",          icon: Icon.wave,      desc: "Pixel-level movement above a threshold.",         accent: "slate",  group: "motion" },
+  { value: "audio_event",     label: "Audio event",     icon: Icon.speaker,   desc: "Baby cry, scream, glass, alarm, bark, gunshot.",  accent: "rose",   group: "audio" },
+  { value: "loitering",       label: "Loitering",       icon: Icon.clock,     desc: "Someone stays inside a zone too long.",           accent: "amber",  group: "spatial" },
+  { value: "line_cross",      label: "Tripwire",        icon: Icon.tripwire,  desc: "A tracked object crosses a line.",                accent: "indigo", group: "spatial" },
+  { value: "any",             label: "Any observation", icon: Icon.spark,     desc: "Fire on every processed keyframe.",               accent: "slate",  group: "any" },
 ];
 
 const TRIGGER_ACCENTS: Record<string, { active: string; dot: string }> = {
@@ -1017,7 +1068,7 @@ export default function RulesPage() {
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-base leading-none">{t.icon}</span>
+                          <t.icon className={selected ? "text-foreground" : "text-muted-foreground"} />
                           <span className="text-sm font-medium">{t.label}</span>
                           {selected && <span className={`ml-auto w-2 h-2 rounded-full ${accent.dot}`} />}
                         </div>
