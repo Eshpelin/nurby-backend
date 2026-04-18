@@ -32,17 +32,35 @@ interface Camera {
   status: string;
 }
 
-const TRIGGER_TYPES = [
-  { value: "object_detected", label: "Object detected" },
-  { value: "face_detected", label: "Face detected" },
-  { value: "face_recognized", label: "Face recognized" },
-  { value: "face_unknown", label: "Unknown face" },
-  { value: "motion", label: "Motion" },
-  { value: "audio_event", label: "Audio event (cry, scream, alarm)" },
-  { value: "loitering", label: "Loitering in zone" },
-  { value: "line_cross", label: "Tripwire crossed" },
-  { value: "any", label: "Any observation" },
+interface TriggerType {
+  value: string;
+  label: string;
+  icon: string;
+  desc: string;
+  accent: string;  // tailwind color root (green, blue, amber, indigo, rose, slate)
+  group: "vision" | "faces" | "motion" | "audio" | "spatial" | "any";
+}
+
+const TRIGGER_TYPES: TriggerType[] = [
+  { value: "object_detected", label: "Object detected", icon: "📦", desc: "Person, car, dog, package, or any YOLO class.", accent: "green", group: "vision" },
+  { value: "face_detected",   label: "Face detected",   icon: "👤", desc: "Any face visible in frame, known or not.", accent: "blue", group: "faces" },
+  { value: "face_recognized", label: "Known face",      icon: "🪪", desc: "A specific person in your library.", accent: "blue", group: "faces" },
+  { value: "face_unknown",    label: "Unknown face",    icon: "❓", desc: "Someone not yet matched to a person.", accent: "amber", group: "faces" },
+  { value: "motion",          label: "Motion",          icon: "🌊", desc: "Pixel-level movement above a threshold.", accent: "slate", group: "motion" },
+  { value: "audio_event",     label: "Audio event",     icon: "🔊", desc: "Baby cry, scream, glass, alarm, bark, gunshot.", accent: "rose", group: "audio" },
+  { value: "loitering",       label: "Loitering",       icon: "⏱️", desc: "Someone stays inside a zone too long.", accent: "amber", group: "spatial" },
+  { value: "line_cross",      label: "Tripwire",        icon: "🚧", desc: "A tracked object crosses a line.", accent: "indigo", group: "spatial" },
+  { value: "any",             label: "Any observation", icon: "✳️", desc: "Fire on every processed keyframe.", accent: "slate", group: "any" },
 ];
+
+const TRIGGER_ACCENTS: Record<string, { active: string; dot: string }> = {
+  green:  { active: "border-green-500 bg-green-500/10 ring-green-500/40",  dot: "bg-green-500" },
+  blue:   { active: "border-sky-500 bg-sky-500/10 ring-sky-500/40",        dot: "bg-sky-500" },
+  amber:  { active: "border-amber-500 bg-amber-500/10 ring-amber-500/40",  dot: "bg-amber-500" },
+  rose:   { active: "border-rose-500 bg-rose-500/10 ring-rose-500/40",     dot: "bg-rose-500" },
+  indigo: { active: "border-indigo-500 bg-indigo-500/10 ring-indigo-500/40", dot: "bg-indigo-500" },
+  slate:  { active: "border-slate-400 bg-slate-400/10 ring-slate-400/40",  dot: "bg-slate-400" },
+};
 
 const AUDIO_LABELS = [
   { value: "baby_cry", label: "Baby cry" },
@@ -946,7 +964,7 @@ export default function RulesPage() {
             className="absolute inset-0 bg-black/60"
             onClick={() => setShowModal(false)}
           />
-          <div className="relative bg-card border border-border rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="relative bg-card border border-border rounded-lg p-6 w-full max-w-3xl shadow-xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-semibold mb-4">
               {editRule ? "Edit rule" : "Create rule"}
             </h2>
@@ -979,21 +997,35 @@ export default function RulesPage() {
               </label>
 
               {/* Trigger */}
-              <fieldset className="border border-border rounded-md p-3 space-y-2">
+              <fieldset className="border border-border rounded-md p-3 space-y-3">
                 <legend className="text-xs font-medium text-muted-foreground px-1">
-                  Trigger
+                  When should this rule fire
                 </legend>
-                <select
-                  value={formTriggerType}
-                  onChange={(e) => setFormTriggerType(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                >
-                  {TRIGGER_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {TRIGGER_TYPES.map((t) => {
+                    const selected = formTriggerType === t.value;
+                    const accent = TRIGGER_ACCENTS[t.accent] || TRIGGER_ACCENTS.slate;
+                    return (
+                      <button
+                        key={t.value}
+                        type="button"
+                        onClick={() => setFormTriggerType(t.value)}
+                        className={`relative text-left rounded-md border p-3 transition-all ${
+                          selected
+                            ? `${accent.active} ring-2`
+                            : "border-border bg-background hover:bg-muted/60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-base leading-none">{t.icon}</span>
+                          <span className="text-sm font-medium">{t.label}</span>
+                          {selected && <span className={`ml-auto w-2 h-2 rounded-full ${accent.dot}`} />}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground leading-snug">{t.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
 
                 {formTriggerType === "object_detected" && (
                   <select
