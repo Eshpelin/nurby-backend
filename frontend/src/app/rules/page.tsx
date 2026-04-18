@@ -1,7 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
+
+const WEBRTC_URL =
+  process.env.NEXT_PUBLIC_WEBRTC_URL || "http://localhost:8889";
+
+function extractStreamName(streamUrl: string): string {
+  try {
+    const path = streamUrl.replace(/\/+$/, "");
+    const lastSlash = path.lastIndexOf("/");
+    return lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+  } catch {
+    return streamUrl;
+  }
+}
 
 interface Rule {
   id: string;
@@ -30,6 +43,9 @@ interface Camera {
   id: string;
   name: string;
   status: string;
+  stream_url?: string;
+  width?: number;
+  height?: number;
 }
 
 interface TriggerType {
@@ -168,8 +184,9 @@ const DEFAULT_PAYLOAD_TEMPLATE = `{
   "detections": "{{object_detections}}"
 }`;
 
-// Populated by the component so describeTrigger can resolve person_id to name.
+// Populated by the component so describeTrigger can resolve ids to names.
 const personLookup = new Map<string, string>();
+const cameraLookup = new Map<string, string>();
 
 function describeTrigger(pattern: Record<string, unknown>): string {
   const t = pattern.type as string;
@@ -195,14 +212,32 @@ function describeTrigger(pattern: Record<string, unknown>): string {
     return label ? `When ${match?.label || label} heard` : "When any audio event";
   }
   if (t === "loitering") {
+    const cid = pattern.camera_id as string | undefined;
     const zone = pattern.zone_name as string | undefined;
-    return zone ? `When someone loiters in "${zone}"` : "When anyone loiters";
+    const secs = pattern.threshold_seconds as number | undefined;
+    const who = pattern.label as string | undefined;
+    const subject = who ? `a ${who}` : "someone";
+    const secText = secs ? ` > ${secs}s` : "";
+    if (cid) {
+      const camName = cameraLookup.get(cid) || cid.slice(0, 8);
+      return `When ${subject} loiters on ${camName}${secText}`;
+    }
+    if (zone) return `When ${subject} loiters in "${zone}"${secText}`;
+    return `When ${subject} loiters${secText}`;
   }
   if (t === "line_cross") {
+    const cid = pattern.camera_id as string | undefined;
     const zone = pattern.zone_name as string | undefined;
     const dir = pattern.direction as string | undefined;
+    const who = pattern.label as string | undefined;
     const dirText = dir && dir !== "any" ? ` (${dir})` : "";
-    return zone ? `When tripwire "${zone}" crossed${dirText}` : `When any tripwire crossed${dirText}`;
+    const subject = who ? `a ${who}` : "a tracked object";
+    if (cid) {
+      const camName = cameraLookup.get(cid) || cid.slice(0, 8);
+      return `When ${subject} crosses tripwire on ${camName}${dirText}`;
+    }
+    if (zone) return `When tripwire "${zone}" crossed${dirText}`;
+    return `When any tripwire crossed${dirText}`;
   }
   if (t === "any") return "On every observation";
   return "Unknown trigger";
@@ -296,8 +331,212 @@ function buildRuleSummary(rule: Rule, cameras: Camera[]): string {
 function SummaryCard({ text, className }: { text: string; className?: string }) {
   return (
     <div className={`bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm text-zinc-200 flex gap-3 items-start ${className || "p-4"}`}>
-      <span className="text-base leading-none mt-0.5">💡</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400 flex-shrink-0 mt-0.5">
+        <path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.4 1 .8 1 1.3v2h6v-2c0-.5.4-.9 1-1.3A7 7 0 0 0 12 2z"/>
+      </svg>
       <span>{text}</span>
+    </div>
+  );
+}
+
+interface SelectOption { value: string; label: string; hint?: string }
+function StyledSelect({
+  value,
+  options,
+  onChange,
+  placeholder,
+  className,
+}: {
+  value: string;
+  options: SelectOption[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = options.find((o) => o.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} className={`relative ${className || ""}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-md bg-background border border-border text-sm hover:border-muted-foreground/40 focus:outline-none focus:border-accent transition-colors"
+      >
+        <span className={current ? "" : "text-muted-foreground"}>
+          {current?.label || placeholder || "Select."}
+        </span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}>
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-card shadow-lg max-h-64 overflow-y-auto py-1">
+          {options.map((o) => {
+            const selected = o.value === value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between gap-2 hover:bg-muted/60 ${selected ? "bg-muted/40" : ""}`}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">{o.label}</span>
+                  {o.hint && <span className="block text-[10px] text-muted-foreground truncate">{o.hint}</span>}
+                </span>
+                {selected && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-accent flex-shrink-0">
+                    <path d="M20 6 9 17l-5-5"/>
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GeometryEditor({
+  camera,
+  mode,
+  points,
+  onChange,
+}: {
+  camera: Camera;
+  mode: "line" | "polygon";
+  points: number[][];
+  onChange: (pts: number[][]) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 640, h: 360 });
+  const frameW = camera.width || 1280;
+  const frameH = camera.height || 720;
+
+  // Size canvas to container width, keep camera aspect.
+  useEffect(() => {
+    const update = () => {
+      const w = wrapRef.current?.clientWidth || 640;
+      const h = Math.round((w * frameH) / frameW);
+      setSize({ w, h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, [frameW, frameH]);
+
+  const scaleX = size.w / frameW;
+  const scaleY = size.h / frameH;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, size.w, size.h);
+    if (points.length === 0) return;
+
+    const stroke = mode === "line" ? "#818cf8" : "#fbbf24";
+    const fill = mode === "line" ? "rgba(129,140,248,0.15)" : "rgba(251,191,36,0.18)";
+
+    ctx.beginPath();
+    ctx.moveTo(points[0][0] * scaleX, points[0][1] * scaleY);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i][0] * scaleX, points[i][1] * scaleY);
+    }
+    if (mode === "polygon" && points.length >= 3) {
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    for (const p of points) {
+      ctx.beginPath();
+      ctx.arc(p[0] * scaleX, p[1] * scaleY, 5, 0, Math.PI * 2);
+      ctx.fillStyle = stroke;
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }, [points, size, scaleX, scaleY, mode]);
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = Math.round((e.clientX - rect.left) / scaleX);
+    const y = Math.round((e.clientY - rect.top) / scaleY);
+    if (mode === "line") {
+      if (points.length >= 2) {
+        onChange([[x, y]]);
+      } else {
+        onChange([...points, [x, y]]);
+      }
+    } else {
+      onChange([...points, [x, y]]);
+    }
+  };
+
+  const streamName = camera.stream_url ? extractStreamName(camera.stream_url) : "";
+  const iframeSrc = streamName ? `${WEBRTC_URL}/${streamName}/` : "";
+
+  return (
+    <div className="space-y-2">
+      <div ref={wrapRef} className="relative w-full bg-black rounded-md overflow-hidden border border-border" style={{ height: size.h }}>
+        {iframeSrc && camera.status !== "offline" ? (
+          <iframe
+            src={iframeSrc}
+            className="absolute inset-0 w-full h-full border-0 pointer-events-none"
+            allow="autoplay; encrypted-media"
+            sandbox="allow-scripts allow-same-origin"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+            {camera.status === "offline" ? "Camera offline" : "No preview"}
+          </div>
+        )}
+        <canvas
+          ref={canvasRef}
+          width={size.w}
+          height={size.h}
+          onClick={handleClick}
+          className="absolute inset-0 w-full h-full cursor-crosshair"
+        />
+      </div>
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>
+          {mode === "line"
+            ? points.length < 2
+              ? `Click two points to place a tripwire. (${points.length}/2)`
+              : "Tripwire placed. Click again to redraw."
+            : points.length < 3
+              ? `Click to add polygon points. (${points.length}/≥3)`
+              : `${points.length} points. Add more or clear to redraw.`}
+        </span>
+        {points.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="px-2 py-0.5 rounded border border-border hover:bg-muted transition-colors"
+          >Clear</button>
+        )}
+      </div>
     </div>
   );
 }
@@ -324,8 +563,11 @@ export default function RulesPage() {
   const [formTriggerSensitivity, setFormTriggerSensitivity] = useState("medium");
   const [formTriggerAudioLabel, setFormTriggerAudioLabel] = useState("baby_cry");
   const [formTriggerAudioMinScore, setFormTriggerAudioMinScore] = useState("0.35");
-  const [formTriggerZoneName, setFormTriggerZoneName] = useState("");
   const [formTriggerLineDirection, setFormTriggerLineDirection] = useState("any");
+  const [formTriggerGeomCamId, setFormTriggerGeomCamId] = useState("");
+  const [formTriggerGeomPoints, setFormTriggerGeomPoints] = useState<number[][]>([]);
+  const [formTriggerLoiterSeconds, setFormTriggerLoiterSeconds] = useState("30");
+  const [formTriggerObjectClass, setFormTriggerObjectClass] = useState("");
   const [formCondCameras, setFormCondCameras] = useState<string[]>([]);
   const [formScheduleMode, setFormScheduleMode] = useState<"always" | "custom">("always");
   const [formCondDays, setFormCondDays] = useState<string[]>([]);
@@ -367,7 +609,12 @@ export default function RulesPage() {
   const fetchCameras = useCallback(async () => {
     try {
       const res = await authFetch("/api/cameras");
-      if (res.ok) setCameras(await res.json());
+      if (res.ok) {
+        const list = await res.json();
+        setCameras(list);
+        cameraLookup.clear();
+        for (const c of list) cameraLookup.set(c.id, c.name);
+      }
     } catch {
       /* silent */
     }
@@ -425,8 +672,11 @@ export default function RulesPage() {
     setFormTriggerSensitivity("medium");
     setFormTriggerAudioLabel("baby_cry");
     setFormTriggerAudioMinScore("0.35");
-    setFormTriggerZoneName("");
     setFormTriggerLineDirection("any");
+    setFormTriggerGeomCamId("");
+    setFormTriggerGeomPoints([]);
+    setFormTriggerLoiterSeconds("30");
+    setFormTriggerObjectClass("");
     setFormCondCameras([]);
     setFormScheduleMode("always");
     setFormCondDays([]);
@@ -471,8 +721,12 @@ export default function RulesPage() {
     setFormTriggerPersonId((tp.person_id as string) || "");
     setFormTriggerAudioLabel((tp.label as string) || "baby_cry");
     setFormTriggerAudioMinScore(tp.min_score != null ? String(tp.min_score) : "0.35");
-    setFormTriggerZoneName((tp.zone_name as string) || "");
     setFormTriggerLineDirection((tp.direction as string) || "any");
+    setFormTriggerGeomCamId((tp.camera_id as string) || "");
+    const pts = tp.points as number[][] | undefined;
+    setFormTriggerGeomPoints(Array.isArray(pts) ? pts : []);
+    setFormTriggerLoiterSeconds(tp.threshold_seconds != null ? String(tp.threshold_seconds) : "30");
+    setFormTriggerObjectClass((tp.label as string) || "");
     // Map min_score back to sensitivity level
     const ms = tp.min_score as number | undefined;
     if (ms != null) {
@@ -560,10 +814,17 @@ export default function RulesPage() {
       triggerPattern.label = formTriggerAudioLabel;
       triggerPattern.min_score = parseFloat(formTriggerAudioMinScore) || 0.3;
     }
-    if (formTriggerType === "loitering" && formTriggerZoneName) triggerPattern.zone_name = formTriggerZoneName;
+    if (formTriggerType === "loitering") {
+      if (formTriggerGeomCamId) triggerPattern.camera_id = formTriggerGeomCamId;
+      if (formTriggerGeomPoints.length >= 3) triggerPattern.points = formTriggerGeomPoints;
+      triggerPattern.threshold_seconds = parseInt(formTriggerLoiterSeconds) || 30;
+      if (formTriggerObjectClass) triggerPattern.label = formTriggerObjectClass;
+    }
     if (formTriggerType === "line_cross") {
-      if (formTriggerZoneName) triggerPattern.zone_name = formTriggerZoneName;
+      if (formTriggerGeomCamId) triggerPattern.camera_id = formTriggerGeomCamId;
+      if (formTriggerGeomPoints.length === 2) triggerPattern.points = formTriggerGeomPoints;
       if (formTriggerLineDirection !== "any") triggerPattern.direction = formTriggerLineDirection;
+      if (formTriggerObjectClass) triggerPattern.label = formTriggerObjectClass;
     }
 
     const action: Record<string, unknown> = { type: formActionType };
@@ -610,12 +871,17 @@ export default function RulesPage() {
       trigger_pattern.label = formTriggerAudioLabel;
       trigger_pattern.min_score = parseFloat(formTriggerAudioMinScore) || 0.3;
     }
-    if (formTriggerType === "loitering" && formTriggerZoneName) {
-      trigger_pattern.zone_name = formTriggerZoneName;
+    if (formTriggerType === "loitering") {
+      if (formTriggerGeomCamId) trigger_pattern.camera_id = formTriggerGeomCamId;
+      if (formTriggerGeomPoints.length >= 3) trigger_pattern.points = formTriggerGeomPoints;
+      trigger_pattern.threshold_seconds = parseInt(formTriggerLoiterSeconds) || 30;
+      if (formTriggerObjectClass) trigger_pattern.label = formTriggerObjectClass;
     }
     if (formTriggerType === "line_cross") {
-      if (formTriggerZoneName) trigger_pattern.zone_name = formTriggerZoneName;
+      if (formTriggerGeomCamId) trigger_pattern.camera_id = formTriggerGeomCamId;
+      if (formTriggerGeomPoints.length === 2) trigger_pattern.points = formTriggerGeomPoints;
       if (formTriggerLineDirection !== "any") trigger_pattern.direction = formTriggerLineDirection;
+      if (formTriggerObjectClass) trigger_pattern.label = formTriggerObjectClass;
     }
 
     const conditions: Record<string, unknown> = {};
@@ -1100,18 +1366,11 @@ export default function RulesPage() {
                 </div>
 
                 {formTriggerType === "object_detected" && (
-                  <select
+                  <StyledSelect
                     value={formTriggerLabel}
-                    onChange={(e) => setFormTriggerLabel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                  >
-                    <option value="">Any object</option>
-                    {OBJECT_LABELS.map((l) => (
-                      <option key={l} value={l}>
-                        {l}
-                      </option>
-                    ))}
-                  </select>
+                    options={[{ value: "", label: "Any object" }, ...OBJECT_LABELS.map((l) => ({ value: l, label: l }))]}
+                    onChange={setFormTriggerLabel}
+                  />
                 )}
 
                 {formTriggerType === "face_recognized" && (
@@ -1203,15 +1462,11 @@ export default function RulesPage() {
                   <div className="space-y-2">
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Sound type</label>
-                      <select
+                      <StyledSelect
                         value={formTriggerAudioLabel}
-                        onChange={(e) => setFormTriggerAudioLabel(e.target.value)}
-                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                      >
-                        {AUDIO_LABELS.map((a) => (
-                          <option key={a.value} value={a.value}>{a.label}</option>
-                        ))}
-                      </select>
+                        options={AUDIO_LABELS.map((a) => ({ value: a.value, label: a.label }))}
+                        onChange={setFormTriggerAudioLabel}
+                      />
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">
@@ -1230,52 +1485,126 @@ export default function RulesPage() {
                   </div>
                 )}
 
-                {formTriggerType === "loitering" && (
-                  <div className="space-y-2">
-                    <label className="text-xs text-muted-foreground block mb-1">
-                      Zone name (configure in Cameras → Motion zones, set loiter_threshold_seconds)
-                    </label>
-                    <input
-                      type="text"
-                      value={formTriggerZoneName}
-                      onChange={(e) => setFormTriggerZoneName(e.target.value)}
-                      placeholder="e.g. crib_area"
-                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    />
-                  </div>
-                )}
-
-                {formTriggerType === "line_cross" && (
-                  <div className="space-y-2">
+                {(formTriggerType === "loitering" || formTriggerType === "line_cross") && (
+                  <div className="space-y-3">
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">
-                        Tripwire zone name (type=&quot;tripwire&quot; with 2 points)
-                      </label>
-                      <input
-                        type="text"
-                        value={formTriggerZoneName}
-                        onChange={(e) => setFormTriggerZoneName(e.target.value)}
-                        placeholder="e.g. driveway_entry"
-                        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
+                      <label className="text-xs text-muted-foreground block mb-1.5">Pick a camera</label>
+                      {cameras.length === 0 ? (
+                        <p className="text-xs text-muted-foreground px-2 py-3 rounded-md border border-dashed border-border">
+                          No cameras yet. Add one on the Cameras page first.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {cameras.map((cam) => {
+                            const selected = formTriggerGeomCamId === cam.id;
+                            return (
+                              <button
+                                key={cam.id}
+                                type="button"
+                                onClick={() => {
+                                  setFormTriggerGeomCamId(cam.id);
+                                  setFormTriggerGeomPoints([]);
+                                }}
+                                className={`flex items-center gap-2 rounded-md border p-2 text-left transition-colors ${
+                                  selected
+                                    ? "border-indigo-500 bg-indigo-500/10 ring-2 ring-indigo-500/40"
+                                    : "border-border bg-background hover:bg-muted/60"
+                                }`}
+                              >
+                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  cam.status === "recording" ? "bg-green-500" :
+                                  cam.status === "online" ? "bg-accent" :
+                                  "bg-muted-foreground/40"
+                                }`} />
+                                <span className="text-sm font-medium truncate">{cam.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {formTriggerGeomCamId && (() => {
+                      const cam = cameras.find((c) => c.id === formTriggerGeomCamId);
+                      if (!cam) return null;
+                      return (
+                        <div>
+                          <label className="text-xs text-muted-foreground block mb-1.5">
+                            {formTriggerType === "line_cross"
+                              ? "Draw tripwire. Click two points on the feed."
+                              : "Draw loiter zone. Click at least three points."}
+                          </label>
+                          <GeometryEditor
+                            camera={cam}
+                            mode={formTriggerType === "line_cross" ? "line" : "polygon"}
+                            points={formTriggerGeomPoints}
+                            onChange={setFormTriggerGeomPoints}
+                          />
+                        </div>
+                      );
+                    })()}
+
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Which objects count (optional)</label>
+                      <StyledSelect
+                        value={formTriggerObjectClass}
+                        options={[{ value: "", label: "Any tracked object" }, ...OBJECT_LABELS.map((l) => ({ value: l, label: l }))]}
+                        onChange={setFormTriggerObjectClass}
                       />
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Direction</label>
-                      <div className="grid grid-cols-3 gap-1">
-                        {["any", "in", "out"].map((d) => (
-                          <button
-                            key={d}
-                            type="button"
-                            onClick={() => setFormTriggerLineDirection(d)}
-                            className={`px-2 py-2 text-xs rounded border transition-colors capitalize ${
-                              formTriggerLineDirection === d
-                                ? "border-accent bg-accent/10 text-accent"
-                                : "border-border hover:bg-muted"
-                            }`}
-                          >{d}</button>
-                        ))}
+
+                    {formTriggerType === "loitering" && (
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">
+                          Loiter threshold (seconds inside the zone)
+                        </label>
+                        <div className="flex gap-1 flex-wrap">
+                          {["10", "30", "60", "120", "300"].map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => setFormTriggerLoiterSeconds(s)}
+                              className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                                formTriggerLoiterSeconds === s
+                                  ? "border-accent bg-accent/10 text-accent"
+                                  : "border-border hover:bg-muted"
+                              }`}
+                            >{parseInt(s) >= 60 ? `${Math.round(parseInt(s) / 60)} min` : `${s}s`}</button>
+                          ))}
+                          <input
+                            type="number"
+                            min="1"
+                            value={formTriggerLoiterSeconds}
+                            onChange={(e) => setFormTriggerLoiterSeconds(e.target.value)}
+                            className="w-20 px-2 py-1.5 text-xs rounded border border-border bg-background"
+                          />
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {formTriggerType === "line_cross" && (
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">Direction</label>
+                        <div className="grid grid-cols-3 gap-1">
+                          {[
+                            { v: "any", l: "Either way" },
+                            { v: "in", l: "Inbound" },
+                            { v: "out", l: "Outbound" },
+                          ].map((d) => (
+                            <button
+                              key={d.v}
+                              type="button"
+                              onClick={() => setFormTriggerLineDirection(d.v)}
+                              className={`px-2 py-2 text-xs rounded border transition-colors ${
+                                formTriggerLineDirection === d.v
+                                  ? "border-accent bg-accent/10 text-accent"
+                                  : "border-border hover:bg-muted"
+                              }`}
+                            >{d.l}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </fieldset>
@@ -1491,17 +1820,11 @@ export default function RulesPage() {
                 <legend className="text-xs font-medium text-muted-foreground px-1">
                   Action
                 </legend>
-                <select
+                <StyledSelect
                   value={formActionType}
-                  onChange={(e) => setFormActionType(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                >
-                  {ACTION_TYPES.map((a) => (
-                    <option key={a.value} value={a.value}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
+                  options={ACTION_TYPES.map((a) => ({ value: a.value, label: a.label }))}
+                  onChange={setFormActionType}
+                />
 
                 {/* Webhook / API Call fields */}
                 {(formActionType === "webhook" || formActionType === "api_call") && (
@@ -1746,15 +2069,15 @@ export default function RulesPage() {
                       className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
                       placeholder="Rule '{rule_name}' triggered"
                     />
-                    <select
+                    <StyledSelect
                       value={formActionSeverity}
-                      onChange={(e) => setFormActionSeverity(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm"
-                    >
-                      <option value="info">Info</option>
-                      <option value="warning">Warning</option>
-                      <option value="critical">Critical</option>
-                    </select>
+                      options={[
+                        { value: "info", label: "Info" },
+                        { value: "warning", label: "Warning" },
+                        { value: "critical", label: "Critical" },
+                      ]}
+                      onChange={setFormActionSeverity}
+                    />
                   </>
                 )}
 

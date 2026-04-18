@@ -342,6 +342,15 @@ class PerceptionPipeline:
             "person_detections": person_detections,
             "loitering_events": loitering_events,
             "line_cross_events": line_cross_events,
+            "tracks": [
+                {
+                    "track_id": tr.track_id,
+                    "label": tr.label,
+                    "bbox": tr.bbox,
+                    "prev_bbox": tr.prev_bbox,
+                }
+                for tr in tracker.tracks.values()
+            ],
             "vlm_description": None,  # VLM runs async, not available at rule eval time
             "confidence": None,
         }
