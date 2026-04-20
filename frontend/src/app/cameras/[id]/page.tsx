@@ -1444,7 +1444,7 @@ export default function CameraConfigPage() {
             )}
           </FieldRow>
 
-          <FieldRow label="Analysis Frequency" hint="How often to send frames to VLM">
+          <FieldRow label="Analysis Frequency" hint="Rate limit. Minimum gap between consecutive VLM calls">
             <div className="flex items-center gap-3">
               <input
                 type="range"
@@ -1466,7 +1466,7 @@ export default function CameraConfigPage() {
             </p>
           </FieldRow>
 
-          <FieldRow label="Trigger Condition" hint="When to send frames to VLM">
+          <FieldRow label="Trigger Condition" hint="Gate. What qualifies a frame for VLM analysis in the first place">
             <div className="flex gap-1.5 mb-2">
               {([
                 { value: "always", label: "Always", desc: "Time-based, using frequency above" },
