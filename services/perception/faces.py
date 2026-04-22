@@ -241,8 +241,18 @@ class FaceRecognizer:
             logger.exception("Failed to load face clusters")
             return []
 
+    # Same-session window. Repeated detections of the same face inside this
+    # window count as one visit. Prevents a person standing in frame from
+    # inflating sighting_count by one per frame.
+    SIGHTING_DEBOUNCE_SECONDS = 300  # 5 min
+
     async def _add_to_cluster(self, cluster_id: uuid.UUID, embedding: np.ndarray, camera_id: str, thumbnail_path: str | None):
-        """Add a face sighting to an existing cluster and update representative embedding."""
+        """Add a face sighting to an existing cluster.
+
+        Debounced. Within SIGHTING_DEBOUNCE_SECONDS of last_seen_at we only
+        bump last_seen_at (same visit). Past the window we count a new
+        sighting and store a fresh sample.
+        """
         try:
             from shared.models import FaceCluster, FaceClusterSample
             async with async_session() as db:
@@ -250,7 +260,21 @@ class FaceRecognizer:
                 if not cluster:
                     return
 
-                # Add sample
+                now = datetime.now(timezone.utc)
+                last_seen = cluster.last_seen_at
+                if last_seen is not None and last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=timezone.utc)
+                within_session = (
+                    last_seen is not None
+                    and (now - last_seen).total_seconds() < self.SIGHTING_DEBOUNCE_SECONDS
+                )
+
+                cluster.last_seen_at = now
+                if within_session:
+                    await db.commit()
+                    return
+
+                # New visit. Record sample, bump count, refine representative.
                 sample = FaceClusterSample(
                     cluster_id=cluster_id,
                     camera_id=uuid.UUID(camera_id),
@@ -259,17 +283,12 @@ class FaceRecognizer:
                 )
                 db.add(sample)
 
-                # Update cluster stats
                 cluster.sighting_count += 1
-                cluster.last_seen_at = datetime.now(timezone.utc)
-
-                # Update representative embedding (running average)
                 old_emb = np.array(cluster.representative_embedding)
                 n = cluster.sighting_count
                 new_rep = ((old_emb * (n - 1)) + embedding) / n
                 cluster.representative_embedding = new_rep.tolist()
 
-                # Update thumbnail if this is a better crop (use first few samples)
                 if cluster.sighting_count <= 5 and thumbnail_path:
                     cluster.sample_thumbnail_path = thumbnail_path
 

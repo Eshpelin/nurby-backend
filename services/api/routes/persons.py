@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.config import settings
-from shared.auth import get_current_user, require_admin
+from shared.auth import decode_access_token, get_current_user, require_admin
 from shared.database import get_db
 from shared.models import Camera, FaceCluster, FaceClusterSample, FaceEmbedding, Observation, Person, User
 from shared.schemas import PersonCreate, PersonRecapResponse, PersonResponse, PersonUpdate
@@ -94,9 +94,12 @@ async def get_cluster_samples(
 @router.get("/suggestions/{cluster_id}/thumbnail")
 async def get_cluster_thumbnail(
     cluster_id: uuid.UUID,
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get the representative face thumbnail for a cluster."""
+    """Thumbnail auth accepts `?token=` query param so <img> tags work."""
+    if not token or not decode_access_token(token):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
     cluster = await db.get(FaceCluster, cluster_id)
     if not cluster or not cluster.sample_thumbnail_path:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
@@ -113,9 +116,12 @@ async def get_cluster_thumbnail(
 async def get_sample_thumbnail(
     cluster_id: uuid.UUID,
     sample_id: uuid.UUID,
-    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get thumbnail for a specific sample."""
+    """Thumbnail auth accepts `?token=` query param so <img> tags work."""
+    if not token or not decode_access_token(token):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
     sample = await db.get(FaceClusterSample, sample_id)
     if not sample or not sample.thumbnail_path or sample.cluster_id != cluster_id:
         raise HTTPException(status_code=404, detail="Thumbnail not found")

@@ -141,7 +141,7 @@ export default function PeoplePage() {
 
   const fetchSuggestions = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await authFetch("/api/persons/suggestions?min_sightings=2");
+      const res = await authFetch("/api/persons/suggestions?min_sightings=1");
       if (!res.ok || signal?.aborted) return;
       const data: FaceSuggestion[] = await res.json();
       if (signal?.aborted) return;
@@ -368,8 +368,8 @@ export default function PeoplePage() {
                         {sample.thumbnail_path ? (
                           <img
                             src={sample.id === "main"
-                              ? `/api/persons/suggestions/${s.id}/thumbnail`
-                              : `/api/persons/suggestions/${s.id}/samples/${sample.id}/thumbnail`}
+                              ? `/api/persons/suggestions/${s.id}/thumbnail${token ? `?token=${token}` : ""}`
+                              : `/api/persons/suggestions/${s.id}/samples/${sample.id}/thumbnail${token ? `?token=${token}` : ""}`}
                             alt="Sighting"
                             className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
