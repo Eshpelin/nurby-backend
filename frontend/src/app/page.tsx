@@ -1075,12 +1075,12 @@ function PersonActivityModal({ personId, personName, onClose, mode = "person" }:
   );
 }
 
-function AddCameraModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function AddCameraModal({ onClose, onSuccess, initialStreamType }: { onClose: () => void; onSuccess: () => void; initialStreamType?: StreamType }) {
   const { authFetch } = useAuth();
   const { startPublish, attachCameraId, stopPublish } = useWebcamPublisher();
   const [activeTab, setActiveTab] = useState<ModalTab>("manual");
   const [name, setName] = useState("");
-  const [streamType, setStreamType] = useState<StreamType>("rtsp");
+  const [streamType, setStreamType] = useState<StreamType>(initialStreamType || "rtsp");
   const [streamUrl, setStreamUrl] = useState("");
 
   // Webcam state
@@ -1107,6 +1107,14 @@ function AddCameraModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
   const selectedType = STREAM_TYPES.find((t) => t.value === streamType)!;
   const supportsAuth = ["rtsp", "http_mjpeg", "http_snapshot", "hls"].includes(streamType);
   const supportsSnapshotInterval = streamType === "http_snapshot";
+
+  // Auto-scan when the modal opens directly into USB mode ("Add Webcam").
+  useEffect(() => {
+    if (initialStreamType === "usb") {
+      handleDetectDevices();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleDetectDevices() {
     setScanningDevices(true);
@@ -1273,6 +1281,7 @@ function AddCameraModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
     }
     if (supportsAuth && authToken.trim()) payload.auth_token = authToken.trim();
     if (supportsSnapshotInterval) payload.snapshot_interval = snapshotInterval;
+    if (streamType === "usb") payload.webcam_device = streamUrl.trim();
     await handleSubmitCamera(payload);
   }
 
@@ -1511,6 +1520,7 @@ function DashboardContent() {
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [camerasLoading, setCamerasLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalInitialType, setModalInitialType] = useState<StreamType | undefined>(undefined);
   const [activityEvents, setActivityEvents] = useState<Record<string, ActivityEvent[]>>({});
   const [selectedCamera, setSelectedCamera] = useState<string | null>(initialCamera);
   const [cameraLayout, setCameraLayout] = useState<CameraLayout>(() => {
@@ -1519,6 +1529,18 @@ function DashboardContent() {
     }
     return "single";
   });
+  // User-customised sidebar width. null means fall back to preset for layout.
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const raw = localStorage.getItem("nurby-sidebar-width");
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) && n >= 220 && n <= 900 ? n : null;
+  });
+  const [resizing, setResizing] = useState(false);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  // Drag-and-drop reorder state
+  const [dragCameraId, setDragCameraId] = useState<string | null>(null);
+  const [dragOverCameraId, setDragOverCameraId] = useState<string | null>(null);
 
   // Timeline state
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -1593,6 +1615,54 @@ function DashboardContent() {
     } catch { /* silent */ }
     finally { setCamerasLoading(false); }
   }, []);
+
+  // Persist a new camera order locally + on the server.
+  const reorderCameras = useCallback(async (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    setCameras((prev) => {
+      const next = [...prev];
+      const srcIdx = next.findIndex((c) => c.id === sourceId);
+      const tgtIdx = next.findIndex((c) => c.id === targetId);
+      if (srcIdx < 0 || tgtIdx < 0) return prev;
+      const [moved] = next.splice(srcIdx, 1);
+      next.splice(tgtIdx, 0, moved);
+      const payload = next.map((c, i) => ({ id: c.id, display_order: i }));
+      authFetch("/api/cameras/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => { /* best-effort */ });
+      return next.map((c, i) => ({ ...c, display_order: i }));
+    });
+  }, [authFetch]);
+
+  // Resizable sidebar. attach global mousemove while resizing.
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) => {
+      if (!sidebarRef.current) return;
+      const rect = sidebarRef.current.getBoundingClientRect();
+      const w = Math.min(900, Math.max(220, e.clientX - rect.left));
+      setSidebarWidth(w);
+    };
+    const onUp = () => {
+      setResizing(false);
+      setSidebarWidth((w) => {
+        if (w != null) localStorage.setItem("nurby-sidebar-width", String(w));
+        return w;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [resizing]);
 
   const fetchActivity = useCallback(async (cameraId: string) => {
     try {
@@ -1830,21 +1900,32 @@ function DashboardContent() {
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* LEFT. Camera feeds */}
-        <aside className={`flex-shrink-0 flex flex-col min-h-0 transition-all ${
-          cameraLayout === "double" ? "w-[480px]" : cameraLayout === "list" ? "w-80" : "w-72"
-        }`}>
+        <aside
+          ref={sidebarRef}
+          style={sidebarWidth ? { width: sidebarWidth } : undefined}
+          className={`relative flex-shrink-0 flex flex-col min-h-0 ${resizing ? "" : "transition-[width]"} ${
+            sidebarWidth ? "" : cameraLayout === "double" ? "w-[480px]" : cameraLayout === "list" ? "w-80" : "w-72"
+          }`}
+        >
           {/* Camera list header with layout toggle */}
           <div className="flex items-center justify-between mb-2 flex-shrink-0">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Cameras</span>
               {cameras.length > 0 && (
-                <button onClick={() => setModalOpen(true)}
-                  className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                  title="Add camera">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                    <path d="M12 5v14" /><path d="M5 12h14" />
-                  </svg>
-                </button>
+                <>
+                  <button onClick={() => { setModalInitialType(undefined); setModalOpen(true); }}
+                    className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                    title="Add camera">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M12 5v14" /><path d="M5 12h14" />
+                    </svg>
+                  </button>
+                  <button onClick={() => { setModalInitialType("usb"); setModalOpen(true); }}
+                    className="text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/50 transition-colors"
+                    title="Add a USB webcam. Auto-detects and bridges the device.">
+                    Webcam
+                  </button>
+                </>
               )}
             </div>
             <div className="flex items-center gap-0.5 p-0.5 rounded bg-muted/50 border border-border">
@@ -1882,14 +1963,41 @@ function DashboardContent() {
             cameraLayout === "double" ? "grid grid-cols-2 gap-2 auto-rows-min content-start" : "space-y-2"
           }`}>
             {cameras.map((cam) => (
-              <CameraSidebarCard
+              <div
                 key={cam.id}
-                camera={cam}
-                selected={selectedCamera === cam.id}
-                onClick={() => setSelectedCamera(selectedCamera === cam.id ? null : cam.id)}
-                activityEvents={activityEvents[cam.id] || []}
-                layout={cameraLayout}
-              />
+                draggable
+                onDragStart={(e) => {
+                  setDragCameraId(cam.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  try { e.dataTransfer.setData("text/plain", cam.id); } catch { /* noop */ }
+                }}
+                onDragOver={(e) => {
+                  if (!dragCameraId || dragCameraId === cam.id) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverCameraId !== cam.id) setDragOverCameraId(cam.id);
+                }}
+                onDragLeave={() => {
+                  if (dragOverCameraId === cam.id) setDragOverCameraId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const src = dragCameraId;
+                  setDragCameraId(null);
+                  setDragOverCameraId(null);
+                  if (src) reorderCameras(src, cam.id);
+                }}
+                onDragEnd={() => { setDragCameraId(null); setDragOverCameraId(null); }}
+                className={`${dragCameraId === cam.id ? "opacity-40" : ""} ${dragOverCameraId === cam.id ? "ring-1 ring-accent rounded-md" : ""}`}
+              >
+                <CameraSidebarCard
+                  camera={cam}
+                  selected={selectedCamera === cam.id}
+                  onClick={() => setSelectedCamera(selectedCamera === cam.id ? null : cam.id)}
+                  activityEvents={activityEvents[cam.id] || []}
+                  layout={cameraLayout}
+                />
+              </div>
             ))}
 
             {cameras.length === 0 && !camerasLoading && (
@@ -1906,13 +2014,13 @@ function DashboardContent() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <button onClick={() => setModalOpen(true)}
+                  <button onClick={() => { setModalInitialType(undefined); setModalOpen(true); }}
                     className="w-full px-2.5 py-2 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity">
                     Add a camera
                   </button>
-                  <button onClick={() => setModalOpen(true)}
-                    className="w-full px-2.5 py-2 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                    Use this device's webcam
+                  <button onClick={() => { setModalInitialType("usb"); setModalOpen(true); }}
+                    className="w-full px-2.5 py-2 text-xs rounded-md border border-accent/50 text-accent hover:bg-accent/10 transition-colors">
+                    Add a webcam
                   </button>
                 </div>
                 <div className="mt-3 pt-3 border-t border-border/50 text-[10px] text-muted-foreground leading-relaxed">
@@ -1925,6 +2033,19 @@ function DashboardContent() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Drag handle to resize sidebar */}
+          <div
+            onMouseDown={(e) => { e.preventDefault(); setResizing(true); }}
+            onDoubleClick={() => {
+              setSidebarWidth(null);
+              localStorage.removeItem("nurby-sidebar-width");
+            }}
+            title="Drag to resize. Double-click to reset."
+            className={`absolute top-0 right-0 h-full w-1.5 -mr-1 cursor-col-resize group/resize ${resizing ? "bg-accent/40" : "hover:bg-accent/30"}`}
+          >
+            <div className={`mx-auto mt-1/2 h-full w-px ${resizing ? "bg-accent" : "bg-border group-hover/resize:bg-accent"}`} />
           </div>
         </aside>
 
@@ -2598,7 +2719,7 @@ function DashboardContent() {
         </main>
       </div>
 
-      {modalOpen && <AddCameraModal onClose={() => setModalOpen(false)} onSuccess={() => { setModalOpen(false); fetchCameras(); }} />}
+      {modalOpen && <AddCameraModal initialStreamType={modalInitialType} onClose={() => { setModalOpen(false); setModalInitialType(undefined); }} onSuccess={() => { setModalOpen(false); setModalInitialType(undefined); fetchCameras(); }} />}
       {selectedPersonId && (
         <PersonActivityModal
           personId={selectedPersonId}
