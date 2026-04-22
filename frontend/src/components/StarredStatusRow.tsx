@@ -128,10 +128,13 @@ export function StarredStatusRow() {
   const active = items.filter((it) => it.last_observation_id && it.last_seen_at);
   const allQuiet = active.length === 0;
 
-  // Quiet mode. One-line flat summary with overlapping avatars.
+  // Quiet mode. One-line flat summary with overlapping avatars. Click to expand.
   if (allQuiet && !expanded) {
     return (
-      <div className="flex-shrink-0 mb-3 flex items-center gap-3 px-1 py-1.5">
+      <button
+        onClick={() => setExpanded(true)}
+        className="flex-shrink-0 mb-3 w-full flex items-center gap-3 px-1 py-1.5 rounded hover:bg-muted/30 transition-colors text-left"
+      >
         <div className="flex -space-x-2">
           {items.slice(0, 5).map((it) => (
             <div key={it.person_id} className="ring-2 ring-background rounded-full">
@@ -142,13 +145,7 @@ export function StarredStatusRow() {
         <span className="text-xs text-muted-foreground">
           All quiet. Watching {items.length} {items.length === 1 ? "person" : "people"}.
         </span>
-        <button
-          onClick={() => setExpanded(true)}
-          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Show all
-        </button>
-      </div>
+      </button>
     );
   }
 
