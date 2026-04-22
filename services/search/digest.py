@@ -31,10 +31,29 @@ PERIOD_DELTAS = {
 }
 
 DEFAULT_DIGEST_PROMPT = (
-    "You are Nurby, an AI camera monitoring assistant. "
-    "Summarize the following camera observations into a brief digest. "
-    "Be concise (2-4 sentences). Mention key activity, people, and patterns."
+    "You are Nurby, a home monitoring assistant. Your job is to turn a "
+    "list of camera observations into a short human-friendly story about "
+    "what actually happened in the home. "
+    "Write in plain English, present tense, 3 to 6 sentences. "
+    "Focus on who was seen (name them when named, call them 'an unknown "
+    "person' otherwise, and keep separate unknowns separate), when they "
+    "were there, which camera, and anything notable they were carrying "
+    "or doing. Call out anything that could indicate danger (knife, gun, "
+    "fire, glass break, weapon, injury) up front. "
+    "Do not quote raw counts like '651 times'. Do not list statistics. "
+    "Do not mention observation IDs. Do not use em-dashes, ellipses, or "
+    "colons before lists. If nothing meaningful happened, say so in one "
+    "sentence."
 )
+
+
+def _format_timestamp(ts: datetime) -> str:
+    """Short human time like '6:32 pm'."""
+    # %-I works on macOS/Linux, %#I on Windows. Use lstrip('0') to be safe.
+    return ts.strftime("%I:%M %p").lstrip("0").lower()
+
+
+SAFETY_LABELS = {"knife", "gun", "fire", "weapon"}
 
 
 async def generate_digest(
@@ -149,34 +168,150 @@ async def generate_digest(
         "camera_activity": dict(sorted(camera_activity.items(), key=lambda x: x[1], reverse=True)),
     }
 
-    # Generate natural language summary with VLM if available
+    # Build a per-observation narrative feed for the LLM. We care about
+    # when, where, who (named vs unknown), what VLM saw, and any safety
+    # label. Raw counts are not included because they add noise.
+    narrative_lines: list[str] = []
+    safety_hits: list[str] = []
+    named_sessions: dict[str, list[datetime]] = {}
+    unknown_sessions: list[datetime] = []
+
+    for obs in observations:
+        cam_name = camera_map.get(obs.camera_id, "Unknown camera")
+        t_start = _format_timestamp(obs.started_at)
+        t_end = _format_timestamp(obs.ended_at) if obs.ended_at else None
+        when = f"{t_start} to {t_end}" if t_end and t_end != t_start else t_start
+
+        labels = [
+            (o.get("label") or "").strip()
+            for o in (obs.object_detections or {}).get("objects", [])
+        ]
+        labels = [l for l in labels if l]
+        label_set = set(labels)
+
+        named_here = sorted({
+            f.get("person_name")
+            for f in (obs.person_detections or {}).get("faces", [])
+            if f.get("person_name")
+        })
+        unknown_here = sum(
+            1 for f in (obs.person_detections or {}).get("faces", [])
+            if not f.get("person_name")
+        )
+
+        for name in named_here:
+            named_sessions.setdefault(name, []).append(obs.started_at)
+        if unknown_here and not named_here:
+            unknown_sessions.append(obs.started_at)
+
+        safety = sorted(label_set & SAFETY_LABELS)
+        if safety:
+            safety_hits.append(
+                f"{when} on {cam_name}. Safety flag. {', '.join(safety)}."
+            )
+
+        who_parts: list[str] = []
+        if named_here:
+            who_parts.append(", ".join(named_here))
+        if unknown_here:
+            who_parts.append(
+                "1 unknown person" if unknown_here == 1
+                else f"{unknown_here} unknown people"
+            )
+        who = " and ".join(who_parts) if who_parts else None
+
+        notable_objects = [
+            l for l in label_set
+            if l not in {"person"} and l in {
+                "knife", "gun", "fire", "weapon", "cell phone", "laptop",
+                "backpack", "handbag", "suitcase", "umbrella", "bottle",
+                "wine glass", "dog", "cat", "car", "truck", "motorcycle",
+                "bicycle", "bus", "package",
+            }
+        ]
+
+        line = f"{when} on {cam_name}. "
+        if who:
+            line += f"Seen. {who}. "
+        if notable_objects:
+            line += f"With. {', '.join(sorted(notable_objects))}. "
+        if obs.vlm_description:
+            desc = obs.vlm_description.strip().replace("\n", " ")
+            if len(desc) > 240:
+                desc = desc[:237] + "."
+            line += f"Scene. {desc}"
+        narrative_lines.append(line.strip())
+
+    # Trim so we stay under token budget. Keep earliest + latest slices.
+    MAX_LINES = 60
+    if len(narrative_lines) > MAX_LINES:
+        half = MAX_LINES // 2
+        narrative_lines = (
+            narrative_lines[:half]
+            + [f". {len(narrative_lines) - MAX_LINES} similar moments omitted ."]
+            + narrative_lines[-half:]
+        )
+
+    # People roll-up for prompt context.
+    roll_up_lines: list[str] = []
+    for name, moments in named_sessions.items():
+        first = _format_timestamp(min(moments))
+        last = _format_timestamp(max(moments))
+        if first == last:
+            roll_up_lines.append(f"{name} seen around {first}.")
+        else:
+            roll_up_lines.append(f"{name} seen from about {first} to {last}.")
+    if unknown_sessions:
+        first = _format_timestamp(min(unknown_sessions))
+        last = _format_timestamp(max(unknown_sessions))
+        if first == last:
+            roll_up_lines.append(f"Unknown person seen around {first}.")
+        else:
+            roll_up_lines.append(f"Unknown person activity from {first} to {last}.")
+
+    # Generate natural language summary with the active text/VLM provider.
     summary_text = None
-    if provider and vlm_descriptions:
+    if provider:
         try:
-            context = "\n".join([
-                f"- {d}" for d in vlm_descriptions[:20]
-            ])
             system_prompt = custom_prompt or DEFAULT_DIGEST_PROMPT
             user_prompt = (
-                f"Period. {period_label}\n"
-                f"Total observations. {len(observations)}\n"
-                f"Cameras. {', '.join(camera_activity.keys())}\n"
-                f"Top objects. {', '.join(f'{l} ({c}x)' for l, c in top_objects)}\n"
-                f"People. {', '.join(f'{n} ({c}x)' for n, c in top_people) if top_people else 'none identified'}\n\n"
-                f"Scene descriptions from cameras.\n{context}\n\n"
-                f"Write a brief summary digest."
+                f"Reporting period. {period_label}.\n"
+                f"Cameras involved. {', '.join(camera_activity.keys()) or 'none'}.\n"
+            )
+            if safety_hits:
+                user_prompt += "Safety flags.\n" + "\n".join(safety_hits) + "\n"
+            if roll_up_lines:
+                user_prompt += "People summary.\n" + "\n".join(roll_up_lines) + "\n"
+            user_prompt += (
+                "\nObservation feed (chronological).\n"
+                + "\n".join(narrative_lines)
+                + "\n\nWrite the digest as a short plain-English story "
+                "about what happened. Lead with any safety flag. Use the "
+                "people summary to avoid double counting. Do not output "
+                "statistics."
             )
             summary_text = await _call_text_llm(provider, system_prompt, user_prompt)
+            if summary_text:
+                summary_text = summary_text.strip()
         except Exception:
             logger.exception("VLM digest summary failed")
 
     if not summary_text:
-        # Fallback structured summary
-        parts = [f"{len(observations)} observations across {len(camera_activity)} camera{'s' if len(camera_activity) != 1 else ''}."]
-        if top_objects:
-            parts.append(f"Top detections. {', '.join(f'{l} ({c}x)' for l, c in top_objects[:3])}.")
-        if top_people:
-            parts.append(f"People identified. {', '.join(n for n, _ in top_people[:3])}.")
+        # Narrative fallback built from the same roll-ups. No raw counts.
+        parts: list[str] = []
+        if safety_hits:
+            parts.append(
+                f"Safety flag. {safety_hits[0]}"
+            )
+        if roll_up_lines:
+            parts.append(" ".join(roll_up_lines))
+        elif camera_activity:
+            parts.append(
+                f"Quiet period on {', '.join(camera_activity.keys())}. "
+                "Motion was detected but nothing notable was identified."
+            )
+        else:
+            parts.append("Nothing notable happened during this period.")
         summary_text = " ".join(parts)
 
     return {

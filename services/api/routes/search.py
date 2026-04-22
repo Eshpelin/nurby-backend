@@ -13,6 +13,7 @@ from shared.schemas import DigestEntryResponse
 from services.search.query import search_observations, answer_question
 from services.search.digest import generate_digest
 from services.search.embeddings import get_embedding_provider
+from services.perception.vlm import get_active_provider as get_active_vlm_provider
 from services.search.backfill import backfill_embeddings
 
 router = APIRouter()
@@ -94,7 +95,12 @@ async def get_digest(
                 provider = await db.get(Provider, cam.digest_provider_id)
 
     if not provider:
-        provider = await get_embedding_provider()
+        # Prefer the active VLM/text provider. get_embedding_provider
+        # returns the embedding model, which is not a text LLM and
+        # silently produces no narrative, forcing the stats fallback.
+        provider = await get_active_vlm_provider()
+        if not provider:
+            provider = await get_embedding_provider()
 
     return await generate_digest(
         db, period=period, camera_id=camera_id,
