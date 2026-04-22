@@ -613,6 +613,12 @@ def _webcam_motion_cooldown(camera: Camera) -> int:
 MOTION_STREAM_KEY = "nurby:motion"
 MOTION_STREAM_MAXLEN = 1000
 
+# Fast lane for live detection overlay. Every frame goes here. YOLO-only
+# consumer runs inline and caches detections for the dashboard overlay.
+LIVE_MOTION_STREAM_KEY = "nurby:live_motion"
+LIVE_MOTION_STREAM_MAXLEN = 50
+LIVE_DET_CACHE_PREFIX = "nurby:live_det:"
+
 
 @router.post("/{camera_id}/frame", status_code=204)
 async def upload_webcam_frame(
@@ -679,6 +685,17 @@ async def upload_webcam_frame(
                 body,
                 ex=WEBCAM_FRAME_TTL,
             )
+            # Fast lane. every frame, no cadence gate. Small stream.
+            await r.xadd(
+                LIVE_MOTION_STREAM_KEY,
+                {
+                    "camera_id": str(camera_id),
+                    "frame": body,
+                },
+                maxlen=LIVE_MOTION_STREAM_MAXLEN,
+                approximate=True,
+            )
+
             cooldown_key = f"{WEBCAM_MOTION_COOLDOWN_KEY}{camera_id}"
             # SET NX with TTL acts as a per-camera rate gate. If the key
             # already exists we skip this frame for perception but keep
@@ -739,6 +756,38 @@ async def latest_webcam_frame(
     if not data:
         raise HTTPException(status_code=404, detail="No recent frame")
     return Response(content=data, media_type="image/jpeg")
+
+
+@router.get("/{camera_id}/live-detections")
+async def live_detections(
+    camera_id: uuid.UUID,
+    _current_user: User = Depends(get_current_user),
+):
+    """Return the latest cached fast-lane YOLO detections for overlay.
+
+    The live detector writes a fresh entry per frame with a short TTL,
+    so callers polling a few times a second see near-realtime boxes
+    that track movement between full observation cadences.
+    """
+    import json as _json
+
+    import redis.asyncio as aioredis
+
+    try:
+        r = aioredis.from_url(settings.redis_url)
+        try:
+            data = await r.get(f"{LIVE_DET_CACHE_PREFIX}{camera_id}")
+        finally:
+            await r.aclose()
+    except Exception:
+        data = None
+
+    if not data:
+        return {"camera_id": str(camera_id), "detections": [], "width": 0, "height": 0}
+    try:
+        return _json.loads(data)
+    except Exception:
+        return {"camera_id": str(camera_id), "detections": [], "width": 0, "height": 0}
 
 
 @router.delete("/{camera_id}", status_code=204)

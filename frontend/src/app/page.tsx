@@ -369,8 +369,8 @@ function statusLabel(status: string): string {
 
 const DEFAULT_FRAME_WIDTH = 1920;
 const DEFAULT_FRAME_HEIGHT = 1080;
-const DETECTION_FADE_MS = 10000;
-const DETECTION_POLL_MS = 5000;
+const DETECTION_FADE_MS = 3500;
+const DETECTION_POLL_MS = 700;
 
 interface OverlayDetection {
   label: string;
@@ -398,6 +398,29 @@ function DetectionOverlay({ cameraId, visible, frameWidth, frameHeight }: {
 
     async function poll() {
       try {
+        // Fast lane first. Live YOLO cache refreshes per frame.
+        const liveRes = await authFetch(`/api/cameras/${cameraId}/live-detections`);
+        if (liveRes.ok && !cancelled) {
+          const live = await liveRes.json() as {
+            width: number;
+            height: number;
+            detections?: { label: string; confidence: number; bbox: number[] }[];
+          };
+          if (!cancelled && live.detections && live.detections.length > 0) {
+            const boxes: OverlayDetection[] = live.detections.map((d) => ({
+              label: `${d.label} ${Math.round(d.confidence * 100)}%`,
+              bbox: d.bbox,
+              color: "rgba(34, 197, 94, 0.15)",
+              borderColor: "rgb(34, 197, 94)",
+            }));
+            setDetections(boxes);
+            setLastUpdated(Date.now());
+            setFaded(false);
+            return;
+          }
+        }
+
+        // Fallback. observation record (slower cadence, includes faces).
         const res = await authFetch(`/api/observations?camera_id=${cameraId}&limit=1`);
         if (!res.ok || cancelled) return;
         const obs: Observation[] = await res.json();

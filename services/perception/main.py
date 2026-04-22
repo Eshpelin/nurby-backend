@@ -9,6 +9,7 @@ observations in the database.
 import asyncio
 import logging
 
+from services.perception.live_detector import LiveDetector
 from services.perception.pipeline import PerceptionPipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
@@ -18,7 +19,8 @@ logger = logging.getLogger("nurby.perception")
 async def main():
     logger.info("Starting Nurby perception service")
     pipeline = PerceptionPipeline()
-    await pipeline.run()
+    live = LiveDetector()
+    await asyncio.gather(pipeline.run(), live.run())
 
 
 if __name__ == "__main__":
