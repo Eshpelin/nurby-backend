@@ -144,10 +144,10 @@ interface Digest {
 
 interface TimelineEntry {
   id: string;
-  type: "recording" | "observation" | "status" | "search_result";
+  type: "recording" | "observation" | "status" | "search_result" | "notification";
   camera_id: string;
   timestamp: string;
-  data: Recording | Observation | StatusLog | SearchResult;
+  data: Recording | Observation | StatusLog | SearchResult | Notification;
 }
 
 interface ActivityEvent {
@@ -155,6 +155,17 @@ interface ActivityEvent {
   timestamp: string;
   summary: string;
   icon: "person" | "object" | "scene";
+}
+
+interface Notification {
+  id: string;
+  message: string;
+  severity: string;
+  rule_id: string | null;
+  camera_id: string | null;
+  observation_id: string | null;
+  read: boolean;
+  created_at: string;
 }
 
 const STREAM_TYPES: { value: StreamType; label: string; hint: string; placeholder: string }[] = [
@@ -1544,6 +1555,7 @@ function DashboardContent() {
 
   // Timeline state
   const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
   const [statusLogs, setStatusLogs] = useState<StatusLog[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
@@ -1710,10 +1722,11 @@ function DashboardContent() {
       const statusParams = new URLSearchParams({ limit: "100" });
       if (selectedCamera) statusParams.set("camera_id", selectedCamera);
 
-      const [recRes, obsRes, statusRes] = await Promise.all([
+      const [recRes, obsRes, statusRes, notifRes] = await Promise.all([
         authFetch(`/api/recordings?${params}`),
         authFetch(`/api/observations?${params}`),
         authFetch(`/api/cameras/status-logs?${statusParams}`),
+        authFetch(`/api/notifications?limit=100`),
       ]);
 
       const now = Date.now();
@@ -1723,6 +1736,10 @@ function DashboardContent() {
       if (recRes.ok) setRecordings((await recRes.json()).filter((r: Recording) => new Date(r.started_at).getTime() >= cutoff));
       if (obsRes.ok) setObservations((await obsRes.json()).filter((o: Observation) => new Date(o.started_at).getTime() >= cutoff));
       if (statusRes.ok) setStatusLogs((await statusRes.json()).filter((s: StatusLog) => new Date(s.timestamp).getTime() >= cutoff));
+      if (notifRes.ok) {
+        const all: Notification[] = await notifRes.json();
+        setNotifications(all.filter((n) => new Date(n.created_at).getTime() >= cutoff && (!selectedCamera || n.camera_id === selectedCamera)));
+      }
     } catch { /* silent */ }
     finally { setTimelineLoading(false); }
   }, [selectedCamera, timeRange, authFetch]);
@@ -1836,6 +1853,15 @@ function DashboardContent() {
     if (eventFilters.has("recordings")) entries.push(...recordings.map((r) => ({ id: `rec-${r.id}`, type: "recording" as const, camera_id: r.camera_id, timestamp: r.started_at, data: r })));
     if (eventFilters.has("observations")) entries.push(...observations.map((o) => ({ id: `obs-${o.id}`, type: "observation" as const, camera_id: o.camera_id, timestamp: o.started_at, data: o })));
     if (eventFilters.has("status")) entries.push(...statusLogs.map((s) => ({ id: `status-${s.id}`, type: "status" as const, camera_id: s.camera_id, timestamp: s.timestamp, data: s })));
+    // Always include notifications. they are explicit rule fires and deserve
+    // priority in the digest even when the "status" filter is off.
+    entries.push(...notifications.map((n) => ({
+      id: `notif-${n.id}`,
+      type: "notification" as const,
+      camera_id: n.camera_id || "",
+      timestamp: n.created_at,
+      data: n,
+    })));
   }
 
   entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -1850,45 +1876,118 @@ function DashboardContent() {
   }
 
   // Build a lightweight digest for a bucket's entries
+  // Object labels worth surfacing in a one-line summary. Everything else
+  // gets folded into "and N other objects" or ignored entirely.
+  const INTERESTING_OBJECTS = new Set([
+    "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat",
+    "package", "box", "backpack", "handbag", "knife", "gun", "fire",
+  ]);
+
+  interface BucketHighlight {
+    tone: "person" | "unknown" | "plate" | "object" | "rule" | "scene";
+    text: string;
+    camName?: string;
+    thumbnailObsId?: string;
+  }
+
   function bucketDigest(bucketEntries: TimelineEntry[]) {
-    let obsCount = 0, recCount = 0, statusCount = 0;
     const persons = new Set<string>();
+    const personObsId: Record<string, string> = {};
     let unknownFaces = 0;
+    let unknownThumb: string | undefined;
     const objectCounts: Record<string, number> = {};
-    const camCounts: Record<string, number> = {};
-    let plateCount = 0;
+    const objectCamByLabel: Record<string, string> = {};
+    const plates = new Set<string>();
+    const plateObsId: Record<string, string> = {};
+    let recCount = 0;
+    const ruleFires: { message: string; camName?: string }[] = [];
+    const camHits: Record<string, number> = {};
+
     for (const e of bucketEntries) {
-      camCounts[e.camera_id] = (camCounts[e.camera_id] || 0) + 1;
-      if (e.type === "recording") recCount++;
-      else if (e.type === "status") statusCount++;
-      else if (e.type === "observation" || e.type === "search_result") {
-        obsCount++;
+      if (e.camera_id) camHits[e.camera_id] = (camHits[e.camera_id] || 0) + 1;
+      const camName = cameraMap[e.camera_id]?.name;
+
+      if (e.type === "recording") {
+        recCount++;
+      } else if (e.type === "notification") {
+        const n = e.data as Notification;
+        ruleFires.push({ message: n.message, camName });
+      } else if (e.type === "observation" || e.type === "search_result") {
         const o = e.data as Observation;
         for (const f of o.person_detections?.faces || []) {
-          if (f.person_name) persons.add(f.person_name); else unknownFaces++;
+          if (f.person_name) {
+            persons.add(f.person_name);
+            if (!personObsId[f.person_name]) personObsId[f.person_name] = o.id;
+          } else {
+            unknownFaces++;
+            if (!unknownThumb) unknownThumb = o.id;
+          }
         }
         for (const d of o.object_detections?.objects || []) {
-          if (d.label === "license_plate") plateCount++;
-          else if (d.label !== "person") objectCounts[d.label] = (objectCounts[d.label] || 0) + 1;
+          if (d.label === "license_plate") {
+            if (d.plate_text) {
+              plates.add(d.plate_text);
+              if (!plateObsId[d.plate_text]) plateObsId[d.plate_text] = o.id;
+            }
+          } else if (d.label !== "person") {
+            objectCounts[d.label] = (objectCounts[d.label] || 0) + 1;
+            if (!objectCamByLabel[d.label] && camName) objectCamByLabel[d.label] = camName;
+          }
         }
       }
     }
-    const topObjects = Object.entries(objectCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
-    const topCams = Object.entries(camCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)
-      .map(([id, n]) => ({ name: cameraMap[id]?.name || "Unknown", n }));
-    const bits: string[] = [];
-    if (persons.size) bits.push(`${Array.from(persons).join(", ")} seen`);
-    if (unknownFaces) bits.push(`${unknownFaces} unknown ${unknownFaces === 1 ? "face" : "faces"}`);
-    if (topObjects.length) bits.push(topObjects.map(([l, n]) => `${n} ${l}${n > 1 ? "s" : ""}`).join(", "));
-    if (plateCount) bits.push(`${plateCount} plate${plateCount > 1 ? "s" : ""}`);
-    if (recCount) bits.push(`${recCount} recording${recCount > 1 ? "s" : ""}`);
+
+    const highlights: BucketHighlight[] = [];
+
+    // Named persons are the most useful signal. list them by name.
+    for (const p of persons) {
+      highlights.push({ tone: "person", text: `${p} seen`, thumbnailObsId: personObsId[p] });
+    }
+
+    // Plates. show the OCR text, not just a count.
+    for (const pt of plates) {
+      highlights.push({ tone: "plate", text: `Plate ${pt}`, thumbnailObsId: plateObsId[pt] });
+    }
+
+    // Unknown faces. a single row noting the count + thumbnail.
+    if (unknownFaces > 0) {
+      highlights.push({
+        tone: "unknown",
+        text: unknownFaces === 1 ? "Unknown person" : `${unknownFaces} unknown faces`,
+        thumbnailObsId: unknownThumb,
+      });
+    }
+
+    // Rule fires. pull the real message so the user sees the reason.
+    for (const f of ruleFires.slice(0, 3)) {
+      highlights.push({ tone: "rule", text: f.message, camName: f.camName });
+    }
+    if (ruleFires.length > 3) {
+      highlights.push({ tone: "rule", text: `${ruleFires.length - 3} more rule fires` });
+    }
+
+    // Interesting objects. skip the long tail.
+    const interesting = Object.entries(objectCounts).filter(([l]) => INTERESTING_OBJECTS.has(l));
+    interesting.sort((a, b) => b[1] - a[1]);
+    for (const [label, n] of interesting.slice(0, 3)) {
+      highlights.push({
+        tone: "object",
+        text: n === 1 ? `${label} spotted` : `${n} ${label}s`,
+        camName: objectCamByLabel[label],
+      });
+    }
+
+    const topCams = Object.entries(camHits).sort((a, b) => b[1] - a[1]).slice(0, 2)
+      .map(([id]) => cameraMap[id]?.name).filter(Boolean) as string[];
+
+    const quiet = highlights.length === 0;
+
     return {
+      highlights,
+      quiet,
+      recCount,
       total: bucketEntries.length,
-      obsCount, recCount, statusCount,
-      summary: bits.length ? bits.join(" \u00b7 ") : `${bucketEntries.length} event${bucketEntries.length > 1 ? "s" : ""}`,
       topCams,
-      persons: Array.from(persons),
-      unknownFaces,
     };
   }
 
@@ -2475,7 +2574,27 @@ function DashboardContent() {
                   const isExpanded = searchActive || expandedBuckets.has(bucketKey);
                   return (
                   <div key={bucketKey}>
-                    {!searchActive && d && (
+                    {!searchActive && d && d.quiet && (
+                      <button
+                        onClick={() => {
+                          setExpandedBuckets((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(bucketKey)) next.delete(bucketKey); else next.add(bucketKey);
+                            return next;
+                          });
+                        }}
+                        className="w-full text-left flex items-center gap-2 px-2 py-1 mb-0.5 rounded hover:bg-muted/40 transition-colors"
+                      >
+                        <span className="w-1 h-1 rounded-full bg-muted-foreground/40" />
+                        <span className="text-[11px] text-muted-foreground font-medium">{formatHourBucket(bucketKey)}</span>
+                        <span className="text-[11px] text-muted-foreground/70 italic">all quiet</span>
+                        {d.recCount > 0 && (
+                          <span className="text-[10px] text-muted-foreground/70">· {d.recCount} rec</span>
+                        )}
+                        <span className="ml-auto text-[10px] text-muted-foreground/60">{isExpanded ? "hide" : "peek"}</span>
+                      </button>
+                    )}
+                    {!searchActive && d && !d.quiet && (
                       <button
                         onClick={() => {
                           setExpandedBuckets((prev) => {
@@ -2486,21 +2605,40 @@ function DashboardContent() {
                         }}
                         className={`w-full text-left rounded-lg border p-3 mb-1.5 transition-colors ${isExpanded ? "border-accent/50 bg-card" : "border-border bg-card/50 hover:border-accent/40 hover:bg-card"}`}
                       >
-                        <div className="flex items-start justify-between gap-3 mb-1">
+                        <div className="flex items-start justify-between gap-3 mb-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-xs font-semibold">{formatHourBucket(bucketKey)}</span>
-                            <span className="text-[10px] text-muted-foreground">{d.total} event{d.total > 1 ? "s" : ""}</span>
+                            {d.topCams.length > 0 && (
+                              <span className="text-[10px] text-muted-foreground truncate">{d.topCams.join(", ")}</span>
+                            )}
                           </div>
-                          <span className="text-[10px] text-muted-foreground">{isExpanded ? "\u25BC hide" : "\u25B6 show"}</span>
+                          <span className="text-[10px] text-muted-foreground flex-shrink-0">{isExpanded ? "\u25BC hide" : "\u25B6 show"}</span>
                         </div>
-                        <p className="text-xs text-muted-foreground leading-relaxed">{d.summary}</p>
-                        {d.topCams.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                            {d.topCams.map((c, i) => (
-                              <span key={i} className="px-1 py-0.5 text-[9px] rounded bg-muted/50 text-muted-foreground">{c.name} ({c.n})</span>
-                            ))}
-                          </div>
-                        )}
+                        <ul className="space-y-1">
+                          {d.highlights.slice(0, 5).map((h, i) => {
+                            const toneClass = h.tone === "person" ? "text-green-400"
+                              : h.tone === "unknown" ? "text-yellow-400"
+                              : h.tone === "plate" ? "text-accent"
+                              : h.tone === "rule" ? "text-blue-400"
+                              : "text-foreground";
+                            return (
+                              <li key={i} className="flex items-center gap-2 text-xs">
+                                {h.thumbnailObsId ? (
+                                  <img src={`/api/observations/${h.thumbnailObsId}/thumbnail`} alt="" className="w-8 h-6 rounded object-cover bg-muted flex-shrink-0" />
+                                ) : (
+                                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${h.tone === "rule" ? "bg-blue-400" : h.tone === "plate" ? "bg-accent" : h.tone === "person" ? "bg-green-400" : h.tone === "unknown" ? "bg-yellow-400" : "bg-muted-foreground"}`} />
+                                )}
+                                <span className={`${toneClass} truncate`}>{h.text}</span>
+                                {h.camName && (
+                                  <span className="text-[10px] text-muted-foreground truncate">on {h.camName}</span>
+                                )}
+                              </li>
+                            );
+                          })}
+                          {d.highlights.length > 5 && (
+                            <li className="text-[10px] text-muted-foreground pl-3.5">and {d.highlights.length - 5} more</li>
+                          )}
+                        </ul>
                       </button>
                     )}
                     {searchActive && (
@@ -2511,6 +2649,25 @@ function DashboardContent() {
                       {dateEntries.map((entry) => {
                         const cam = cameraMap[entry.camera_id];
                         const isActive = activeEntry === entry.id;
+
+                        if (entry.type === "notification") {
+                          const n = entry.data as Notification;
+                          const tone = n.severity === "critical" ? "text-danger"
+                            : n.severity === "warning" ? "text-warning"
+                            : "text-blue-400";
+                          return (
+                            <div key={entry.id} className="px-3 py-2 rounded-lg border border-border/50 flex items-start gap-2">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`${tone} flex-shrink-0 mt-0.5`}>
+                                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
+                              </svg>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs"><span className={`${tone} font-medium`}>Rule fired</span> · {n.message}</p>
+                                {cam?.name && <p className="text-[10px] text-muted-foreground mt-0.5">{cam.name}</p>}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-mono flex-shrink-0">{formatTime(n.created_at)}</span>
+                            </div>
+                          );
+                        }
 
                         if (entry.type === "search_result") {
                           const r = entry.data as SearchResult;
