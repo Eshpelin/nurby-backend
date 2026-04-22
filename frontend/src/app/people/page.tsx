@@ -88,7 +88,7 @@ function formatDate(iso: string): string {
 }
 
 export default function PeoplePage() {
-  const { authFetch } = useAuth();
+  const { authFetch, token } = useAuth();
   const [persons, setPersons] = useState<Person[]>([]);
   const [summaries, setSummaries] = useState<PersonSummary[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -617,7 +617,7 @@ export default function PeoplePage() {
                                       {/* Thumbnail */}
                                       {a.thumbnail_path ? (
                                         <img
-                                          src={`/api/observations/${a.observation_id}/thumbnail`}
+                                          src={`/api/observations/${a.observation_id}/thumbnail${token ? `?token=${token}` : ""}`}
                                           alt=""
                                           className="w-14 h-10 rounded object-cover border border-border flex-shrink-0"
                                           onError={(e) => {
