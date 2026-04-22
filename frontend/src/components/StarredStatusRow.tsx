@@ -106,7 +106,24 @@ export function StarredStatusRow() {
     }
   }, [authFetch]);
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return (
+      <div className="flex-shrink-0 mb-3 flex items-center gap-3 px-1 py-1.5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400/80 flex-shrink-0">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        <span className="text-xs text-muted-foreground">
+          No one to watch yet. Star a person to see their recap here.
+        </span>
+        <a
+          href="/people"
+          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Open People
+        </a>
+      </div>
+    );
+  }
 
   const active = items.filter((it) => it.last_observation_id && it.last_seen_at);
   const allQuiet = active.length === 0;
