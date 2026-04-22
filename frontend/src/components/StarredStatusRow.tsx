@@ -49,7 +49,7 @@ function Avatar({ it, size = "md" }: { it: StarredStatus; size?: "sm" | "md" }) 
 }
 
 export function StarredStatusRow() {
-  const { authFetch } = useAuth();
+  const { authFetch, token } = useAuth();
   const [items, setItems] = useState<StarredStatus[]>([]);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -182,7 +182,7 @@ export function StarredStatusRow() {
               {hasSighting ? (
                 <div className="relative flex-shrink-0 w-16 aspect-video rounded overflow-hidden bg-muted/20">
                   <img
-                    src={`/api/observations/${it.last_observation_id}/thumbnail`}
+                    src={`/api/observations/${it.last_observation_id}/thumbnail${token ? `?token=${token}` : ""}`}
                     alt=""
                     className="h-full w-full object-cover"
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}

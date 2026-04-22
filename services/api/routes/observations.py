@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.auth import get_current_user, require_admin
+from shared.auth import decode_access_token, get_current_user, require_admin
 from shared.config import settings
 from shared.database import get_db
 from shared.models import Observation, User
@@ -41,8 +41,14 @@ async def get_observation(observation_id: uuid.UUID, _current_user: User = Depen
 
 @router.get("/{observation_id}/thumbnail")
 async def get_observation_thumbnail(
-    observation_id: uuid.UUID, _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    observation_id: uuid.UUID,
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
 ):
+    """Thumbnail auth accepts either Bearer header or a `?token=` query
+    param so <img> tags can load without JS."""
+    if not token or not decode_access_token(token):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
     observation = await db.get(Observation, observation_id)
     if not observation:
         raise HTTPException(status_code=404, detail="Observation not found")
