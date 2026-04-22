@@ -23,7 +23,7 @@ from shared.auth import get_current_user, require_admin
 from shared.config import settings
 from shared.database import get_db
 from shared.models import Camera, CameraStatusLog, User
-from shared.schemas import CameraCreate, CameraResponse, CameraStatusLogResponse, CameraUpdate
+from shared.schemas import CameraCreate, CameraReorderItem, CameraResponse, CameraStatusLogResponse, CameraUpdate
 
 # Redis key prefix for signaling stream restart to manager
 RESTART_KEY_PREFIX = "nurby:stream_restart:"
@@ -239,17 +239,50 @@ async def list_status_logs(
 
 @router.get("")
 async def list_cameras(_current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Camera).order_by(Camera.created_at))
+    result = await db.execute(
+        select(Camera).order_by(Camera.display_order, Camera.created_at)
+    )
     return [_camera_to_response(c) for c in result.scalars().all()]
 
 
 @router.post("", status_code=201)
 async def create_camera(body: CameraCreate, _current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
-    camera = Camera(**body.model_dump())
+    payload = body.model_dump()
+    # New cameras land at the end of the ordering.
+    max_result = await db.execute(select(Camera.display_order))
+    orders = [o for (o,) in max_result.all()]
+    payload["display_order"] = (max(orders) + 1) if orders else 0
+    camera = Camera(**payload)
     db.add(camera)
     await db.commit()
     await db.refresh(camera)
+    # Auto-register webcam bridge if this is a USB/webcam camera.
+    if camera.stream_type == "usb" and camera.webcam_device is not None:
+        try:
+            from services.ingestion.webcam_bridge import bridge_manager
+            await bridge_manager.ensure(camera)
+        except Exception:
+            pass  # Bridge is best-effort on create, ingest retries later.
     return _camera_to_response(camera)
+
+
+@router.post("/reorder", status_code=200)
+async def reorder_cameras(
+    items: list[CameraReorderItem],
+    _current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a new ordering for the camera sidebar. Items that are not
+    passed keep their existing display_order."""
+    if not items:
+        return {"updated": 0}
+    id_to_order = {str(i.id): i.display_order for i in items}
+    result = await db.execute(select(Camera).where(Camera.id.in_(list(id_to_order.keys()))))
+    cams = result.scalars().all()
+    for c in cams:
+        c.display_order = id_to_order[str(c.id)]
+    await db.commit()
+    return {"updated": len(cams)}
 
 
 # ---------------------------------------------------------------------------
@@ -547,3 +580,8 @@ async def delete_camera(camera_id: uuid.UUID, _current_user: User = Depends(requ
         raise HTTPException(status_code=404, detail="Camera not found")
     await db.delete(camera)
     await db.commit()
+    try:
+        from services.ingestion.webcam_bridge import bridge_manager
+        await bridge_manager.stop(camera_id)
+    except Exception:
+        pass
