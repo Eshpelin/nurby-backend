@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://nurby:nurby_dev@localhost:5433/nurby"
     redis_url: str = "redis://localhost:6379/0"
     mediamtx_api_url: str = "http://localhost:9997"
+    mediamtx_rtsp_url: str = "rtsp://localhost:8554"  # target for webcam bridge publishes
     recordings_path: str = "./recordings"
     thumbnails_path: str = "./thumbnails"
     jwt_secret: str = _DEFAULT_JWT_SECRET

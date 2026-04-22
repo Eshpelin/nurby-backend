@@ -68,6 +68,7 @@ class StreamWorker:
         password: str | None = None,
         auth_token: str | None = None,
         snapshot_interval: float = 2.0,
+        webcam_device: str | None = None,
     ):
         self.camera_id = camera_id
         self.stream_url = stream_url
@@ -76,6 +77,7 @@ class StreamWorker:
         self.password = password
         self.auth_token = auth_token
         self.snapshot_interval = snapshot_interval
+        self.webcam_device = webcam_device
         self.recording_enabled = recording_enabled
         self.recording_mode = recording_mode
         self.recording_trigger_objects = recording_trigger_objects or []
@@ -261,7 +263,13 @@ class StreamWorker:
     def _resolve_capture_url(self) -> str | int:
         """Build final capture source based on stream type and auth."""
         if self.stream_type == STREAM_TYPE_USB:
-            # USB cameras use integer device index or /dev/videoN path
+            # If a webcam_device is set, the USB feed is bridged through
+            # MediaMTX via webcam_bridge. Pull the RTSP copy so cv2 and
+            # the frontend WebRTC viewer don't fight for the device.
+            if self.webcam_device:
+                from services.ingestion.webcam_bridge import bridge_rtsp_url
+                return bridge_rtsp_url(self.camera_id)
+            # Fall back to direct device access for legacy setups.
             try:
                 return int(self.stream_url)
             except ValueError:

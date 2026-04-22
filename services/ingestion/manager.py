@@ -17,6 +17,7 @@ from shared.database import async_session
 from shared.models import Camera
 from services.ingestion.audio_worker import AudioWorker, set_main_loop as set_audio_main_loop
 from services.ingestion.stream import StreamWorker
+from services.ingestion.webcam_bridge import bridge_manager
 
 logger = logging.getLogger("nurby.ingestion.manager")
 
@@ -33,6 +34,7 @@ def _stream_config_hash(cam: Camera) -> str:
         cam.password or "",
         cam.auth_token or "",
         str(cam.snapshot_interval or 2.0),
+        getattr(cam, "webcam_device", "") or "",
     ]
     return hashlib.md5("|".join(parts).encode()).hexdigest()
 
@@ -80,6 +82,7 @@ class CameraManager:
             password=getattr(cam, "password", None),
             auth_token=getattr(cam, "auth_token", None),
             snapshot_interval=getattr(cam, "snapshot_interval", 2.0),
+            webcam_device=getattr(cam, "webcam_device", None),
         )
         self._workers[cam_id] = worker
         self._tasks[cam_id] = asyncio.create_task(worker.run())
@@ -125,6 +128,13 @@ class CameraManager:
         async with async_session() as db:
             result = await db.execute(select(Camera))
             cameras = {c.id: c for c in result.scalars().all()}
+
+        # Keep webcam bridges aligned with DB state before starting workers
+        # so stream workers can pull the bridged RTSP copy.
+        try:
+            await bridge_manager.sync(list(cameras.values()))
+        except Exception:
+            logger.exception("webcam bridge sync failed")
 
         # Start workers for new cameras, restart changed ones
         for cam_id, cam in cameras.items():
