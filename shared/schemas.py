@@ -167,6 +167,8 @@ class PersonCreate(BaseModel):
     relationship: str | None = Field(default=None, max_length=64)
     consent_given: bool = False
     privacy_blur: bool = False
+    is_starred: bool = False
+    recap_prompt: str | None = Field(default=None, max_length=2000)
 
 
 class PersonUpdate(BaseModel):
@@ -174,6 +176,8 @@ class PersonUpdate(BaseModel):
     relationship: str | None = Field(default=None, max_length=64)
     consent_given: bool | None = None
     privacy_blur: bool | None = None
+    is_starred: bool | None = None
+    recap_prompt: str | None = Field(default=None, max_length=2000)
 
 
 class PersonResponse(BaseModel):
@@ -183,9 +187,24 @@ class PersonResponse(BaseModel):
     consent_given: bool
     privacy_blur: bool
     photo_path: str | None
+    is_starred: bool
+    recap_prompt: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PersonRecapResponse(BaseModel):
+    person_id: uuid.UUID
+    display_name: str
+    photo_path: str | None
+    status: str
+    last_seen_at: datetime | None
+    last_camera_id: uuid.UUID | None
+    last_thumbnail_path: str | None
+    sightings_24h: int
+    generated_at: datetime
+    cached: bool
 
 
 # ── Observation schemas ──
