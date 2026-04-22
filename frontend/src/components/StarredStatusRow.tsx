@@ -30,11 +30,29 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function Avatar({ it, size = "md" }: { it: StarredStatus; size?: "sm" | "md" }) {
+  const dim = size === "sm" ? "h-7 w-7 text-[10px]" : "h-8 w-8 text-xs";
+  if (it.photo_path) {
+    return (
+      <img
+        src={`/api/persons/${it.person_id}/photo`}
+        alt={it.display_name}
+        className={`${dim} rounded-full object-cover ring-1 ring-border`}
+      />
+    );
+  }
+  return (
+    <div className={`${dim} rounded-full bg-muted flex items-center justify-center font-medium ring-1 ring-border`}>
+      {it.display_name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
 export function StarredStatusRow() {
   const { authFetch } = useAuth();
   const [items, setItems] = useState<StarredStatus[]>([]);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   const fetchStatus = useCallback(async (force = false) => {
@@ -52,13 +70,10 @@ export function StarredStatusRow() {
     return () => clearInterval(t);
   }, [fetchStatus]);
 
-  // WS listener. Invalidate + refetch when a starred person is spotted.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const apiBase = process.env.NEXT_PUBLIC_API_BASE || window.location.origin;
     const url = apiBase.replace(/^http/, "ws") + "/ws";
-    let closed = false;
     try {
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -77,15 +92,12 @@ export function StarredStatusRow() {
       /* silent */
     }
     return () => {
-      closed = true;
       try { wsRef.current?.close(); } catch { /* ignore */ }
-      void closed;
-      void proto;
     };
   }, [fetchStatus]);
 
-  const refreshOne = useCallback(async (_id: string) => {
-    setRefreshingId(_id);
+  const refreshOne = useCallback(async (id: string) => {
+    setRefreshingId(id);
     try {
       const res = await authFetch(`/api/persons/starred/status?force=true`);
       if (res.ok) setItems(await res.json());
@@ -94,120 +106,136 @@ export function StarredStatusRow() {
     }
   }, [authFetch]);
 
-  if (dismissed || items.length === 0) return null;
+  if (items.length === 0) return null;
 
-  return (
-    <div className="flex-shrink-0 mb-3 rounded-lg border border-border bg-card/60 backdrop-blur-sm overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/60">
-        <div className="flex items-center gap-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-          </svg>
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Pinned people
-          </span>
-          <span className="text-[10px] text-muted-foreground/60">
-            {items.length}
-          </span>
+  const active = items.filter((it) => it.last_observation_id && it.last_seen_at);
+  const allQuiet = active.length === 0;
+
+  // Quiet mode. One-line flat summary with overlapping avatars.
+  if (allQuiet && !expanded) {
+    return (
+      <div className="flex-shrink-0 mb-3 flex items-center gap-3 px-1 py-1.5">
+        <div className="flex -space-x-2">
+          {items.slice(0, 5).map((it) => (
+            <div key={it.person_id} className="ring-2 ring-background rounded-full">
+              <Avatar it={it} size="sm" />
+            </div>
+          ))}
         </div>
+        <span className="text-xs text-muted-foreground">
+          All quiet. Watching {items.length} {items.length === 1 ? "person" : "people"}.
+        </span>
         <button
-          onClick={() => setDismissed(true)}
-          aria-label="Hide"
-          className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          onClick={() => setExpanded(true)}
+          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground transition-colors"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          Show all
         </button>
       </div>
-      <div className="flex gap-2 overflow-x-auto p-2">
-        {items.map((it) => (
-          <div
-            key={it.person_id}
-            className="flex-shrink-0 w-[280px] rounded-md border border-border bg-background/60 overflow-hidden hover:border-amber-500/30 transition-colors"
+    );
+  }
+
+  // Active mode. Flat horizontal ribbon, hairline dividers, no outer box.
+  return (
+    <div className="flex-shrink-0 mb-3">
+      <div className="mb-2 flex items-center gap-2 px-1">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Watching
+        </span>
+        <span className="text-[10px] text-muted-foreground/60">
+          {items.length}
+        </span>
+        {allQuiet && (
+          <button
+            onClick={() => setExpanded(false)}
+            className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
           >
-            {it.last_observation_id ? (
-              <div className="relative aspect-video bg-muted/20">
-                <img
-                  src={`/api/observations/${it.last_observation_id}/thumbnail`}
-                  alt=""
-                  className="h-full w-full object-cover"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                />
-                {it.last_camera_name && (
-                  <div className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-mono text-white/90">
-                    {it.last_camera_name}
-                  </div>
-                )}
-                {it.stale && (
-                  <div className="absolute top-1.5 right-1.5 rounded bg-amber-500/80 px-1.5 py-0.5 text-[9px] font-mono text-black">
-                    stale
-                  </div>
-                )}
-              </div>
-            ) : null}
-            <div className="p-2.5">
-              <div className="flex items-start gap-2.5">
-                {it.photo_path ? (
+            Collapse
+          </button>
+        )}
+      </div>
+      <div className="flex divide-x divide-border/60 overflow-x-auto">
+        {items.map((it) => {
+          const hasSighting = !!it.last_observation_id && !!it.last_seen_at;
+          return (
+            <div
+              key={it.person_id}
+              className="flex-shrink-0 w-[280px] flex gap-2.5 px-3 py-2 first:pl-1 group hover:bg-muted/20 transition-colors"
+            >
+              {hasSighting ? (
+                <div className="relative flex-shrink-0 w-16 aspect-video rounded overflow-hidden bg-muted/20">
                   <img
-                    src={`/api/persons/${it.person_id}/photo`}
-                    alt={it.display_name}
-                    className="w-9 h-9 rounded-full object-cover border border-border flex-shrink-0"
+                    src={`/api/observations/${it.last_observation_id}/thumbnail`}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                   />
-                ) : (
-                  <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-medium flex-shrink-0">
-                    {it.display_name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium truncate">
-                    {it.display_name}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {timeAgo(it.last_seen_at)}
-                    {it.last_camera_name && !it.last_observation_id && (
-                      <>
-                        <span className="mx-1">&middot;</span>
-                        {it.last_camera_name}
-                      </>
-                    )}
-                    {it.sightings_24h > 0 && (
-                      <>
-                        <span className="mx-1">&middot;</span>
-                        {it.sightings_24h} today
-                      </>
-                    )}
-                  </div>
                 </div>
-                <button
-                  onClick={() => refreshOne(it.person_id)}
-                  disabled={refreshingId === it.person_id}
-                  aria-label="Refresh recap"
-                  title="Refresh recap"
-                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className={refreshingId === it.person_id ? "animate-spin" : ""}
+              ) : (
+                <div className="flex-shrink-0">
+                  <Avatar it={it} />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[13px] font-medium truncate">
+                    {it.display_name}
+                  </span>
+                  {it.stale && (
+                    <span className="text-[9px] font-mono text-amber-400">stale</span>
+                  )}
+                  <button
+                    onClick={() => refreshOne(it.person_id)}
+                    disabled={refreshingId === it.person_id}
+                    aria-label="Refresh recap"
+                    className="ml-auto p-0.5 rounded text-muted-foreground/60 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-40"
                   >
-                    <polyline points="23 4 23 10 17 10" />
-                    <polyline points="1 20 1 14 7 14" />
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                  </svg>
-                </button>
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className={refreshingId === it.person_id ? "animate-spin" : ""}
+                    >
+                      <polyline points="23 4 23 10 17 10" />
+                      <polyline points="1 20 1 14 7 14" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="text-[10px] text-muted-foreground truncate">
+                  {hasSighting ? (
+                    <>
+                      {timeAgo(it.last_seen_at)}
+                      {it.last_camera_name && (
+                        <>
+                          <span className="mx-1">&middot;</span>
+                          {it.last_camera_name}
+                        </>
+                      )}
+                      {it.sightings_24h > 0 && (
+                        <>
+                          <span className="mx-1">&middot;</span>
+                          {it.sightings_24h}x today
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    "no recent sightings"
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] leading-snug text-foreground/80 line-clamp-2">
+                  {it.status}
+                </p>
               </div>
-              <p className="mt-2 text-xs leading-snug text-foreground/90 line-clamp-3">
-                {it.status}
-              </p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
