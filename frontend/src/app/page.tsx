@@ -1893,10 +1893,17 @@ function DashboardContent() {
       const res = await authFetch("/api/search/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: searchQuery.trim() }) });
       if (res.ok) {
         const data = await res.json();
-        setAiAnswer(data.answer);
+        // Surface server-side notes (e.g. "No VLM provider configured")
+        // so the user sees feedback instead of a silent no-op.
+        const answer = data.answer || data.note || "AI could not produce an answer for this question.";
+        setAiAnswer(answer);
         if (data.sources?.length > 0 && searchResults.length === 0) { setSearchResults(data.sources); setSearchActive(true); }
+      } else {
+        setAiAnswer(`AI request failed (${res.status}). Check the server logs.`);
       }
-    } catch { /* silent */ }
+    } catch (err) {
+      setAiAnswer(`AI request failed. ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
     finally { setAskingAi(false); }
   };
 
@@ -2406,6 +2413,7 @@ function DashboardContent() {
                   </div>
                   {hasAiProvider ? (
                     <button
+                      type="button"
                       onClick={handleAskAi}
                       className="px-3 py-1.5 text-xs rounded-md bg-accent text-black font-medium hover:opacity-90 flex items-center gap-1.5 whitespace-nowrap"
                     >

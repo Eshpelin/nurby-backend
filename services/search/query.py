@@ -347,6 +347,14 @@ async def answer_question(
             logger.exception("Failed to resolve cluster -> person names for answer")
 
     if not provider:
+        # Prefer the active VLM/text provider. Embedding providers are
+        # not chat models and cannot synthesize answers.
+        try:
+            from services.perception.vlm import get_active_provider as _get_vlm
+            provider = await _get_vlm()
+        except Exception:
+            provider = None
+    if not provider:
         from services.search.embeddings import get_embedding_provider
         provider = await get_embedding_provider()
 
