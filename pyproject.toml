@@ -26,6 +26,7 @@ dependencies = [
     "nudenet>=3.4.0",
     "panns_inference>=0.1.0",
     "librosa>=0.10.0",
+    "jsonschema>=4.0.0",
 ]
 
 [project.optional-dependencies]
