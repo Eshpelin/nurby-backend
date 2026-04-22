@@ -8,6 +8,9 @@ interface Person {
   display_name: string;
   relationship: string | null;
   consent_given: boolean;
+  privacy_blur?: boolean;
+  is_starred?: boolean;
+  recap_prompt?: string | null;
   photo_path: string | null;
   created_at: string;
 }
@@ -101,8 +104,11 @@ export default function PeoplePage() {
   const [formName, setFormName] = useState("");
   const [formRelationship, setFormRelationship] = useState("");
   const [formConsent, setFormConsent] = useState(false);
+  const [formStarred, setFormStarred] = useState(false);
+  const [formRecapPrompt, setFormRecapPrompt] = useState("");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [togglingStar, setTogglingStar] = useState<string | null>(null);
 
   // Suggestions state
   const [suggestions, setSuggestions] = useState<FaceSuggestion[]>([]);
@@ -198,9 +204,31 @@ export default function PeoplePage() {
     setFormName(p.display_name);
     setFormRelationship(p.relationship || "");
     setFormConsent(p.consent_given);
+    setFormStarred(!!p.is_starred);
+    setFormRecapPrompt(p.recap_prompt || "");
     setFormError("");
     setShowModal(true);
   };
+
+  const toggleStar = useCallback(async (p: Person) => {
+    setTogglingStar(p.id);
+    const next = !p.is_starred;
+    setPersons((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_starred: next } : x)));
+    try {
+      const res = await authFetch(`/api/persons/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_starred: next }),
+      });
+      if (!res.ok) {
+        setPersons((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_starred: !next } : x)));
+      }
+    } catch {
+      setPersons((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_starred: !next } : x)));
+    } finally {
+      setTogglingStar(null);
+    }
+  }, [authFetch]);
 
   const handleSubmit = async () => {
     if (!editPerson || !formName.trim()) {
@@ -218,6 +246,8 @@ export default function PeoplePage() {
           display_name: formName.trim(),
           relationship: formRelationship.trim() || null,
           consent_given: formConsent,
+          is_starred: formStarred,
+          recap_prompt: formRecapPrompt.trim() || null,
         }),
       });
 
@@ -495,6 +525,17 @@ export default function PeoplePage() {
 
                     {/* Activity counters */}
                     <div className="flex items-center gap-3 flex-shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleStar(p); }}
+                        disabled={togglingStar === p.id}
+                        title={p.is_starred ? "Unpin from dashboard" : "Pin to dashboard"}
+                        aria-label={p.is_starred ? "Unpin from dashboard" : "Pin to dashboard"}
+                        className={`p-1 rounded transition-colors disabled:opacity-50 ${p.is_starred ? "text-amber-400 hover:bg-amber-500/10" : "text-muted-foreground hover:text-amber-400 hover:bg-muted"}`}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill={p.is_starred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                      </button>
                       {summary && summary.sightings_1h > 0 && (
                         <div className="flex items-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
@@ -703,6 +744,32 @@ export default function PeoplePage() {
                   Consent given for face recognition
                 </span>
               </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formStarred}
+                  onChange={(e) => setFormStarred(e.target.checked)}
+                  className="accent-amber-500"
+                />
+                <span className="text-sm">Pin to dashboard status row</span>
+              </label>
+
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">
+                  Recap prompt
+                </label>
+                <textarea
+                  rows={3}
+                  value={formRecapPrompt}
+                  onChange={(e) => setFormRecapPrompt(e.target.value)}
+                  placeholder="What do you care about for this person? Example. Is the baby still asleep. Any crying. Did grandma take her meds. Is the dog walker on time."
+                  className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent resize-y"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  The dashboard recap will bias toward whatever you put here. Leave blank for a neutral status.
+                </p>
+              </div>
 
               {formError && (
                 <div className="text-xs text-red-400">{formError}</div>
