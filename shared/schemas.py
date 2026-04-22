@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Camera schemas ──
@@ -223,13 +223,73 @@ class NotificationResponse(BaseModel):
 
 # ── Rule schemas ──
 
+_VALID_ACTION_TYPES = {
+    "webhook", "api_call", "broadcast", "notify", "email", "vlm_call",
+}
+
+
+def _validate_action_chain(actions):
+    """Static checks. each action is a dict, has a known type, and
+    any `{{vars.X.*}}` references point to an `output` declared by a
+    previous vlm_call action in the chain.
+    """
+    import re
+    from services.events.templates import collect_refs
+
+    items = actions if isinstance(actions, list) else [actions] if isinstance(actions, dict) else []
+    known_outputs: set[str] = set()
+    known_schemas: dict[str, dict] = {}
+
+    for idx, action in enumerate(items):
+        if not isinstance(action, dict):
+            raise ValueError(f"action[{idx}] must be an object")
+        a_type = action.get("type")
+        if a_type not in _VALID_ACTION_TYPES:
+            raise ValueError(f"action[{idx}] has unknown type '{a_type}'")
+
+        refs = collect_refs(action)
+        for ref in refs:
+            if not ref.startswith("vars."):
+                continue
+            tail = ref[len("vars."):]
+            name = tail.split(".", 1)[0]
+            if name not in known_outputs:
+                raise ValueError(
+                    f"action[{idx}] references vars.{name} but no prior action declares output '{name}'"
+                )
+            # Best-effort top-level schema key check.
+            schema = known_schemas.get(name)
+            if schema and "." in tail:
+                nested = tail.split(".")[1]
+                props = schema.get("properties") or {}
+                if props and nested not in props:
+                    raise ValueError(
+                        f"action[{idx}] references vars.{name}.{nested} not in response_schema"
+                    )
+
+        if a_type == "vlm_call":
+            output = action.get("output")
+            if output:
+                if not re.fullmatch(r"[a-zA-Z_][\w]*", output):
+                    raise ValueError(f"action[{idx}] output '{output}' is not a valid identifier")
+                known_outputs.add(output)
+                if isinstance(action.get("response_schema"), dict):
+                    known_schemas[output] = action["response_schema"]
+
+
 class RuleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     enabled: bool = True
     trigger_pattern: dict
     conditions: dict | None = None
-    actions: dict
+    actions: dict | list
     cooldown_seconds: int = 300
+
+    @field_validator("actions")
+    @classmethod
+    def _check_actions(cls, v):
+        _validate_action_chain(v)
+        return v
 
 
 class RuleResponse(BaseModel):
@@ -238,7 +298,7 @@ class RuleResponse(BaseModel):
     enabled: bool
     trigger_pattern: dict
     conditions: dict | None
-    actions: dict
+    actions: dict | list
     cooldown_seconds: int
     created_at: datetime
 
