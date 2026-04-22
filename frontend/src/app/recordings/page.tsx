@@ -55,6 +55,9 @@ export default function RecordingsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const cameraNames = useMemo(() => {
     const map: Record<string, string> = {};
@@ -112,6 +115,25 @@ export default function RecordingsPage() {
   useEffect(() => {
     fetchRecordings();
   }, [fetchRecordings]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    setDeletingId(id);
+    setDeleteError(null);
+    try {
+      const res = await authFetch(`/api/recordings/${id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 204) {
+        const body = await res.text().catch(() => "");
+        throw new Error(body || `Delete failed (${res.status})`);
+      }
+      setRecordings((prev) => prev.filter((r) => r.id !== id));
+      if (expandedId === id) setExpandedId(null);
+      setConfirmDeleteId(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
+  }, [authFetch, expandedId]);
 
   const resetFiltersAndPage = () => {
     setCameraFilter("");
@@ -220,7 +242,7 @@ export default function RecordingsPage() {
               return (
                 <div
                   key={rec.id}
-                  className={`rounded-lg border bg-card overflow-hidden transition-all ${isExpanded ? "border-accent col-span-1 sm:col-span-2 lg:col-span-3 xl:col-span-4" : "border-border hover:border-accent/50"}`}
+                  className={`rounded-lg border bg-card overflow-hidden transition-all ${isExpanded ? "border-accent col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-2" : "border-border hover:border-accent/50"}`}
                 >
                   <div
                     className="cursor-pointer"
@@ -272,39 +294,67 @@ export default function RecordingsPage() {
                     <div className="border-t border-border p-4 space-y-3">
                       <video
                         controls
-                        className="w-full max-h-[480px] rounded bg-black"
+                        className="w-full max-h-[420px] rounded bg-black"
                         src={`/api/recordings/${rec.id}/stream`}
                       />
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={`/api/recordings/${rec.id}/download`}
-                          download
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity"
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
+                      {confirmDeleteId === rec.id ? (
+                        <div className="flex flex-wrap items-center gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2">
+                          <span className="text-xs text-red-300 flex-1 min-w-[180px]">Delete this recording and its file?</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(rec.id); }}
+                            disabled={deletingId === rec.id}
+                            className="px-3 py-1.5 text-sm rounded-md bg-red-600 text-white font-medium hover:bg-red-500 transition-colors disabled:opacity-50"
                           >
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                          </svg>
-                          Download
-                        </a>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedId(null);
-                          }}
-                          className="px-3 py-1.5 text-sm rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        >
-                          Close
-                        </button>
-                      </div>
+                            {deletingId === rec.id ? "Deleting." : "Yes, delete"}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); setDeleteError(null); }}
+                            disabled={deletingId === rec.id}
+                            className="px-3 py-1.5 text-sm rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`/api/recordings/${rec.id}/download`}
+                              download
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                              </svg>
+                              Download
+                            </a>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setExpandedId(null); }}
+                              className="px-3 py-1.5 text-sm rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(rec.id); setDeleteError(null); }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                              <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+                            </svg>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                      {deleteError && confirmDeleteId === rec.id && (
+                        <p className="text-xs text-red-400">{deleteError}</p>
+                      )}
                     </div>
                   )}
                 </div>
