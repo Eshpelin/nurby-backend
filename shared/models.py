@@ -56,6 +56,8 @@ class Camera(Base):
     # Motion zones: [{"name": "Zone 1", "points": [[x,y], ...], "type": "include"|"exclude"}]
     motion_zones: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="offline")
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    webcam_device: Mapped[str | None] = mapped_column(String(255), nullable=True)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fps: Mapped[float | None] = mapped_column(Float, nullable=True)

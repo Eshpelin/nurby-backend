@@ -43,6 +43,7 @@ class CameraCreate(BaseModel):
     retention_days: int = Field(default=30, ge=1, le=3650)
     retention_gb: float = Field(default=50.0, ge=1.0, le=10000.0)
     motion_zones: list[dict] | None = None
+    webcam_device: str | None = Field(default=None, max_length=255)
 
 
 class CameraUpdate(BaseModel):
@@ -82,6 +83,13 @@ class CameraUpdate(BaseModel):
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     retention_gb: float | None = Field(default=None, ge=1.0, le=10000.0)
     motion_zones: list[dict] | None = None
+    webcam_device: str | None = Field(default=None, max_length=255)
+    display_order: int | None = None
+
+
+class CameraReorderItem(BaseModel):
+    id: uuid.UUID
+    display_order: int
 
 
 class CameraResponse(BaseModel):
@@ -121,6 +129,8 @@ class CameraResponse(BaseModel):
     retention_gb: float
     motion_zones: list[dict] | None
     status: str
+    display_order: int = 0
+    webcam_device: str | None = None
     width: int | None
     height: int | None
     fps: float | None
