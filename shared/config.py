@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     jwt_expiry_hours: int = 24
     cors_origins: str = ""  # comma-separated additional origins
 
+    # Starred-person recap
+    recap_ttl_seconds: int = 300
+    recap_timeout_seconds: float = 20.0
+    recap_default_provider: str = ""  # openai|anthropic|google|ollama. empty = auto
+
     # SMTP settings for email notifications
     smtp_host: str = ""
     smtp_port: int = 587

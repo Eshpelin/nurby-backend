@@ -23,10 +23,16 @@ def upgrade() -> None:
         sa.Column("is_starred", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.add_column("persons", sa.Column("recap_prompt", sa.Text(), nullable=True))
+    op.add_column("persons", sa.Column("recap_provider", sa.String(length=32), nullable=True))
+    op.add_column("persons", sa.Column("recap_model", sa.String(length=255), nullable=True))
     op.add_column("persons", sa.Column("recap_cached_status", sa.Text(), nullable=True))
     op.add_column(
         "persons",
         sa.Column("recap_cached_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.add_column(
+        "persons",
+        sa.Column("recap_stale", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.create_index(
         "ix_persons_is_starred",
@@ -38,7 +44,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_persons_is_starred", table_name="persons")
+    op.drop_column("persons", "recap_stale")
     op.drop_column("persons", "recap_cached_at")
     op.drop_column("persons", "recap_cached_status")
+    op.drop_column("persons", "recap_model")
+    op.drop_column("persons", "recap_provider")
     op.drop_column("persons", "recap_prompt")
     op.drop_column("persons", "is_starred")

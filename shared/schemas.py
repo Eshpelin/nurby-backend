@@ -169,6 +169,8 @@ class PersonCreate(BaseModel):
     privacy_blur: bool = False
     is_starred: bool = False
     recap_prompt: str | None = Field(default=None, max_length=2000)
+    recap_provider: str | None = Field(default=None, max_length=32)
+    recap_model: str | None = Field(default=None, max_length=255)
 
 
 class PersonUpdate(BaseModel):
@@ -178,6 +180,8 @@ class PersonUpdate(BaseModel):
     privacy_blur: bool | None = None
     is_starred: bool | None = None
     recap_prompt: str | None = Field(default=None, max_length=2000)
+    recap_provider: str | None = Field(default=None, max_length=32)
+    recap_model: str | None = Field(default=None, max_length=255)
 
 
 class PersonResponse(BaseModel):
@@ -189,6 +193,8 @@ class PersonResponse(BaseModel):
     photo_path: str | None
     is_starred: bool
     recap_prompt: str | None
+    recap_provider: str | None
+    recap_model: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -201,10 +207,13 @@ class PersonRecapResponse(BaseModel):
     status: str
     last_seen_at: datetime | None
     last_camera_id: uuid.UUID | None
+    last_camera_name: str | None
     last_thumbnail_path: str | None
+    last_observation_id: uuid.UUID | None = None
     sightings_24h: int
     generated_at: datetime
     cached: bool
+    stale: bool
 
 
 # ── Observation schemas ──

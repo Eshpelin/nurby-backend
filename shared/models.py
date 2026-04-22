@@ -102,8 +102,11 @@ class Person(Base):
     photo_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     recap_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recap_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    recap_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     recap_cached_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     recap_cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recap_stale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
