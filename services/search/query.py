@@ -367,10 +367,23 @@ async def answer_question(
             "note": "No VLM provider configured. Showing matching observations.",
         }
 
+    def _pretty_ts(iso: str | None) -> str:
+        """Human-readable timestamp. Avoids the model echoing raw ISO
+        strings like 2026-04-22T19:31:30.609929+00:00 in answers."""
+        if not iso:
+            return ""
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            # Local time reads naturally for a single-home user.
+            local = dt.astimezone()
+            return local.strftime("%b %d, %-I:%M %p").lower().replace(" 0", " ")
+        except Exception:
+            return iso
+
     # Build context from observations
     context_parts = []
     for i, obs in enumerate(results[:10]):
-        parts = [f"[{i+1}] {obs['started_at']} on {obs['camera_name']}"]
+        parts = [f"[{i+1}] {_pretty_ts(obs['started_at'])} on {obs['camera_name']}"]
         if obs.get("vlm_description"):
             parts.append(f"  Description: {obs['vlm_description']}")
         if obs.get("object_detections"):
@@ -413,8 +426,10 @@ async def answer_question(
         "line listing the recognized person by name. When asked who was seen, "
         "list every person name that appears on any 'People.' line and when. "
         "Treat entries without a name as 'unknown person'. Be concise. Use the "
-        "real name when one is given. If the data truly contains no people, "
-        "only then say so."
+        "real name when one is given. Quote timestamps exactly as shown (they "
+        "are already in human-readable local time, like 'apr 22, 7:31 pm'). "
+        "Do not output ISO strings, do not output seconds or microseconds. "
+        "If the data truly contains no people, only then say so."
     )
 
     user_prompt = (
