@@ -419,23 +419,59 @@ async def answer_question(
 
     context = "\n\n".join(context_parts)
 
+    # Intent flags. only surface timestamps / cameras when the question
+    # actually asks about them. Otherwise answer the question directly.
+    q_lower = (question or "").lower()
+    wants_time = any(w in q_lower for w in (
+        "when", "what time", "how long", "how often", "how many times",
+        "last time", "first time", "recent", "today", "yesterday",
+        "tonight", "morning", "evening", "night",
+    ))
+    wants_where = any(w in q_lower for w in (
+        "where", "which camera", "what camera", "room", "location",
+    ))
+    wants_count = any(w in q_lower for w in (
+        "how many", "count", "number of",
+    ))
+    wants_list = _is_people_intent(question) and any(w in q_lower for w in (
+        "who", "list", "everyone", "all ",
+    ))
+
+    directives = [
+        "Answer the question directly in 1 to 3 short sentences.",
+        "Synthesize across observations. Summarize behaviour, not each frame.",
+        "Do not list observations one by one. Do not number them. Do not use bullet points unless the user asked for a list.",
+    ]
+    if wants_time:
+        directives.append("Include the relevant timestamp in natural language, like 'around 7:30 pm'.")
+    else:
+        directives.append("Do not mention timestamps unless the user asked when something happened.")
+    if wants_where:
+        directives.append("Mention the camera or location.")
+    else:
+        directives.append("Do not mention camera names unless the user asked where.")
+    if wants_count:
+        directives.append("Give a specific count.")
+    if wants_list:
+        directives.append("List each distinct person by name, once.")
+
+    directives.extend([
+        "Use the person's real name when one is given. Unnamed faces are 'an unknown person'.",
+        "Do not output ISO strings, seconds, or microseconds.",
+        "If the observations do not actually answer the question, say so briefly.",
+    ])
+
     system_prompt = (
-        "You are Nurby, an AI camera monitoring assistant. Answer the user's "
-        "question using the observation data below. Each observation has a "
-        "timestamp, a camera, a scene description, and optionally a 'People.' "
-        "line listing the recognized person by name. When asked who was seen, "
-        "list every person name that appears on any 'People.' line and when. "
-        "Treat entries without a name as 'unknown person'. Be concise. Use the "
-        "real name when one is given. Quote timestamps exactly as shown (they "
-        "are already in human-readable local time, like 'apr 22, 7:31 pm'). "
-        "Do not output ISO strings, do not output seconds or microseconds. "
-        "If the data truly contains no people, only then say so."
+        "You are Nurby, a home camera assistant. You receive a log of recent "
+        "observations and answer the user's question about what is happening. "
+        "Write like a person giving a quick update, not like a database dump.\n\n"
+        "Rules.\n- " + "\n- ".join(directives)
     )
 
     user_prompt = (
-        f"Observation data:\n{context}\n\n"
-        f"Question: {question}\n\n"
-        f"Answer concisely based on the observations above."
+        f"Observations (most recent first):\n{context}\n\n"
+        f"Question. {question}\n\n"
+        f"Write the answer now. Keep it short and direct."
     )
 
     try:
