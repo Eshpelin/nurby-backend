@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useWebcamPublisher, listVideoDevices } from "@/lib/webcam-publisher";
 import { StarredStatusRow } from "@/components/StarredStatusRow";
+import { LiveCaptionOverlay } from "@/components/LiveCaptionOverlay";
 import { RecordingModal } from "@/components/RecordingModal";
 
 const WEBRTC_URL =
@@ -25,6 +26,8 @@ interface Camera {
   recording_enabled: boolean;
   digest_enabled: boolean;
   digest_period: string;
+  audio_capture_enabled?: boolean;
+  audio_transcribe_enabled?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -755,6 +758,11 @@ function CameraSidebarCard({
         {/* Detection bounding box overlay */}
         {camera.status !== "offline" && (
           <DetectionOverlay cameraId={camera.id} visible={overlayVisible} frameWidth={frameW} frameHeight={frameH} />
+        )}
+
+        {/* Live caption overlay. only when transcription enabled */}
+        {camera.status !== "offline" && camera.audio_transcribe_enabled && (
+          <LiveCaptionOverlay cameraId={camera.id} position="bottom" />
         )}
 
         {/* Overlay toggle (eye icon) */}
