@@ -113,10 +113,30 @@ class CameraAudioRouter:
                 chunk = await self._capture.queue.get()
                 for seg in self._vad.feed(chunk):
                     self._enqueue_segment(seg)
+                    asyncio.create_task(self._broadcast_vad_pulse(seg))
         except asyncio.CancelledError:
             for seg in self._vad.flush():
                 self._enqueue_segment(seg)
             raise
+
+    async def _broadcast_vad_pulse(self, seg: SpeechSegment) -> None:
+        # Lightweight UI signal. fires the moment a speech segment closes,
+        # before STT runs. Good enough to drive a tile "audio active" dot
+        # without waiting for transcription.
+        try:
+            from services.api.ws import broadcast as ws_broadcast
+
+            await ws_broadcast(
+                {
+                    "type": "vad_pulse",
+                    "camera_id": str(self.camera_id),
+                    "started_at": seg.started_at.isoformat(),
+                    "ended_at": seg.ended_at.isoformat(),
+                    "duration_ms": seg.duration_ms,
+                }
+            )
+        except Exception:
+            logger.debug("vad_pulse broadcast failed", exc_info=True)
 
     def _enqueue_segment(self, seg: SpeechSegment) -> None:
         try:
