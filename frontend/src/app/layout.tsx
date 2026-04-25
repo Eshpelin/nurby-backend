@@ -5,7 +5,6 @@ import { AuthShell } from "@/components/auth-shell";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { ThemeProvider, themeInitScript } from "@/lib/theme";
 import { WebcamPublisherProvider } from "@/lib/webcam-publisher";
-import { WebcamPublishBar } from "@/components/WebcamPublishBar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,7 +42,6 @@ export default function RootLayout({
               <ErrorBoundary>
                 {children}
               </ErrorBoundary>
-              <WebcamPublishBar />
             </WebcamPublisherProvider>
           </AuthShell>
         </ThemeProvider>
