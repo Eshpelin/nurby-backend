@@ -14,7 +14,7 @@ import httpx
 from sqlalchemy import select, and_, or_, func, cast, String, Float, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.models import Observation, Camera, FaceCluster, Person
+from shared.models import Observation, Camera, FaceCluster, Person, Transcript
 from services.search.embeddings import generate_embedding, get_embedding_provider, EMBEDDING_DIM
 
 logger = logging.getLogger("nurby.search.query")
@@ -558,3 +558,91 @@ async def _call_text_llm(provider, system_prompt: str, user_prompt: str) -> str:
 
         else:
             raise ValueError(f"Unknown provider kind: {provider.kind}")
+
+
+# ---- transcript search (Phase 2) -----------------------------------------
+
+
+async def search_transcripts(
+    db: AsyncSession,
+    query: str | None = None,
+    camera_id: uuid.UUID | None = None,
+    time_from: datetime | None = None,
+    time_to: datetime | None = None,
+    limit: int = 30,
+) -> list[dict]:
+    """Search transcripts by ILIKE + cosine similarity on embeddings.
+
+    Mirrors :func:`search_observations` shape so the API layer can
+    return a unified result envelope tagged with ``kind``. Filtered
+    transcripts are excluded.
+    """
+    base_filters = [Transcript.filtered.is_(False)]
+    if camera_id:
+        base_filters.append(Transcript.camera_id == camera_id)
+    if time_from:
+        base_filters.append(Transcript.started_at >= time_from)
+    if time_to:
+        base_filters.append(Transcript.started_at <= time_to)
+
+    rows: list[Transcript] = []
+    distances: dict[uuid.UUID, float | None] = {}
+
+    if query:
+        query_embedding = await _embed_query(query)
+        if query_embedding is not None:
+            vector_filters = list(base_filters) + [Transcript.embedding.isnot(None)]
+            cosine_distance = Transcript.embedding.cosine_distance(query_embedding)
+            stmt = (
+                select(Transcript, cosine_distance.label("distance"))
+                .where(and_(*vector_filters))
+                .order_by(cosine_distance.asc())
+                .limit(limit)
+            )
+            result = await db.execute(stmt)
+            for tx, dist in result.all():
+                rows.append(tx)
+                distances[tx.id] = float(dist) if dist is not None else None
+        if not rows:
+            text_filters = list(base_filters) + [Transcript.text.ilike(f"%{query}%")]
+            stmt = (
+                select(Transcript)
+                .where(and_(*text_filters))
+                .order_by(Transcript.started_at.desc())
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+    else:
+        stmt = (
+            select(Transcript)
+            .where(and_(*base_filters))
+            .order_by(Transcript.started_at.desc())
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+
+    camera_names = await _resolve_camera_names(db, {r.camera_id for r in rows})
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "kind": "transcript",
+                "id": str(r.id),
+                "camera_id": str(r.camera_id),
+                "camera_name": camera_names.get(r.camera_id, "Unknown"),
+                "started_at": r.started_at.isoformat(),
+                "ended_at": r.ended_at.isoformat(),
+                "text": r.text,
+                "language": r.language,
+                "provider": r.provider,
+                "speaker_person_id": str(r.speaker_person_id)
+                if r.speaker_person_id
+                else None,
+                "speaker_source": r.speaker_source,
+                "audio_capture_id": str(r.audio_capture_id)
+                if r.audio_capture_id
+                else None,
+                "distance": distances.get(r.id),
+            }
+        )
+    return out
