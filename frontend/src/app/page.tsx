@@ -9,6 +9,7 @@ import { LiveCaptionOverlay } from "@/components/LiveCaptionOverlay";
 import { AudioActiveDot } from "@/components/AudioActiveDot";
 import { VLMStatusBadge } from "@/components/VLMStatusBadge";
 import { SummarizeNowButton } from "@/components/SummarizeNowButton";
+import { CameraStatsHover } from "@/components/CameraStatsHover";
 import { SystemHealthFooter } from "@/components/SystemHealthFooter";
 import { LLMErrorToasts } from "@/components/LLMErrorToasts";
 import { OnboardingWizard } from "@/components/OnboardingWizard";
@@ -842,6 +843,17 @@ function CameraSidebarCard({
         {/* Summarize now. Hover-revealed top-right control. */}
         {camera.status !== "offline" && (
           <SummarizeNowButton cameraId={camera.id} variant="tile" />
+        )}
+
+        {/* Stats hover. FPS / resolution / VLM latency / drops. Quiet
+            until the user hovers the tile. */}
+        {camera.status !== "offline" && (
+          <CameraStatsHover
+            cameraId={camera.id}
+            fps={camera.fps}
+            width={camera.width}
+            height={camera.height}
+          />
         )}
 
         {/* Overlay toggle (eye icon) */}
