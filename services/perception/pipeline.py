@@ -146,6 +146,76 @@ class PerceptionPipeline:
         last = self._vlm_last_call.get(camera_id, 0)
         return (_time.monotonic() - last) >= interval
 
+    def _build_vlm_context(
+        self,
+        cam: Camera | None,
+        timestamp: datetime,
+        faces: list[dict],
+        detections: list[dict],
+    ) -> str | None:
+        """Assemble a multimodal context block from specialist models.
+
+        VLMs are bad at OCR and unreliable at face ID on small crops. We
+        already nailed those signals upstream (InsightFace, plate OCR,
+        face clustering). Pass the answers in plain English so the VLM
+        treats them as ground truth instead of re-guessing from pixels.
+
+        Returns None when there is nothing worth saying so we don't
+        bloat the prompt for empty scenes.
+        """
+        parts: list[str] = []
+
+        # Camera + location. Helps the VLM reason about indoor vs
+        # outdoor and use the room name in the description.
+        cam_bits: list[str] = []
+        if cam and cam.name:
+            cam_bits.append(cam.name)
+        if cam and cam.location_label:
+            cam_bits.append(cam.location_label)
+        if cam_bits:
+            parts.append(f"Camera: {' / '.join(cam_bits)}.")
+
+        # Time of day. Local time string is enough. Helps disambiguate
+        # delivery vs intruder, sunrise vs dusk, etc.
+        try:
+            local_ts = timestamp.astimezone()
+            parts.append(f"Local time: {local_ts.strftime('%H:%M %a %b %d')}.")
+        except Exception:
+            pass
+
+        # Face recognition results. Named matches first, then unknown
+        # count + cluster ids when present.
+        if faces:
+            named = [f for f in faces if f.get("person_name")]
+            unknown = [f for f in faces if not f.get("person_name")]
+            if named:
+                names = ", ".join(sorted({f["person_name"] for f in named}))
+                parts.append(f"Identified people: {names}.")
+            if unknown:
+                clusters = sorted(
+                    {f.get("cluster_id") for f in unknown if f.get("cluster_id")}
+                )
+                if clusters:
+                    parts.append(
+                        f"Unknown faces: {len(unknown)}"
+                        f" (recurring cluster ids: {', '.join(str(c)[:8] for c in clusters)})."
+                    )
+                else:
+                    parts.append(f"Unknown faces: {len(unknown)}.")
+
+        # License plate OCR. Plates ride inside detections with label
+        # license_plate. Pull the OCR text out so the VLM sees the
+        # actual string, not just the label.
+        plate_texts = [
+            d.get("plate_text")
+            for d in detections
+            if d.get("label") == "license_plate" and d.get("plate_text")
+        ]
+        if plate_texts:
+            parts.append(f"License plates read: {', '.join(plate_texts)}.")
+
+        return " ".join(parts) if parts else None
+
     async def _recent_heard_text(
         self, camera_id: str, ts: datetime, lookback_seconds: int = 8
     ) -> str | None:
@@ -324,6 +394,12 @@ class PerceptionPipeline:
             if provider:
                 self._vlm_last_call[camera_id] = _time.monotonic()
                 heard_text = await self._recent_heard_text(camera_id, timestamp)
+                extra_context = self._build_vlm_context(
+                    cam=cam,
+                    timestamp=timestamp,
+                    faces=faces,
+                    detections=detections,
+                )
                 await self._vlm_queue.enqueue(VLMJob(
                     camera_id=camera_id,
                     observation_id=observation_id,
@@ -334,6 +410,7 @@ class PerceptionPipeline:
                     max_tokens=cam.vlm_max_tokens if cam else 200,
                     timestamp=timestamp,
                     heard_text=heard_text,
+                    extra_context=extra_context,
                 ))
 
         # Step 6. Generate description embedding for detections (VLM embedding added later by queue)

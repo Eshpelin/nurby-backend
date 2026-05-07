@@ -62,6 +62,7 @@ class VLMClient:
         system_prompt: str | None = None,
         max_tokens: int = 200,
         heard_text: str | None = None,
+        extra_context: str | None = None,
     ) -> str | None:
         """Send frame to VLM and get a scene description.
 
@@ -70,6 +71,11 @@ class VLMClient:
         heard_text: recent transcript text overlapping this frame's window.
             When present, the prompt asks the VLM to fuse audio + visual
             context. Avoids the post-hoc re-enrichment round-trip.
+        extra_context: pre-formatted multimodal context block (face
+            recognition results, license plate OCR, camera location,
+            etc). The pipeline assembles this from specialist models
+            so the VLM does not have to re-derive identity or text from
+            pixels.
         """
         try:
             prompt = system_prompt or SYSTEM_PROMPT
@@ -78,11 +84,28 @@ class VLMClient:
             _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             b64_image = base64.b64encode(jpeg_buf.tobytes()).decode("utf-8")
 
-            # Build context from detections
+            # Build context from detections. Skip license_plate here.
+            # Plate text is surfaced through extra_context in plain
+            # English so the VLM does not see a useless "license_plate"
+            # label without the OCR string attached.
             detection_context = ""
             if detections:
-                det_parts = [f"{d['label']} ({d['confidence']:.0%})" for d in detections]
-                detection_context = f" Objects detected by YOLO: {', '.join(det_parts)}."
+                det_parts = [
+                    f"{d['label']} ({d['confidence']:.0%})"
+                    for d in detections
+                    if d.get("label") != "license_plate"
+                ]
+                if det_parts:
+                    detection_context = (
+                        f" Objects detected by YOLO: {', '.join(det_parts)}."
+                    )
+
+            extra_block = ""
+            if extra_context and extra_context.strip():
+                trimmed = extra_context.strip()
+                if len(trimmed) > 600:
+                    trimmed = trimmed[:600].rstrip() + "..."
+                extra_block = f" {trimmed}"
 
             heard_context = ""
             if heard_text and heard_text.strip():
@@ -100,7 +123,11 @@ class VLMClient:
                 )
 
             user_prompt = (
-                f"Describe this security camera frame.{detection_context}{heard_context}"
+                f"Describe this security camera frame."
+                f"{detection_context}{extra_block}{heard_context}"
+                " Use the identity, plate, and location facts above as"
+                " ground truth. Do not contradict them or re-guess from"
+                " pixels."
             )
 
             if provider.kind == "openai":
