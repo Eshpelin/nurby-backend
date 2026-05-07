@@ -61,11 +61,15 @@ class VLMClient:
         provider: Provider,
         system_prompt: str | None = None,
         max_tokens: int = 200,
+        heard_text: str | None = None,
     ) -> str | None:
         """Send frame to VLM and get a scene description.
 
         system_prompt: per-camera prompt override. Falls back to default SYSTEM_PROMPT.
         max_tokens: per-camera token limit.
+        heard_text: recent transcript text overlapping this frame's window.
+            When present, the prompt asks the VLM to fuse audio + visual
+            context. Avoids the post-hoc re-enrichment round-trip.
         """
         try:
             prompt = system_prompt or SYSTEM_PROMPT
@@ -80,7 +84,24 @@ class VLMClient:
                 det_parts = [f"{d['label']} ({d['confidence']:.0%})" for d in detections]
                 detection_context = f" Objects detected by YOLO: {', '.join(det_parts)}."
 
-            user_prompt = f"Describe this security camera frame.{detection_context}"
+            heard_context = ""
+            if heard_text and heard_text.strip():
+                # Cap at a sane length so we never blow the prompt budget on
+                # a long monologue. The VLM only needs the gist.
+                snippet = heard_text.strip()
+                if len(snippet) > 400:
+                    snippet = snippet[:400].rstrip() + "..."
+                heard_context = (
+                    f' Heard during this scene: "{snippet}".'
+                    " Incorporate the speech into your description when it"
+                    " clarifies who is speaking, what is happening, or the"
+                    " mood. If the speech is unrelated to the visible scene,"
+                    " ignore it."
+                )
+
+            user_prompt = (
+                f"Describe this security camera frame.{detection_context}{heard_context}"
+            )
 
             if provider.kind == "openai":
                 return await self._call_openai(b64_image, user_prompt, provider, prompt, max_tokens)

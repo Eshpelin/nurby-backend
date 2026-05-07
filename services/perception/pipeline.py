@@ -15,7 +15,7 @@ import redis.asyncio as aioredis
 
 from shared.config import settings
 from shared.database import async_session
-from shared.models import Camera, Observation, Provider
+from shared.models import Camera, Observation, Provider, Transcript
 from services.perception.detector import ObjectDetector
 from services.perception.faces import FaceRecognizer
 from services.perception.plates import detect_plates
@@ -145,6 +145,41 @@ class PerceptionPipeline:
             return True
         last = self._vlm_last_call.get(camera_id, 0)
         return (_time.monotonic() - last) >= interval
+
+    async def _recent_heard_text(
+        self, camera_id: str, ts: datetime, lookback_seconds: int = 8
+    ) -> str | None:
+        """Pull any transcripts that finalized in the last few seconds for
+        this camera so the VLM can fuse audio context into its first-pass
+        description. Avoids the post-hoc re-enrichment round-trip when
+        speech was already heard before the keyframe arrived.
+
+        Post-hoc enrichment still runs for transcripts that finalize
+        AFTER the VLM call, so we never lose late speech.
+        """
+        try:
+            from datetime import timedelta as _td
+
+            cutoff = ts - _td(seconds=lookback_seconds)
+            async with async_session() as db:
+                rows = (
+                    await db.execute(
+                        select(Transcript.text)
+                        .where(Transcript.camera_id == uuid.UUID(camera_id))
+                        .where(Transcript.filtered.is_(False))
+                        .where(Transcript.started_at >= cutoff)
+                        .where(Transcript.started_at <= ts)
+                        .order_by(Transcript.started_at.asc())
+                        .limit(5)
+                    )
+                ).scalars().all()
+            if not rows:
+                return None
+            joined = " ".join(t.strip() for t in rows if t and t.strip())
+            return joined or None
+        except Exception:
+            logger.debug("recent_heard_text lookup failed", exc_info=True)
+            return None
 
     async def _process_keyframe(self, data: dict):
         """Process a single motion keyframe through detection and VLM."""
@@ -288,6 +323,7 @@ class PerceptionPipeline:
             provider = await self._get_provider_for_camera(cam)
             if provider:
                 self._vlm_last_call[camera_id] = _time.monotonic()
+                heard_text = await self._recent_heard_text(camera_id, timestamp)
                 await self._vlm_queue.enqueue(VLMJob(
                     camera_id=camera_id,
                     observation_id=observation_id,
@@ -297,6 +333,7 @@ class PerceptionPipeline:
                     system_prompt=cam.vlm_prompt if cam else None,
                     max_tokens=cam.vlm_max_tokens if cam else 200,
                     timestamp=timestamp,
+                    heard_text=heard_text,
                 ))
 
         # Step 6. Generate description embedding for detections (VLM embedding added later by queue)

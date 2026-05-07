@@ -95,6 +95,7 @@ class VLMJob:
     system_prompt: str | None
     max_tokens: int
     timestamp: datetime
+    heard_text: str | None = None
     enqueued_at: float = field(default_factory=time.monotonic)
 
 
@@ -234,6 +235,7 @@ class VLMQueue:
                     job.provider,
                     system_prompt=job.system_prompt,
                     max_tokens=job.max_tokens,
+                    heard_text=job.heard_text,
                 )
                 duration = time.monotonic() - start
                 stats.record_latency(duration)
