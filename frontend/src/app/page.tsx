@@ -7,6 +7,8 @@ import { useWebcamPublisher, listVideoDevices } from "@/lib/webcam-publisher";
 import { StarredStatusRow } from "@/components/StarredStatusRow";
 import { LiveCaptionOverlay } from "@/components/LiveCaptionOverlay";
 import { AudioActiveDot } from "@/components/AudioActiveDot";
+import { VLMStatusBadge } from "@/components/VLMStatusBadge";
+import { SystemHealthFooter } from "@/components/SystemHealthFooter";
 import { TranscriptCard } from "@/components/TranscriptCard";
 import { SummaryCard } from "@/components/SummaryCard";
 import { ConversationCard } from "@/components/ConversationCard";
@@ -807,10 +809,13 @@ function CameraSidebarCard({
           <LiveCaptionOverlay cameraId={camera.id} position="bottom" />
         )}
 
-        {/* Audio active dot. pulses on VAD speech detection */}
-        {camera.status !== "offline" && camera.audio_capture_enabled && (
-          <div className="absolute top-1.5 left-1.5 z-10">
-            <AudioActiveDot cameraId={camera.id} />
+        {/* Audio active dot + VLM thinking badge. stack top-left so the
+            two are visually grouped and out of the way of overlay
+            controls top-right. */}
+        {camera.status !== "offline" && (
+          <div className="absolute top-1.5 left-1.5 z-10 flex items-center gap-1">
+            {camera.audio_capture_enabled && <AudioActiveDot cameraId={camera.id} />}
+            <VLMStatusBadge cameraId={camera.id} />
           </div>
         )}
 
@@ -3138,6 +3143,10 @@ function DashboardContent() {
           </div>
         </main>
       </div>
+
+      <footer className="flex-shrink-0 mt-2 pt-2 border-t border-border/40 flex items-center justify-end gap-3">
+        <SystemHealthFooter />
+      </footer>
 
       {modalOpen && <AddCameraModal initialStreamType={modalInitialType} onClose={() => { setModalOpen(false); setModalInitialType(undefined); }} onSuccess={() => { setModalOpen(false); setModalInitialType(undefined); fetchCameras(); }} />}
       {selectedPersonId && (

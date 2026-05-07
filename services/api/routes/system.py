@@ -98,6 +98,55 @@ async def get_vlm_queue_stats(_current_user: User = Depends(get_current_user)):
     return get_vlm_stats()
 
 
+@router.get("/health")
+async def get_health(_current_user: User = Depends(get_current_user)):
+    """Lightweight host-level CPU / RAM / disk snapshot for the footer.
+
+    Sampled with psutil. cpu_percent uses interval=None so the call
+    returns immediately (uses the value since the last call). The
+    frontend polls on a coarse cadence so this stays cheap.
+    """
+    import psutil
+
+    cpu = psutil.cpu_percent(interval=None)
+    mem = psutil.virtual_memory()
+    # Disk usage on the storage root the app actually writes to. Falls
+    # back to '/' if the configured path does not exist yet.
+    storage_path = settings.storage_path if hasattr(settings, "storage_path") else "/"
+    disk_target = storage_path
+    try:
+        import os
+        if not os.path.isdir(disk_target):
+            disk_target = "/"
+    except Exception:
+        disk_target = "/"
+    disk = psutil.disk_usage(disk_target)
+    load_avg = None
+    try:
+        load_avg = list(psutil.getloadavg())
+    except (AttributeError, OSError):
+        # getloadavg is unavailable on Windows.
+        pass
+    return {
+        "cpu_percent": round(cpu, 1),
+        "cpu_count": psutil.cpu_count(logical=True),
+        "load_avg": load_avg,
+        "mem": {
+            "total_bytes": mem.total,
+            "used_bytes": mem.used,
+            "available_bytes": mem.available,
+            "percent": mem.percent,
+        },
+        "disk": {
+            "path": disk_target,
+            "total_bytes": disk.total,
+            "used_bytes": disk.used,
+            "free_bytes": disk.free,
+            "percent": disk.percent,
+        },
+    }
+
+
 @router.get("/smtp")
 async def get_smtp_config(_current_user: User = Depends(require_admin)):
     """Return current SMTP configuration with masked password."""
