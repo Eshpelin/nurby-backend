@@ -9,6 +9,7 @@ observations in the database.
 import asyncio
 import logging
 
+from services.perception.conversation_finalizer import ConversationFinalizer
 from services.perception.live_detector import LiveDetector
 from services.perception.pipeline import PerceptionPipeline
 from services.perception.summarizer import CameraSummarizer
@@ -30,7 +31,13 @@ async def main():
     except Exception:
         logger.exception("ws import failed, summaries will not broadcast")
         summarizer = CameraSummarizer()
-    await asyncio.gather(pipeline.run(), live.run(), summarizer.run())
+    finalizer = ConversationFinalizer()
+    await asyncio.gather(
+        pipeline.run(),
+        live.run(),
+        summarizer.run(),
+        finalizer.run(),
+    )
 
 
 if __name__ == "__main__":

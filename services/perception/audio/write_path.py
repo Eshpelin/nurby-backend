@@ -17,6 +17,8 @@ import logging
 import uuid
 from typing import Any
 
+from datetime import timedelta
+
 from sqlalchemy import select
 
 from services.api.ws import broadcast as ws_broadcast
@@ -29,7 +31,7 @@ from services.perception.audio.speaker_video import attribute_by_video
 from services.perception.audio.storage import write_opus
 from services.perception.audio.types import SpeechSegment, TranscriptResult
 from shared.database import async_session
-from shared.models import AudioCapture, Camera, Transcript
+from shared.models import AudioCapture, Camera, Conversation, Transcript
 
 logger = logging.getLogger("nurby.perception.audio.write")
 
@@ -109,6 +111,17 @@ async def _write(
         except Exception:
             logger.exception("speaker attribution failed camera=%s", camera_id)
 
+        # Conversation assignment. Group consecutive transcripts on
+        # this camera into a rolling artifact so the timeline can show
+        # one card per actual conversation instead of N cards per VAD
+        # segment. Boundary is the camera's gap_seconds. Filtered rows
+        # do not open or extend a conversation.
+        conversation_id: uuid.UUID | None = None
+        if keep:
+            conversation_id = await _assign_conversation(
+                db, cam, segment.started_at, segment.ended_at
+            )
+
         transcript = Transcript(
             camera_id=camera_id,
             audio_capture_id=capture_id,
@@ -128,13 +141,14 @@ async def _write(
             speaker_person_id=attribution.person_id if attribution else None,
             speaker_confidence=attribution.confidence if attribution else None,
             speaker_source=attribution.source if attribution else None,
+            conversation_id=conversation_id,
         )
         db.add(transcript)
         await db.commit()
         await db.refresh(transcript)
 
     if keep:
-        await _broadcast(camera_id, transcript.id, segment, result)
+        await _broadcast(camera_id, transcript.id, segment, result, conversation_id)
         # Schedule VLM re-enrichment for any observations this transcript
         # overlaps. Debounced inside the enrichment module so multiple
         # transcripts on the same observation do not amplify VLM load.
@@ -151,11 +165,13 @@ async def _broadcast(
     transcript_id: uuid.UUID | None,
     segment: SpeechSegment,
     result: TranscriptResult,
+    conversation_id: uuid.UUID | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "type": "transcript_created",
         "camera_id": str(camera_id),
         "id": str(transcript_id) if transcript_id else None,
+        "conversation_id": str(conversation_id) if conversation_id else None,
         "started_at": segment.started_at.isoformat(),
         "ended_at": segment.ended_at.isoformat(),
         "text": result.text,
@@ -165,3 +181,66 @@ async def _broadcast(
         await ws_broadcast(payload)
     except Exception:
         logger.exception("WS broadcast failed for transcript %s", transcript_id)
+    if conversation_id is not None:
+        # Separate event so the UI can collapse + update a single
+        # conversation card without re-fetching the whole timeline.
+        try:
+            await ws_broadcast(
+                {
+                    "type": "conversation_updated",
+                    "camera_id": str(camera_id),
+                    "conversation_id": str(conversation_id),
+                    "transcript_id": str(transcript_id) if transcript_id else None,
+                    "started_at": segment.started_at.isoformat(),
+                    "ended_at": segment.ended_at.isoformat(),
+                    "text": result.text,
+                }
+            )
+        except Exception:
+            logger.exception("conversation_updated WS failed")
+
+
+async def _assign_conversation(
+    db,
+    cam: Camera,
+    seg_start,
+    seg_end,
+) -> uuid.UUID | None:
+    """Find an open conversation on this camera within the gap window
+    and extend it. Otherwise open a new one.
+
+    The query targets the partial index on (camera_id, finalized,
+    ended_at_provisional), so this is one indexed lookup per
+    transcript.
+    """
+    gap = max(5, int(getattr(cam, "conversation_gap_seconds", 30) or 30))
+    cutoff = seg_start - timedelta(seconds=gap)
+    try:
+        existing = (
+            await db.execute(
+                select(Conversation)
+                .where(Conversation.camera_id == cam.id)
+                .where(Conversation.finalized.is_(False))
+                .where(Conversation.ended_at_provisional >= cutoff)
+                .order_by(Conversation.ended_at_provisional.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if existing is not None:
+            existing.ended_at_provisional = seg_end
+            existing.transcript_count = (existing.transcript_count or 0) + 1
+            return existing.id
+
+        new_conv = Conversation(
+            camera_id=cam.id,
+            started_at=seg_start,
+            ended_at_provisional=seg_end,
+            transcript_count=1,
+            finalized=False,
+        )
+        db.add(new_conv)
+        await db.flush()
+        return new_conv.id
+    except Exception:
+        logger.exception("conversation assignment failed camera=%s", cam.id)
+        return None

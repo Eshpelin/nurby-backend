@@ -43,6 +43,7 @@ from shared.models import (
     Summary,
     Transcript,
 )
+from services.perception.text_llm import call_text
 from services.perception.vlm import VLMClient, get_active_provider
 from services.search.embeddings import generate_embedding, get_embedding_provider
 
@@ -287,9 +288,10 @@ class CameraSummarizer:
             tx_rows=tx_rows,
         )
 
-        text = await self._call_text_only(
+        text = await call_text(
             provider=provider,
-            prompt=prompt,
+            system_prompt=SUMMARY_SYSTEM_PROMPT,
+            user_prompt=prompt,
             max_tokens=int(cam.summary_max_tokens or 400),
         )
         if not text:
@@ -442,88 +444,6 @@ class CameraSummarizer:
 
         people = sorted(people_acc.values(), key=lambda p: -p["sightings"])
         return people, sorted(plates), dict(obj_counts)
-
-    async def _call_text_only(
-        self, provider: Provider, prompt: str, max_tokens: int
-    ) -> str | None:
-        """Send a text-only completion to the provider. Reuses the VLM
-        client's HTTP plumbing but skips image encoding.
-        """
-        import httpx
-
-        http = await self._vlm._get_http()
-        kind = provider.kind
-        try:
-            if kind == "openai":
-                model = provider.default_model or "gpt-4o-mini"
-                resp = await http.post(
-                    f"{provider.base_url}/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {provider.api_key}"},
-                    json={
-                        "model": model,
-                        "max_tokens": max_tokens,
-                        "messages": [
-                            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                    },
-                )
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
-            if kind == "anthropic":
-                model = provider.default_model or "claude-sonnet-4-20250514"
-                resp = await http.post(
-                    f"{provider.base_url}/v1/messages",
-                    headers={
-                        "x-api-key": provider.api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": model,
-                        "max_tokens": max_tokens,
-                        "system": SUMMARY_SYSTEM_PROMPT,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-                resp.raise_for_status()
-                return resp.json()["content"][0]["text"]
-            if kind == "google":
-                model = provider.default_model or "gemini-1.5-flash"
-                resp = await http.post(
-                    f"{provider.base_url}/v1beta/models/{model}:generateContent",
-                    params={"key": provider.api_key},
-                    json={
-                        "systemInstruction": {
-                            "parts": [{"text": SUMMARY_SYSTEM_PROMPT}]
-                        },
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"maxOutputTokens": max_tokens},
-                    },
-                )
-                resp.raise_for_status()
-                cands = resp.json().get("candidates") or []
-                if cands and cands[0].get("content", {}).get("parts"):
-                    return cands[0]["content"]["parts"][0].get("text")
-                return None
-            if kind == "ollama":
-                model = provider.default_model or "gemma3:4b"
-                resp = await http.post(
-                    f"{provider.base_url}/api/generate",
-                    json={
-                        "model": model,
-                        "prompt": f"{SUMMARY_SYSTEM_PROMPT}\n\n{prompt}",
-                        "stream": False,
-                        "options": {"num_predict": max_tokens},
-                    },
-                )
-                resp.raise_for_status()
-                return resp.json().get("response")
-        except httpx.HTTPError:
-            logger.exception("summary call failed provider=%s", kind)
-            return None
-        logger.warning("unknown provider kind for summary: %s", kind)
-        return None
 
     async def _store_summary(
         self,

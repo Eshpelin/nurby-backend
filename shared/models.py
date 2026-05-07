@@ -76,6 +76,10 @@ class Camera(Base):
     summary_event_trigger_objects: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # YOLO labels e.g. ["person"]
     summary_event_min_duration_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     summary_max_tokens: Mapped[int] = mapped_column(Integer, default=400, nullable=False)
+    # Conversation grouping (audio rollup)
+    conversation_gap_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    conversation_summary_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    conversation_min_messages_for_summary: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fps: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -352,6 +356,9 @@ class Transcript(Base):
     )
     speaker_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     speaker_source: Mapped[str | None] = mapped_column(String(16), nullable=True)  # video, voice, fused, ambiguous
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -413,6 +420,41 @@ class Summary(Base):
     people_seen: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     plates_seen: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     object_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Conversation(Base):
+    """A rolling group of consecutive transcripts on a camera.
+
+    Boundary is a gap heuristic. transcripts whose start is within
+    ``conversation_gap_seconds`` of the previous transcript's end on
+    the same camera belong to the same conversation. The conversation
+    is marked ``finalized`` and summarized after the gap window passes
+    with no new transcript.
+    """
+
+    __tablename__ = "conversations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    camera_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Advances every time a transcript is appended.
+    ended_at_provisional: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Set when the conversation closes.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transcript_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    finalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    speakers_seen: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

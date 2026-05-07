@@ -52,6 +52,10 @@ class CameraCreate(BaseModel):
     summary_event_trigger_objects: list[str] | None = None
     summary_event_min_duration_seconds: int = Field(default=5, ge=1, le=3600)
     summary_max_tokens: int = Field(default=400, ge=50, le=2000)
+    # Conversation grouping
+    conversation_gap_seconds: int = Field(default=30, ge=5, le=600)
+    conversation_summary_enabled: bool = True
+    conversation_min_messages_for_summary: int = Field(default=2, ge=1, le=20)
 
 
 class CameraUpdate(BaseModel):
@@ -101,6 +105,10 @@ class CameraUpdate(BaseModel):
     summary_event_trigger_objects: list[str] | None = None
     summary_event_min_duration_seconds: int | None = Field(default=None, ge=1, le=3600)
     summary_max_tokens: int | None = Field(default=None, ge=50, le=2000)
+    # Conversation grouping
+    conversation_gap_seconds: int | None = Field(default=None, ge=5, le=600)
+    conversation_summary_enabled: bool | None = None
+    conversation_min_messages_for_summary: int | None = Field(default=None, ge=1, le=20)
 
 
 class CameraReorderItem(BaseModel):
@@ -154,6 +162,9 @@ class CameraResponse(BaseModel):
     summary_event_trigger_objects: list[str] | None = None
     summary_event_min_duration_seconds: int = 5
     summary_max_tokens: int = 400
+    conversation_gap_seconds: int = 30
+    conversation_summary_enabled: bool = True
+    conversation_min_messages_for_summary: int = 2
     width: int | None
     height: int | None
     fps: float | None
