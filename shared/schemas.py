@@ -27,6 +27,11 @@ class CameraCreate(BaseModel):
     vlm_interval: int = Field(default=0, ge=0, le=3600)
     vlm_max_tokens: int = Field(default=200, ge=50, le=2000)
     vlm_max_input_tokens: int | None = Field(default=None, ge=64, le=2_000_000)
+    vlm_refiner_provider_id: uuid.UUID | None = None
+    vlm_refiner_trigger_objects: list[str] | None = None
+    vlm_refiner_keywords: list[str] | None = None
+    vlm_refiner_max_tokens: int | None = Field(default=None, ge=50, le=2000)
+    vlm_refiner_max_input_tokens: int | None = Field(default=None, ge=64, le=2_000_000)
     detect_objects: bool = True
     detect_faces: bool = True
     scene_mode: str = Field(default="indoor", max_length=16)  # indoor, outdoor
@@ -80,6 +85,11 @@ class CameraUpdate(BaseModel):
     vlm_interval: int | None = Field(default=None, ge=0, le=3600)
     vlm_max_tokens: int | None = Field(default=None, ge=50, le=2000)
     vlm_max_input_tokens: int | None = Field(default=None, ge=64, le=2_000_000)
+    vlm_refiner_provider_id: uuid.UUID | None = None
+    vlm_refiner_trigger_objects: list[str] | None = None
+    vlm_refiner_keywords: list[str] | None = None
+    vlm_refiner_max_tokens: int | None = Field(default=None, ge=50, le=2000)
+    vlm_refiner_max_input_tokens: int | None = Field(default=None, ge=64, le=2_000_000)
     detect_objects: bool | None = None
     detect_faces: bool | None = None
     scene_mode: str | None = Field(default=None, max_length=16)
@@ -138,6 +148,11 @@ class CameraResponse(BaseModel):
     vlm_interval: int
     vlm_max_tokens: int
     vlm_max_input_tokens: int | None = None
+    vlm_refiner_provider_id: uuid.UUID | None = None
+    vlm_refiner_trigger_objects: list[str] | None = None
+    vlm_refiner_keywords: list[str] | None = None
+    vlm_refiner_max_tokens: int | None = None
+    vlm_refiner_max_input_tokens: int | None = None
     detect_objects: bool
     detect_faces: bool
     scene_mode: str

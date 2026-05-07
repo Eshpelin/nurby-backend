@@ -34,6 +34,15 @@ class Camera(Base):
     vlm_interval: Mapped[int] = mapped_column(Integer, default=0)  # seconds between VLM calls, 0 = every keyframe
     vlm_max_tokens: Mapped[int] = mapped_column(Integer, default=200)
     vlm_max_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Cascade refiner. When set, the primary VLM's output is post-
+    # processed by the refiner provider whenever a trigger matches.
+    vlm_refiner_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("providers.id", ondelete="SET NULL"), nullable=True
+    )
+    vlm_refiner_trigger_objects: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    vlm_refiner_keywords: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    vlm_refiner_max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vlm_refiner_max_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     detect_objects: Mapped[bool] = mapped_column(Boolean, default=True)
     detect_faces: Mapped[bool] = mapped_column(Boolean, default=True)
     scene_mode: Mapped[str] = mapped_column(String(16), default="indoor")  # indoor, outdoor
@@ -190,6 +199,12 @@ class Observation(Base):
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     clip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     description_embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
+    # Cascade history. When the refiner stage replaces the primary
+    # text on this observation, the original primary output is moved
+    # here so the UI can show a before/after comparison.
+    primary_vlm_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refined_by_provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    refined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DigestEntry(Base):
