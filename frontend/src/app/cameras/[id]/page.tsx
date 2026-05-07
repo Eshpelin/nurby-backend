@@ -26,6 +26,7 @@ interface Camera {
   vlm_prompt: string | null;
   vlm_interval: number;
   vlm_max_tokens: number;
+  vlm_max_input_tokens: number | null;
   detect_objects: boolean;
   detect_faces: boolean;
   scene_mode: string;
@@ -945,6 +946,7 @@ export default function CameraConfigPage() {
   const [vlmPrompt, setVlmPrompt] = useState("");
   const [vlmInterval, setVlmInterval] = useState(0);
   const [vlmMaxTokens, setVlmMaxTokens] = useState(200);
+  const [vlmMaxInputTokens, setVlmMaxInputTokens] = useState<string>("");
   const [vlmTrigger, setVlmTrigger] = useState("always");
   const [vlmTriggerObjects, setVlmTriggerObjects] = useState<string[]>([]);
   const [detectObjects, setDetectObjects] = useState(true);
@@ -1011,6 +1013,7 @@ export default function CameraConfigPage() {
       setVlmPrompt(cam.vlm_prompt || "");
       setVlmInterval(cam.vlm_interval ?? 0);
       setVlmMaxTokens(cam.vlm_max_tokens ?? 200);
+      setVlmMaxInputTokens(cam.vlm_max_input_tokens != null ? String(cam.vlm_max_input_tokens) : "");
       setVlmTrigger(cam.vlm_trigger ?? "always");
       setVlmTriggerObjects(cam.vlm_trigger_objects ?? []);
       setDetectObjects(cam.detect_objects ?? true);
@@ -1095,6 +1098,7 @@ export default function CameraConfigPage() {
         vlm_prompt: vlmPrompt.trim() || null,
         vlm_interval: vlmInterval,
         vlm_max_tokens: vlmMaxTokens,
+        vlm_max_input_tokens: vlmMaxInputTokens.trim() ? Number(vlmMaxInputTokens) : null,
         vlm_trigger: vlmTrigger,
         vlm_trigger_objects: vlmTriggerObjects.length > 0 ? vlmTriggerObjects : null,
         detect_objects: detectObjects,
@@ -1573,7 +1577,7 @@ export default function CameraConfigPage() {
             </FieldRow>
           )}
 
-          <FieldRow label="Max Tokens" hint="Response length limit">
+          <FieldRow label="Max Output Tokens" hint="Per-camera output cap. The provider's cap (set in Settings) further tightens this.">
             <div className="flex items-center gap-3">
               <input
                 type="range"
@@ -1588,6 +1592,17 @@ export default function CameraConfigPage() {
                 {vlmMaxTokens}
               </span>
             </div>
+          </FieldRow>
+
+          <FieldRow label="Max Input Tokens" hint="Per-camera prompt size cap. Empty defers to the provider's input cap.">
+            <input
+              type="number"
+              min={64}
+              value={vlmMaxInputTokens}
+              onChange={(e) => setVlmMaxInputTokens(e.target.value)}
+              className={inputClass}
+              placeholder="defer to provider"
+            />
           </FieldRow>
 
           <FieldRow label="Custom Prompt" hint="Override system prompt for this camera">

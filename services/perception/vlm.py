@@ -19,6 +19,7 @@ import httpx
 import numpy as np
 
 from services.perception.token_budget import (
+    resolve_input_cap,
     resolve_output_cap,
     trim_sections_to_budget,
 )
@@ -67,6 +68,7 @@ class VLMClient:
         max_tokens: int | None = None,
         heard_text: str | None = None,
         extra_context: str | None = None,
+        max_input_tokens: int | None = None,
     ) -> str | None:
         """Send frame to VLM and get a scene description.
 
@@ -140,7 +142,10 @@ class VLMClient:
                 sections.append(("extra", extra_block))
             sections.append(("base", base_block))
 
-            input_cap = getattr(provider, "max_input_tokens", None)
+            input_cap = resolve_input_cap(
+                max_input_tokens,
+                getattr(provider, "max_input_tokens", None),
+            )
             sections = trim_sections_to_budget(sections, input_cap)
             user_prompt = "".join(text for _, text in sections).strip()
 

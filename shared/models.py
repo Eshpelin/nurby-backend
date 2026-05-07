@@ -33,6 +33,7 @@ class Camera(Base):
     vlm_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)  # custom system prompt override
     vlm_interval: Mapped[int] = mapped_column(Integer, default=0)  # seconds between VLM calls, 0 = every keyframe
     vlm_max_tokens: Mapped[int] = mapped_column(Integer, default=200)
+    vlm_max_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     detect_objects: Mapped[bool] = mapped_column(Boolean, default=True)
     detect_faces: Mapped[bool] = mapped_column(Boolean, default=True)
     scene_mode: Mapped[str] = mapped_column(String(16), default="indoor")  # indoor, outdoor

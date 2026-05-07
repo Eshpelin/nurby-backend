@@ -94,6 +94,7 @@ class VLMJob:
     provider: Provider
     system_prompt: str | None
     max_tokens: int | None
+    max_input_tokens: int | None = None
     timestamp: datetime
     heard_text: str | None = None
     extra_context: str | None = None
@@ -202,6 +203,15 @@ class VLMQueue:
 
         await q.put(job)
 
+        # Surface a "queued" state immediately so the tile shows a
+        # signal during the (usually short) gap between enqueue and
+        # the worker picking the job up. The worker will overwrite
+        # this with "processing" on its next iteration.
+        stats = self._stats[camera_id]
+        if stats.status == "idle":
+            stats.status = "queued"
+            await self._broadcast_status(camera_id)
+
         # Start worker if not running
         if camera_id not in self._workers or self._workers[camera_id].done():
             self._workers[camera_id] = asyncio.create_task(
@@ -238,6 +248,7 @@ class VLMQueue:
                     max_tokens=job.max_tokens,
                     heard_text=job.heard_text,
                     extra_context=job.extra_context,
+                    max_input_tokens=job.max_input_tokens,
                 )
                 duration = time.monotonic() - start
                 stats.record_latency(duration)

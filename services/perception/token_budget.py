@@ -46,6 +46,13 @@ def resolve_output_cap(*caps: int | None) -> int | None:
     return min(real) if real else None
 
 
+# Same shape as resolve_output_cap. Kept named separately so call
+# sites read intentionally and so the input-cap rules can diverge
+# later (e.g. honor model context window) without disturbing output
+# cap callers.
+resolve_input_cap = resolve_output_cap
+
+
 def trim_sections_to_budget(
     sections: list[tuple[str, str]],
     budget_tokens: int | None,
