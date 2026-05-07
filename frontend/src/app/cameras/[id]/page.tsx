@@ -62,6 +62,8 @@ interface Camera {
   conversation_gap_seconds: number;
   conversation_summary_enabled: boolean;
   conversation_min_messages_for_summary: number;
+  incident_tracking_enabled: boolean;
+  incident_idle_seconds: number;
   motion_zones: MotionZone[] | null;
   status: string;
   width: number | null;
@@ -1047,6 +1049,8 @@ export default function CameraConfigPage() {
   const [conversationGapSeconds, setConversationGapSeconds] = useState(30);
   const [conversationSummaryEnabled, setConversationSummaryEnabled] = useState(true);
   const [conversationMinMessages, setConversationMinMessages] = useState(2);
+  const [incidentTrackingEnabled, setIncidentTrackingEnabled] = useState(true);
+  const [incidentIdleSeconds, setIncidentIdleSeconds] = useState(600);
   const [activeTab, setActiveTab] = useState<"settings" | "activity">("settings");
   const [motionZones, setMotionZones] = useState<MotionZone[]>([]);
 
@@ -1118,6 +1122,8 @@ export default function CameraConfigPage() {
       setConversationGapSeconds(cam.conversation_gap_seconds ?? 30);
       setConversationSummaryEnabled(cam.conversation_summary_enabled ?? true);
       setConversationMinMessages(cam.conversation_min_messages_for_summary ?? 2);
+      setIncidentTrackingEnabled(cam.incident_tracking_enabled ?? true);
+      setIncidentIdleSeconds(cam.incident_idle_seconds ?? 600);
       setMotionZones(cam.motion_zones ?? []);
     } catch {
       setError("Failed to load camera");
@@ -1249,6 +1255,8 @@ export default function CameraConfigPage() {
         conversation_gap_seconds: conversationGapSeconds,
         conversation_summary_enabled: conversationSummaryEnabled,
         conversation_min_messages_for_summary: conversationMinMessages,
+        incident_tracking_enabled: incidentTrackingEnabled,
+        incident_idle_seconds: incidentIdleSeconds,
         motion_zones: motionZones.length > 0 ? motionZones : null,
       };
 
@@ -1308,6 +1316,7 @@ export default function CameraConfigPage() {
     summaryEventQuietSeconds, summaryEventTriggerObjects,
     summaryEventMinDurationSeconds, summaryMaxTokens,
     conversationGapSeconds, conversationSummaryEnabled, conversationMinMessages,
+    incidentTrackingEnabled, incidentIdleSeconds,
     motionZones,
   ]);
 
@@ -2364,6 +2373,39 @@ export default function CameraConfigPage() {
                 />
                 <span className="font-mono text-xs text-muted-foreground w-20 text-right">
                   {conversationMinMessages} msg
+                </span>
+              </div>
+            </FieldRow>
+          )}
+        </Section>
+
+        {/* ── Incident tracking ── */}
+        <Section
+          title="Incident tracking"
+          description="Group repeated observations of the same person or object on this camera into one persistent rolling card with a stable id, live updates, and a final summary on close."
+        >
+          <FieldRow label="Tracking">
+            <Toggle
+              checked={incidentTrackingEnabled}
+              onChange={setIncidentTrackingEnabled}
+              label={incidentTrackingEnabled ? "On" : "Off"}
+            />
+          </FieldRow>
+
+          {incidentTrackingEnabled && (
+            <FieldRow label="Idle window" hint="Seconds without a matching detection before the incident closes and gets summarized.">
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={60}
+                  max={3600}
+                  step={30}
+                  value={incidentIdleSeconds}
+                  onChange={(e) => setIncidentIdleSeconds(Number(e.target.value))}
+                  className="flex-1 accent-accent"
+                />
+                <span className="font-mono text-xs text-muted-foreground w-20 text-right">
+                  {formatInterval(incidentIdleSeconds)}
                 </span>
               </div>
             </FieldRow>

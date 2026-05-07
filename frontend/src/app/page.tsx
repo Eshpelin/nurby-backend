@@ -12,6 +12,7 @@ import { SummarizeNowButton } from "@/components/SummarizeNowButton";
 import { CameraStatsHover } from "@/components/CameraStatsHover";
 import { RefinedBadge } from "@/components/RefinedBadge";
 import { ObservationGroupCard } from "@/components/ObservationGroupCard";
+import { IncidentCard } from "@/components/IncidentCard";
 import {
   coalesceObservations,
   isObservationGroup,
@@ -205,6 +206,23 @@ interface Summary {
   object_counts: Record<string, number> | null;
 }
 
+interface Incident {
+  id: string;
+  camera_id: string;
+  signature_kind: string;
+  signature_key: string;
+  started_at: string;
+  last_seen_at: string;
+  ended_at: string | null;
+  finalized: boolean;
+  occurrence_count: number;
+  peak_observation_id: string | null;
+  observation_ids: string[] | null;
+  thumbnails: { obs_id: string; path: string | null; ts: string }[] | null;
+  summary_text: string | null;
+  summary_provider_name: string | null;
+}
+
 interface Conversation {
   id: string;
   camera_id: string;
@@ -226,6 +244,7 @@ interface TimelineEntry {
     | "recording"
     | "observation"
     | "observation_group"
+    | "incident"
     | "status"
     | "search_result"
     | "notification"
@@ -238,6 +257,7 @@ interface TimelineEntry {
     | Recording
     | Observation
     | CoalesceGroup
+    | Incident
     | StatusLog
     | SearchResult
     | Notification
@@ -1790,6 +1810,7 @@ function DashboardContent() {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [modalRecording, setModalRecording] = useState<Recording | null>(null);
@@ -1868,6 +1889,16 @@ function DashboardContent() {
             // Cascade refiner replaced the primary description on an
             // observation. Refetch so the timeline picks up the
             // upgraded text and refined badge.
+            fetchTimeline();
+          }
+          if (
+            data.type === "incident_opened" ||
+            data.type === "incident_updated" ||
+            data.type === "incident_finalized"
+          ) {
+            // The IncidentCard already splices live state from
+            // incident_updated and incident_finalized payloads. The
+            // timeline refetch picks up new rows for incident_opened.
             fetchTimeline();
           }
         } catch { /* ignore */ }
@@ -1981,7 +2012,7 @@ function DashboardContent() {
       const statusParams = new URLSearchParams({ limit: "100" });
       if (selectedCamera) statusParams.set("camera_id", selectedCamera);
 
-      const [recRes, obsRes, statusRes, notifRes, tlRes, sumRes, convRes] = await Promise.all([
+      const [recRes, obsRes, statusRes, notifRes, tlRes, sumRes, convRes, incRes] = await Promise.all([
         authFetch(`/api/recordings?${params}`),
         authFetch(`/api/observations?${params}`),
         authFetch(`/api/cameras/status-logs?${statusParams}`),
@@ -1989,6 +2020,7 @@ function DashboardContent() {
         authFetch(`/api/timeline?${params}`),
         authFetch(`/api/summaries?${params}`),
         authFetch(`/api/conversations?${params}`),
+        authFetch(`/api/incidents?${params}`),
       ]);
 
       const now = Date.now();
@@ -2015,6 +2047,14 @@ function DashboardContent() {
         setConversations(
           (Array.isArray(all) ? all : []).filter(
             (c) => new Date(c.started_at).getTime() >= cutoff
+          )
+        );
+      }
+      if (incRes.ok) {
+        const all: Incident[] = await incRes.json();
+        setIncidents(
+          (Array.isArray(all) ? all : []).filter(
+            (i) => new Date(i.started_at).getTime() >= cutoff
           )
         );
       }
@@ -2187,13 +2227,28 @@ function DashboardContent() {
   } else {
     if (eventFilters.has("recordings")) entries.push(...recordings.map((r) => ({ id: `rec-${r.id}`, type: "recording" as const, camera_id: r.camera_id, timestamp: r.started_at, data: r })));
     if (eventFilters.has("observations")) {
-      // The grouper works on a structurally compatible Observation
-      // shape from the helper module. The page-level Observation
-      // interface is stricter on optional fields like person_id and
-      // bbox; the runtime data matches both. Cast through unknown to
-      // avoid having to keep the two shapes in lockstep.
+      // Persistent incidents take precedence over the frontend-only
+      // group cards. We push one IncidentCard entry per incident and
+      // suppress the underlying observations from the timeline so the
+      // user sees one rolling artifact per identity-on-camera.
+      // Observations not linked to any incident still flow through
+      // the legacy coalescer below.
+      const incidentObsIds = new Set<string>();
+      for (const inc of incidents) {
+        for (const obsId of inc.observation_ids || []) {
+          incidentObsIds.add(obsId);
+        }
+        entries.push({
+          id: `inc-${inc.id}`,
+          type: "incident" as const,
+          camera_id: inc.camera_id,
+          timestamp: inc.last_seen_at,
+          data: inc,
+        });
+      }
+      const looseObs = observations.filter((o) => !incidentObsIds.has(o.id));
       const coalesced = coalesceObservations(
-        observations as unknown as Parameters<typeof coalesceObservations>[0],
+        looseObs as unknown as Parameters<typeof coalesceObservations>[0],
         groupWindowSeconds * 1000
       );
       for (const e of coalesced) {
@@ -3282,6 +3337,17 @@ function DashboardContent() {
                                 </div>
                               </button>
                             </div>
+                          );
+                        }
+
+                        if (entry.type === "incident") {
+                          const inc = entry.data as Incident;
+                          return (
+                            <IncidentCard
+                              key={entry.id}
+                              incident={inc}
+                              cameraName={cam?.name}
+                            />
                           );
                         }
 
