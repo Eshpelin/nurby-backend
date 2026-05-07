@@ -95,6 +95,28 @@ services:
       redis:
         condition: service_healthy
 
+  perception:
+    build:
+      context: .
+      dockerfile: services/perception/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nurby:${POSTGRES_PASSWORD:-nurby_dev}@postgres:5432/nurby
+      REDIS_URL: redis://redis:6379/0
+      MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+      RECORDINGS_PATH: /data/recordings
+      THUMBNAILS_PATH: /data/thumbnails
+      AUDIO_STORAGE_PATH: /data/audio
+    volumes:
+      - recordings:/data/recordings
+      - thumbnails:/data/thumbnails
+      - audio:/data/audio
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -114,3 +136,4 @@ volumes:
   redis_data:
   recordings:
   thumbnails:
+  audio:

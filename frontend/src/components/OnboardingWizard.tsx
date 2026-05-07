@@ -83,6 +83,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const [presetIdx, setPresetIdx] = useState<number>(0);
   const [providerName, setProviderName] = useState<string>(PROVIDER_PRESETS[0].name);
   const [providerApiKey, setProviderApiKey] = useState<string>("");
+  const [providerModel, setProviderModel] = useState<string>(PROVIDER_PRESETS[0].default_model);
   const [providerSubmitting, setProviderSubmitting] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [skipProvider, setSkipProvider] = useState(false);
@@ -102,9 +103,10 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
     [camPersonaId]
   );
 
-  // Auto-pick provider name from preset.
+  // Auto-pick provider name + default model from preset.
   useEffect(() => {
     setProviderName(PROVIDER_PRESETS[presetIdx].name);
+    setProviderModel(PROVIDER_PRESETS[presetIdx].default_model);
   }, [presetIdx]);
 
   // Hydrate existing providers so we can skip step 2 if one already
@@ -131,7 +133,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
         name: providerName.trim() || preset.name,
         kind: preset.kind,
         base_url: preset.base_url,
-        default_model: preset.default_model,
+        default_model: providerModel.trim() || preset.default_model,
         active: true,
       };
       if (preset.keyRequired) {
@@ -239,6 +241,8 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               setProviderName={setProviderName}
               providerApiKey={providerApiKey}
               setProviderApiKey={setProviderApiKey}
+              providerModel={providerModel}
+              setProviderModel={setProviderModel}
               error={providerError}
               submitting={providerSubmitting}
               skipProvider={skipProvider}
@@ -413,6 +417,8 @@ function ProviderStep({
   setProviderName,
   providerApiKey,
   setProviderApiKey,
+  providerModel,
+  setProviderModel,
   error,
   submitting,
   skipProvider,
@@ -425,6 +431,8 @@ function ProviderStep({
   setProviderName: (s: string) => void;
   providerApiKey: string;
   setProviderApiKey: (s: string) => void;
+  providerModel: string;
+  setProviderModel: (s: string) => void;
   error: string | null;
   submitting: boolean;
   skipProvider: boolean;
@@ -475,6 +483,15 @@ function ProviderStep({
               value={preset.base_url}
               readOnly
               className="w-full px-3 py-2 rounded-md bg-muted/30 border border-border text-sm font-mono opacity-70"
+            />
+          </FieldRow>
+          <FieldRow label="Model" hint="The model name the provider uses by default. Override here if you want a different one.">
+            <input
+              type="text"
+              value={providerModel}
+              onChange={(e) => setProviderModel(e.target.value)}
+              placeholder={preset.default_model}
+              className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm font-mono focus:outline-none focus:border-accent"
             />
           </FieldRow>
           {preset.keyRequired && (

@@ -123,6 +123,14 @@ class CameraAudioRouter:
         """Fire-and-forget speech-start pulse the moment VAD detects a
         new segment opening. Runs in the segmenter's sync context so we
         schedule the WS broadcast on the running loop.
+
+        Also kicks the recording trigger so cameras whose
+        ``recording_mode`` is ``on_motion`` / ``on_object`` / ``clip``
+        keep recording for the duration of the conversation. This is
+        what lets the conversation_clip builder always find an
+        overlapping Recording row to slice. Cameras with
+        ``recording_mode=off`` are respected: the trigger has no
+        effect there.
         """
         try:
             loop = asyncio.get_running_loop()
@@ -135,8 +143,30 @@ class CameraAudioRouter:
                     }
                 )
             )
+            loop.create_task(self._kick_recording_trigger())
         except RuntimeError:
             pass
+
+    async def _kick_recording_trigger(self) -> None:
+        """Set the Redis recording trigger so the stream writer keeps
+        recording across the conversation window."""
+        try:
+            import redis.asyncio as aioredis
+
+            from shared.config import settings
+
+            r = aioredis.from_url(settings.redis_url)
+            try:
+                # 30s TTL matches what perception's _set_record_trigger
+                # uses. Re-set on every speech segment so a long
+                # conversation keeps the recording alive.
+                await r.setex(
+                    f"nurby:record_trigger:{self.camera_id}", 30, "1"
+                )
+            finally:
+                await r.aclose()
+        except Exception:
+            logger.debug("recording trigger kick failed", exc_info=True)
 
     async def _do_broadcast(self, payload: dict) -> None:
         try:

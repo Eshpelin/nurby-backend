@@ -1047,6 +1047,12 @@ export default function CameraConfigPage() {
       setError("Failed to load camera");
     } finally {
       setLoading(false);
+      // Mark autosave as armed only after the hydrate burst settles.
+      // setTimeout pushes past the React commit so the next render
+      // tick is the first one autosave watches.
+      setTimeout(() => {
+        firstLoadDone.current = true;
+      }, 0);
     }
   }, [cameraId]);
 
@@ -1105,6 +1111,13 @@ export default function CameraConfigPage() {
     if (patch.conversation_gap_seconds !== undefined) setConversationGapSeconds(patch.conversation_gap_seconds);
     if (patch.conversation_summary_enabled !== undefined) setConversationSummaryEnabled(patch.conversation_summary_enabled);
   }
+
+  // Autosave plumbing. firstLoadDone flips true after fetchData
+  // hydrates the form so the initial setState burst does not trigger
+  // a save loop. autosaveTimer holds the pending debounce so a flurry
+  // of slider drags collapses into a single PATCH.
+  const firstLoadDone = useRef(false);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function handleSave() {
     setSaving(true);
@@ -1183,6 +1196,37 @@ export default function CameraConfigPage() {
       setSaving(false);
     }
   }
+
+  // Autosave. Watches every editable field and PATCHes the camera
+  // 800ms after the last change. Skips the first hydrate burst via
+  // the firstLoadDone ref so we never POST an immediate save on
+  // mount.
+  useEffect(() => {
+    if (!firstLoadDone.current) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      handleSave();
+    }, 800);
+    return () => {
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    name, streamUrl, streamType, locationLabel, username, password, authToken,
+    snapshotInterval, motionSensitivity, recordingEnabled, recordingMode,
+    recordingTriggerObjects, recordingClipPre, recordingClipPost,
+    vlmProviderId, vlmPrompt, vlmInterval, vlmMaxTokens, vlmMaxInputTokens,
+    vlmTrigger, vlmTriggerObjects,
+    detectObjects, detectFaces, sceneMode, objectConfidence,
+    detectionModels, detectionMerge, detectionConsensusMin,
+    digestEnabled, digestPeriod, digestProviderId, digestPrompt,
+    retentionMode, retentionDays, retentionGb,
+    summaryProviderId, summaryMode, summaryPeriodSeconds,
+    summaryEventQuietSeconds, summaryEventTriggerObjects,
+    summaryEventMinDurationSeconds, summaryMaxTokens,
+    conversationGapSeconds, conversationSummaryEnabled, conversationMinMessages,
+    motionZones,
+  ]);
 
   async function handleDelete() {
     try {
@@ -2303,27 +2347,42 @@ export default function CameraConfigPage() {
 
       {/* Sticky save bar */}
       <div className="sticky bottom-0 mt-6 -mx-6 px-6 py-3 bg-background/80 backdrop-blur-sm border-t border-border flex items-center justify-between">
-        <div>
-          {error && <p className="text-sm text-danger">{error}</p>}
-          {saved && (
-            <p className="text-sm text-accent">Settings saved</p>
+        <div className="flex items-center gap-2 text-xs">
+          {error && <span className="text-danger">{error}</span>}
+          {!error && saving && (
+            <>
+              <svg
+                className="animate-spin w-3 h-3 text-muted-foreground"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeDasharray="40 60"
+                />
+              </svg>
+              <span className="text-muted-foreground">Saving.</span>
+            </>
+          )}
+          {!error && !saving && saved && (
+            <span className="text-accent">All changes saved</span>
+          )}
+          {!error && !saving && !saved && (
+            <span className="text-muted-foreground/70">
+              Changes save automatically
+            </span>
           )}
         </div>
-        <div className="flex gap-2">
-          <Link
-            href="/"
-            className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted transition-colors"
-          >
-            Cancel
-          </Link>
-          <button
-            onClick={handleSave}
-            disabled={saving || !name.trim() || !streamUrl.trim()}
-            className="px-4 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? "Saving..." : "Save Changes"}
-          </button>
-        </div>
+        <Link
+          href="/"
+          className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted transition-colors"
+        >
+          Done
+        </Link>
       </div>
     </div>
   );
