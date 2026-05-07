@@ -10,7 +10,13 @@ from shared.auth import get_current_user, require_admin
 from shared.database import get_db
 from shared.models import Camera, DigestEntry, Provider, User
 from shared.schemas import DigestEntryResponse
-from services.search.query import search_observations, answer_question
+from services.search.query import (
+    answer_question,
+    search_conversations,
+    search_observations,
+    search_summaries,
+    search_transcripts,
+)
 from services.search.digest import generate_digest
 from services.search.embeddings import get_embedding_provider
 from services.perception.vlm import get_active_provider as get_active_vlm_provider
@@ -63,6 +69,63 @@ async def search(
         limit=limit,
         offset=offset,
     )
+    return SearchResponse(results=results, total=len(results))
+
+
+@router.get("/union", response_model=SearchResponse)
+async def search_union(
+    q: str | None = Query(default=None),
+    camera_id: uuid.UUID | None = Query(default=None),
+    time_from: datetime | None = Query(default=None),
+    time_to: datetime | None = Query(default=None),
+    limit_per_kind: int = Query(default=10, ge=1, le=50),
+    kinds: str = Query(
+        default="observations,transcripts,conversations,summaries",
+        description="Comma-separated. observations,transcripts,conversations,summaries",
+    ),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Union search across observations, transcripts, conversations, and
+    summaries. Each kind contributes up to ``limit_per_kind`` rows. The
+    UI is responsible for ranking / interleaving by recency or distance.
+    """
+    selected = {k.strip() for k in kinds.split(",") if k.strip()}
+    results: list[dict] = []
+    if "observations" in selected:
+        results.extend(
+            await search_observations(
+                db, query=q, camera_id=camera_id,
+                time_from=time_from, time_to=time_to, limit=limit_per_kind,
+            )
+        )
+    if "transcripts" in selected:
+        results.extend(
+            await search_transcripts(
+                db, query=q, camera_id=camera_id,
+                time_from=time_from, time_to=time_to, limit=limit_per_kind,
+            )
+        )
+    if "conversations" in selected:
+        results.extend(
+            await search_conversations(
+                db, query=q, camera_id=camera_id,
+                time_from=time_from, time_to=time_to, limit=limit_per_kind,
+            )
+        )
+    if "summaries" in selected:
+        results.extend(
+            await search_summaries(
+                db, query=q, camera_id=camera_id,
+                time_from=time_from, time_to=time_to, limit=limit_per_kind,
+            )
+        )
+    # Sort. distance asc when present, else started_at desc.
+    def _sort_key(r: dict):
+        d = r.get("distance")
+        return (0 if d is not None else 1, d if d is not None else 0,
+                -datetime.fromisoformat(r["started_at"]).timestamp())
+    results.sort(key=_sort_key)
     return SearchResponse(results=results, total=len(results))
 
 

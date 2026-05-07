@@ -47,7 +47,7 @@ interface Transcript {
   text: string;
   language: string | null;
   provider: string;
-  filtered: boolean;
+  filtered?: boolean;
 }
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -62,6 +62,9 @@ export default function CameraAudioPage() {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showFiltered, setShowFiltered] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summarizeMsg, setSummarizeMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token || !cameraId) return;
@@ -85,7 +88,7 @@ export default function CameraAudioPage() {
         });
 
         const txResp = await fetch(
-          `${API}/api/transcripts?camera_id=${cameraId}&limit=100`,
+          `${API}/api/transcripts?camera_id=${cameraId}&limit=100&include_filtered=${showFiltered}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const txList = await txResp.json();
@@ -97,7 +100,29 @@ export default function CameraAudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [cameraId, token]);
+  }, [cameraId, token, showFiltered]);
+
+  const runSummary = async () => {
+    if (summarizing) return;
+    setSummarizing(true);
+    setSummarizeMsg(null);
+    try {
+      const resp = await fetch(`${API}/api/summaries/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ camera_id: cameraId, window_minutes: 30 }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      setSummarizeMsg("Summary generated. Check the dashboard timeline.");
+    } catch (e: any) {
+      setSummarizeMsg(e?.message || "Summarize failed");
+    } finally {
+      setSummarizing(false);
+    }
+  };
 
   const update = async (patch: Partial<AudioConfig>) => {
     if (!config) return;
@@ -218,6 +243,34 @@ export default function CameraAudioPage() {
           </div>
         </section>
 
+        <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-5 mb-6">
+          <h2 className="text-sm font-medium text-zinc-300 mb-3">
+            Manual actions
+          </h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={runSummary}
+              disabled={summarizing}
+              className="px-3 py-1.5 text-xs rounded-md bg-emerald-600/20 text-emerald-300 border border-emerald-600/40 hover:bg-emerald-600/30 disabled:opacity-50"
+            >
+              {summarizing ? "Generating." : "Summarize last 30 min"}
+            </button>
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={showFiltered}
+                onChange={(e) => setShowFiltered(e.target.checked)}
+                className="accent-emerald-500"
+              />
+              Show filtered (hallucination) transcripts
+            </label>
+            {summarizeMsg && (
+              <span className="text-xs text-zinc-400">{summarizeMsg}</span>
+            )}
+          </div>
+        </section>
+
         <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-5">
           <h2 className="text-sm font-medium text-zinc-300 mb-4">
             Recent transcripts ({transcripts.length})
@@ -232,12 +285,29 @@ export default function CameraAudioPage() {
               {transcripts.map((t) => (
                 <div
                   key={t.id}
-                  className="rounded border border-zinc-800 bg-zinc-900 p-3"
+                  className={`rounded border p-3 ${
+                    t.filtered
+                      ? "border-amber-700/40 bg-amber-950/10"
+                      : "border-zinc-800 bg-zinc-900"
+                  }`}
                 >
-                  <div className="text-xs text-zinc-500 mb-1">
-                    {new Date(t.started_at).toLocaleString()} · {t.provider}
+                  <div className="text-xs text-zinc-500 mb-1 flex items-center gap-2">
+                    <span>{new Date(t.started_at).toLocaleString()}</span>
+                    <span>·</span>
+                    <span>{t.provider}</span>
+                    {t.filtered && (
+                      <span className="ml-auto text-[10px] uppercase tracking-wider text-amber-400">
+                        filtered
+                      </span>
+                    )}
                   </div>
-                  <div className="text-sm italic text-zinc-100">{t.text}</div>
+                  <div
+                    className={`text-sm italic ${
+                      t.filtered ? "text-zinc-400" : "text-zinc-100"
+                    }`}
+                  >
+                    {t.text}
+                  </div>
                 </div>
               ))}
             </div>

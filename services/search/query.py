@@ -14,7 +14,7 @@ import httpx
 from sqlalchemy import select, and_, or_, func, cast, String, Float, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.models import Observation, Camera, FaceCluster, Person, Transcript
+from shared.models import Conversation, Observation, Camera, FaceCluster, Person, Summary, Transcript
 from services.search.embeddings import generate_embedding, get_embedding_provider, EMBEDDING_DIM
 
 logger = logging.getLogger("nurby.search.query")
@@ -646,3 +646,148 @@ async def search_transcripts(
             }
         )
     return out
+
+
+# ---- summary search ------------------------------------------------------
+
+
+async def search_summaries(
+    db: AsyncSession,
+    query: str | None = None,
+    camera_id: uuid.UUID | None = None,
+    time_from: datetime | None = None,
+    time_to: datetime | None = None,
+    limit: int = 30,
+) -> list[dict]:
+    """Search Summary rows. Mirrors the transcript path."""
+    base_filters = []
+    if camera_id:
+        base_filters.append(Summary.camera_id == camera_id)
+    if time_from:
+        base_filters.append(Summary.started_at >= time_from)
+    if time_to:
+        base_filters.append(Summary.started_at <= time_to)
+
+    rows: list[Summary] = []
+    distances: dict[uuid.UUID, float | None] = {}
+
+    if query:
+        query_embedding = await _embed_query(query)
+        if query_embedding is not None:
+            stmt = (
+                select(Summary, Summary.embedding.cosine_distance(query_embedding).label("distance"))
+                .where(and_(*(base_filters + [Summary.embedding.isnot(None)])))
+                .order_by("distance")
+                .limit(limit)
+            )
+            result = await db.execute(stmt)
+            for s, dist in result.all():
+                rows.append(s)
+                distances[s.id] = float(dist) if dist is not None else None
+        if not rows:
+            stmt = (
+                select(Summary)
+                .where(and_(*(base_filters + [Summary.summary_text.ilike(f"%{query}%")])))
+                .order_by(Summary.started_at.desc())
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+    else:
+        stmt = (
+            select(Summary)
+            .where(and_(*base_filters)) if base_filters else select(Summary)
+        )
+        stmt = stmt.order_by(Summary.started_at.desc()).limit(limit)
+        rows = (await db.execute(stmt)).scalars().all()
+
+    camera_names = await _resolve_camera_names(db, {r.camera_id for r in rows})
+    return [
+        {
+            "kind": "summary",
+            "id": str(r.id),
+            "camera_id": str(r.camera_id),
+            "camera_name": camera_names.get(r.camera_id, "Unknown"),
+            "started_at": r.started_at.isoformat(),
+            "ended_at": r.ended_at.isoformat(),
+            "summary_kind": r.kind,
+            "summary_text": r.summary_text,
+            "provider_name": r.provider_name,
+            "people_seen": r.people_seen,
+            "plates_seen": r.plates_seen,
+            "distance": distances.get(r.id),
+        }
+        for r in rows
+    ]
+
+
+# ---- conversation search -------------------------------------------------
+
+
+async def search_conversations(
+    db: AsyncSession,
+    query: str | None = None,
+    camera_id: uuid.UUID | None = None,
+    time_from: datetime | None = None,
+    time_to: datetime | None = None,
+    limit: int = 30,
+) -> list[dict]:
+    """Search finalized Conversation rows by their summary embedding +
+    text. Open conversations are excluded since they have no summary
+    yet."""
+    base_filters = [Conversation.finalized.is_(True)]
+    if camera_id:
+        base_filters.append(Conversation.camera_id == camera_id)
+    if time_from:
+        base_filters.append(Conversation.started_at >= time_from)
+    if time_to:
+        base_filters.append(Conversation.started_at <= time_to)
+
+    rows: list[Conversation] = []
+    distances: dict[uuid.UUID, float | None] = {}
+
+    if query:
+        query_embedding = await _embed_query(query)
+        if query_embedding is not None:
+            stmt = (
+                select(Conversation, Conversation.embedding.cosine_distance(query_embedding).label("distance"))
+                .where(and_(*(base_filters + [Conversation.embedding.isnot(None)])))
+                .order_by("distance")
+                .limit(limit)
+            )
+            result = await db.execute(stmt)
+            for c, dist in result.all():
+                rows.append(c)
+                distances[c.id] = float(dist) if dist is not None else None
+        if not rows:
+            stmt = (
+                select(Conversation)
+                .where(and_(*(base_filters + [Conversation.summary_text.ilike(f"%{query}%")])))
+                .order_by(Conversation.started_at.desc())
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+    else:
+        stmt = (
+            select(Conversation)
+            .where(and_(*base_filters))
+            .order_by(Conversation.started_at.desc())
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+
+    camera_names = await _resolve_camera_names(db, {r.camera_id for r in rows})
+    return [
+        {
+            "kind": "conversation",
+            "id": str(r.id),
+            "camera_id": str(r.camera_id),
+            "camera_name": camera_names.get(r.camera_id, "Unknown"),
+            "started_at": r.started_at.isoformat(),
+            "ended_at": (r.ended_at or r.ended_at_provisional).isoformat(),
+            "summary_text": r.summary_text,
+            "transcript_count": r.transcript_count,
+            "summary_provider_name": r.summary_provider_name,
+            "distance": distances.get(r.id),
+        }
+        for r in rows
+    ]

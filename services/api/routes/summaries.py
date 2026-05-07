@@ -11,13 +11,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from datetime import timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_current_user
 from shared.database import get_db
-from shared.models import Summary, User
+from shared.models import Camera, Summary, User
 
 router = APIRouter()
 
@@ -63,6 +66,44 @@ async def list_summaries(
         q = q.where(Summary.started_at <= to)
     rows = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
     return [_serialize(r) for r in rows]
+
+
+class RunSummaryRequest(BaseModel):
+    camera_id: uuid.UUID
+    window_minutes: int = Field(default=30, ge=1, le=1440)
+
+
+@router.post("/run")
+async def run_summary_now(
+    body: RunSummaryRequest,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger a one-shot summary over the last N minutes for a camera.
+
+    Reuses the same code path the periodic worker takes. Useful when the
+    user wants a recap on demand without waiting for the next tick.
+    """
+    cam = await db.get(Camera, body.camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    # Lazy import to avoid pulling perception deps at API import time.
+    from services.perception.summarizer import CameraSummarizer
+    from services.api.ws import broadcast as ws_broadcast
+
+    now = datetime.now(timezone.utc)
+    started = now - timedelta(minutes=body.window_minutes)
+    summarizer = CameraSummarizer(broadcast_fn=ws_broadcast)
+    db.expunge(cam)
+    await summarizer.summarize_window(
+        cam=cam,
+        kind="periodic",
+        window_start=started,
+        window_end=now,
+        trigger_reason="manual",
+    )
+    return {"status": "ok", "window_start": started.isoformat(), "window_end": now.isoformat()}
 
 
 @router.get("/{summary_id}")

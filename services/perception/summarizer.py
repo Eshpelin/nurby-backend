@@ -133,7 +133,7 @@ class CameraSummarizer:
         window_start = state.last_periodic_at
         window_end = now
         state.last_periodic_at = now
-        await self._summarize_window(
+        await self.summarize_window(
             cam=cam,
             kind="periodic",
             window_start=window_start,
@@ -182,7 +182,7 @@ class CameraSummarizer:
             )
             return
 
-        await self._summarize_window(
+        await self.summarize_window(
             cam=cam,
             kind="event",
             window_start=started,
@@ -234,7 +234,7 @@ class CameraSummarizer:
 
     # ---- summarize ---------------------------------------------------
 
-    async def _summarize_window(
+    async def summarize_window(
         self,
         cam: Camera,
         kind: str,
