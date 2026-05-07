@@ -8,7 +8,7 @@ interface Props {
 }
 
 interface VLMState {
-  status: "idle" | "queued" | "processing" | "slow" | "stalled" | string;
+  status: "idle" | "queued" | "processing" | "refining" | "slow" | "stalled" | string;
   avg_latency?: number;
   last_latency?: number;
 }
@@ -20,6 +20,7 @@ interface VLMState {
  *   idle        -> hidden
  *   queued      -> violet "Queued"
  *   processing  -> violet "Thinking"
+ *   refining    -> sky-blue "Refining"   (cascade second stage)
  *   slow        -> amber "VLM slow (12.4s)"
  *   stalled     -> amber "VLM stalled"
  */
@@ -53,9 +54,22 @@ export function VLMStatusBadge({ cameraId }: Props) {
   if (!state || state.status === "idle") return null;
 
   const isWarn = state.status === "slow" || state.status === "stalled";
-  const colorDot = isWarn ? "bg-amber-400" : "bg-violet-400";
-  const colorBorder = isWarn ? "border-amber-400/50" : "border-violet-400/50";
-  const colorText = isWarn ? "text-amber-300" : "text-violet-300";
+  const isRefining = state.status === "refining";
+  const colorDot = isWarn
+    ? "bg-amber-400"
+    : isRefining
+      ? "bg-sky-400"
+      : "bg-violet-400";
+  const colorBorder = isWarn
+    ? "border-amber-400/50"
+    : isRefining
+      ? "border-sky-400/50"
+      : "border-violet-400/50";
+  const colorText = isWarn
+    ? "text-amber-300"
+    : isRefining
+      ? "text-sky-300"
+      : "text-violet-300";
   const label =
     state.status === "stalled"
       ? "VLM stalled"
@@ -63,7 +77,9 @@ export function VLMStatusBadge({ cameraId }: Props) {
         ? `VLM slow (${state.avg_latency?.toFixed(1)}s)`
         : state.status === "queued"
           ? "Queued"
-          : "Thinking";
+          : isRefining
+            ? "Refining"
+            : "Thinking";
 
   return (
     <div

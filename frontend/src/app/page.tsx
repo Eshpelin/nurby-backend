@@ -10,6 +10,7 @@ import { AudioActiveDot } from "@/components/AudioActiveDot";
 import { VLMStatusBadge } from "@/components/VLMStatusBadge";
 import { SummarizeNowButton } from "@/components/SummarizeNowButton";
 import { CameraStatsHover } from "@/components/CameraStatsHover";
+import { RefinedBadge } from "@/components/RefinedBadge";
 import { SystemHealthFooter } from "@/components/SystemHealthFooter";
 import { LLMErrorToasts } from "@/components/LLMErrorToasts";
 import { OnboardingWizard } from "@/components/OnboardingWizard";
@@ -117,6 +118,9 @@ interface Observation {
   vlm_provider: string | null;
   confidence: number | null;
   thumbnail_path: string | null;
+  primary_vlm_description?: string | null;
+  refined_by_provider_name?: string | null;
+  refined_at?: string | null;
 }
 
 interface Detection {
@@ -1824,6 +1828,12 @@ function DashboardContent() {
           if (data.type === "conversation_updated" || data.type === "conversation_finalized") {
             fetchTimeline();
           }
+          if (data.type === "vlm_refined") {
+            // Cascade refiner replaced the primary description on an
+            // observation. Refetch so the timeline picks up the
+            // upgraded text and refined badge.
+            fetchTimeline();
+          }
         } catch { /* ignore */ }
       };
     }
@@ -3221,6 +3231,13 @@ function DashboardContent() {
                                       <p className="text-xs leading-relaxed line-clamp-2">{obs.vlm_description}</p>
                                     ) : !hasFaces && (
                                       <p className="text-xs font-medium line-clamp-1">{summarizeDetections(obs)}</p>
+                                    )}
+                                    {obs.refined_by_provider_name && obs.primary_vlm_description && (
+                                      <RefinedBadge
+                                        primaryText={obs.primary_vlm_description}
+                                        refinedText={obs.vlm_description || ""}
+                                        refinerProviderName={obs.refined_by_provider_name}
+                                      />
                                     )}
 
                                     {/* Detection tags with confidence */}

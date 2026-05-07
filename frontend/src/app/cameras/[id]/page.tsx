@@ -31,6 +31,11 @@ interface Camera {
   vlm_interval: number;
   vlm_max_tokens: number;
   vlm_max_input_tokens: number | null;
+  vlm_refiner_provider_id: string | null;
+  vlm_refiner_trigger_objects: string[] | null;
+  vlm_refiner_keywords: string[] | null;
+  vlm_refiner_max_tokens: number | null;
+  vlm_refiner_max_input_tokens: number | null;
   detect_objects: boolean;
   detect_faces: boolean;
   scene_mode: string;
@@ -396,6 +401,64 @@ function FieldRow({
         {hint && <p className="text-[11px] text-muted-foreground mt-0.5">{hint}</p>}
       </div>
       <div>{children}</div>
+    </div>
+  );
+}
+
+function KeywordChipInput({
+  values,
+  onChange,
+  placeholder,
+}: {
+  values: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState("");
+  const commit = () => {
+    const cleaned = draft
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (cleaned.length === 0) return;
+    const next = Array.from(new Set([...values, ...cleaned]));
+    onChange(next);
+    setDraft("");
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 min-h-[2.25rem] px-2 py-1 rounded-md border border-border bg-background focus-within:border-accent">
+      {values.map((v) => (
+        <span
+          key={v}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-accent/15 text-accent border border-accent/30"
+        >
+          {v}
+          <button
+            type="button"
+            onClick={() => onChange(values.filter((x) => x !== v))}
+            className="text-accent/70 hover:text-accent"
+            aria-label={`Remove ${v}`}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Backspace" && !draft && values.length > 0) {
+            onChange(values.slice(0, -1));
+          }
+        }}
+        onBlur={commit}
+        placeholder={values.length === 0 ? placeholder : ""}
+        className="flex-1 min-w-[8rem] bg-transparent text-sm focus:outline-none"
+      />
     </div>
   );
 }
@@ -951,6 +1014,11 @@ export default function CameraConfigPage() {
   const [vlmInterval, setVlmInterval] = useState(0);
   const [vlmMaxTokens, setVlmMaxTokens] = useState(200);
   const [vlmMaxInputTokens, setVlmMaxInputTokens] = useState<string>("");
+  const [vlmRefinerProviderId, setVlmRefinerProviderId] = useState<string | null>(null);
+  const [vlmRefinerTriggerObjects, setVlmRefinerTriggerObjects] = useState<string[]>(["person"]);
+  const [vlmRefinerKeywords, setVlmRefinerKeywords] = useState<string[]>(["package", "delivery", "stranger", "weapon"]);
+  const [vlmRefinerMaxTokens, setVlmRefinerMaxTokens] = useState<string>("");
+  const [vlmRefinerMaxInputTokens, setVlmRefinerMaxInputTokens] = useState<string>("");
   const [vlmTrigger, setVlmTrigger] = useState("always");
   const [vlmTriggerObjects, setVlmTriggerObjects] = useState<string[]>([]);
   const [detectObjects, setDetectObjects] = useState(true);
@@ -1019,6 +1087,11 @@ export default function CameraConfigPage() {
       setVlmInterval(cam.vlm_interval ?? 0);
       setVlmMaxTokens(cam.vlm_max_tokens ?? 200);
       setVlmMaxInputTokens(cam.vlm_max_input_tokens != null ? String(cam.vlm_max_input_tokens) : "");
+      setVlmRefinerProviderId(cam.vlm_refiner_provider_id ?? null);
+      setVlmRefinerTriggerObjects(cam.vlm_refiner_trigger_objects ?? ["person"]);
+      setVlmRefinerKeywords(cam.vlm_refiner_keywords ?? ["package", "delivery", "stranger", "weapon"]);
+      setVlmRefinerMaxTokens(cam.vlm_refiner_max_tokens != null ? String(cam.vlm_refiner_max_tokens) : "");
+      setVlmRefinerMaxInputTokens(cam.vlm_refiner_max_input_tokens != null ? String(cam.vlm_refiner_max_input_tokens) : "");
       setVlmTrigger(cam.vlm_trigger ?? "always");
       setVlmTriggerObjects(cam.vlm_trigger_objects ?? []);
       setDetectObjects(cam.detect_objects ?? true);
@@ -1145,6 +1218,11 @@ export default function CameraConfigPage() {
         vlm_interval: vlmInterval,
         vlm_max_tokens: vlmMaxTokens,
         vlm_max_input_tokens: vlmMaxInputTokens.trim() ? Number(vlmMaxInputTokens) : null,
+        vlm_refiner_provider_id: vlmRefinerProviderId,
+        vlm_refiner_trigger_objects: vlmRefinerProviderId && vlmRefinerTriggerObjects.length > 0 ? vlmRefinerTriggerObjects : null,
+        vlm_refiner_keywords: vlmRefinerProviderId && vlmRefinerKeywords.length > 0 ? vlmRefinerKeywords : null,
+        vlm_refiner_max_tokens: vlmRefinerMaxTokens.trim() ? Number(vlmRefinerMaxTokens) : null,
+        vlm_refiner_max_input_tokens: vlmRefinerMaxInputTokens.trim() ? Number(vlmRefinerMaxInputTokens) : null,
         vlm_trigger: vlmTrigger,
         vlm_trigger_objects: vlmTriggerObjects.length > 0 ? vlmTriggerObjects : null,
         detect_objects: detectObjects,
@@ -1220,6 +1298,8 @@ export default function CameraConfigPage() {
     recordingTriggerObjects, recordingClipPre, recordingClipPost,
     vlmProviderId, vlmPrompt, vlmInterval, vlmMaxTokens, vlmMaxInputTokens,
     vlmTrigger, vlmTriggerObjects,
+    vlmRefinerProviderId, vlmRefinerTriggerObjects, vlmRefinerKeywords,
+    vlmRefinerMaxTokens, vlmRefinerMaxInputTokens,
     detectObjects, detectFaces, sceneMode, objectConfidence,
     detectionModels, detectionMerge, detectionConsensusMin,
     digestEnabled, digestPeriod, digestProviderId, digestPrompt,
@@ -1734,6 +1814,94 @@ export default function CameraConfigPage() {
               </button>
             )}
           </FieldRow>
+        </Section>
+
+        {/* Cascade refiner */}
+        <Section
+          title="Refiner (cascade)"
+          description="Use a stronger second model only when triggers match. Cheap brain handles routine frames, smart brain handles the moments that matter."
+        >
+          <FieldRow label="Refiner Model" hint="Off when blank. Pick a different provider than AI Analysis.">
+            <select
+              value={vlmRefinerProviderId || ""}
+              onChange={(e) => setVlmRefinerProviderId(e.target.value || null)}
+              className={inputClass}
+            >
+              <option value="">Off</option>
+              {providers
+                .filter((p) => p.id !== vlmProviderId)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.default_model ? ` · ${p.default_model}` : ""}
+                  </option>
+                ))}
+            </select>
+            {vlmRefinerProviderId && vlmRefinerProviderId === vlmProviderId && (
+              <p className="text-[11px] text-warning mt-1">
+                Refiner must differ from the primary provider. Cascade
+                disabled until you pick another model.
+              </p>
+            )}
+          </FieldRow>
+
+          {vlmRefinerProviderId && (
+            <>
+              <FieldRow label="Escalate when YOLO sees" hint="Detection labels that fire the refiner. Pet-cams, wildlife, vehicles all welcome.">
+                <LabelPicker
+                  selected={vlmRefinerTriggerObjects}
+                  available={modelClasses}
+                  loading={modelClassesLoading}
+                  onChange={setVlmRefinerTriggerObjects}
+                  placeholder="Search labels or press Enter for custom"
+                  activeModels={detectionModels.map((m) => m.model)}
+                  onAddModel={(model) => {
+                    if (detectionModels.some((m) => m.model === model)) return;
+                    setDetectionModels([
+                      ...detectionModels,
+                      { model, confidence: 0.35, enabled: true, label_filter: [] },
+                    ]);
+                  }}
+                />
+                {vlmRefinerTriggerObjects.length === 0 && vlmRefinerKeywords.length === 0 && (
+                  <p className="text-[11px] text-warning mt-1.5">
+                    No triggers set. Refiner will fire on every frame.
+                    Add labels or keywords to gate it.
+                  </p>
+                )}
+              </FieldRow>
+
+              <FieldRow label="Escalate when primary mentions" hint="Comma or Enter to add. Case-insensitive substring match against the cheap model's text output.">
+                <KeywordChipInput
+                  values={vlmRefinerKeywords}
+                  onChange={setVlmRefinerKeywords}
+                  placeholder="package, delivery, stranger..."
+                />
+              </FieldRow>
+
+              <FieldRow label="Refiner Max Output" hint="Per-camera output cap for the refiner. Empty defers to its provider cap.">
+                <input
+                  type="number"
+                  min={50}
+                  value={vlmRefinerMaxTokens}
+                  onChange={(e) => setVlmRefinerMaxTokens(e.target.value)}
+                  className={inputClass}
+                  placeholder="defer to provider"
+                />
+              </FieldRow>
+
+              <FieldRow label="Refiner Max Input" hint="Per-camera prompt size cap for the refiner. Empty defers to its provider cap.">
+                <input
+                  type="number"
+                  min={64}
+                  value={vlmRefinerMaxInputTokens}
+                  onChange={(e) => setVlmRefinerMaxInputTokens(e.target.value)}
+                  className={inputClass}
+                  placeholder="defer to provider"
+                />
+              </FieldRow>
+            </>
+          )}
         </Section>
 
         {/* Detection */}
