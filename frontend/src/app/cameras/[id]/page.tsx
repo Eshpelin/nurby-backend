@@ -49,6 +49,9 @@ interface Camera {
   summary_event_trigger_objects: string[] | null;
   summary_event_min_duration_seconds: number;
   summary_max_tokens: number;
+  conversation_gap_seconds: number;
+  conversation_summary_enabled: boolean;
+  conversation_min_messages_for_summary: number;
   motion_zones: MotionZone[] | null;
   status: string;
   width: number | null;
@@ -967,6 +970,9 @@ export default function CameraConfigPage() {
   const [summaryEventTriggerObjects, setSummaryEventTriggerObjects] = useState<string[]>(["person"]);
   const [summaryEventMinDurationSeconds, setSummaryEventMinDurationSeconds] = useState(5);
   const [summaryMaxTokens, setSummaryMaxTokens] = useState(400);
+  const [conversationGapSeconds, setConversationGapSeconds] = useState(30);
+  const [conversationSummaryEnabled, setConversationSummaryEnabled] = useState(true);
+  const [conversationMinMessages, setConversationMinMessages] = useState(2);
   const [motionZones, setMotionZones] = useState<MotionZone[]>([]);
 
   const fetchData = useCallback(async () => {
@@ -1028,6 +1034,9 @@ export default function CameraConfigPage() {
       setSummaryEventTriggerObjects(cam.summary_event_trigger_objects ?? ["person"]);
       setSummaryEventMinDurationSeconds(cam.summary_event_min_duration_seconds ?? 5);
       setSummaryMaxTokens(cam.summary_max_tokens ?? 400);
+      setConversationGapSeconds(cam.conversation_gap_seconds ?? 30);
+      setConversationSummaryEnabled(cam.conversation_summary_enabled ?? true);
+      setConversationMinMessages(cam.conversation_min_messages_for_summary ?? 2);
       setMotionZones(cam.motion_zones ?? []);
     } catch {
       setError("Failed to load camera");
@@ -1109,6 +1118,9 @@ export default function CameraConfigPage() {
         summary_event_trigger_objects: summaryEventTriggerObjects.length > 0 ? summaryEventTriggerObjects : null,
         summary_event_min_duration_seconds: summaryEventMinDurationSeconds,
         summary_max_tokens: summaryMaxTokens,
+        conversation_gap_seconds: conversationGapSeconds,
+        conversation_summary_enabled: conversationSummaryEnabled,
+        conversation_min_messages_for_summary: conversationMinMessages,
         motion_zones: motionZones.length > 0 ? motionZones : null,
       };
 
@@ -2011,6 +2023,56 @@ export default function CameraConfigPage() {
                 </div>
               </FieldRow>
             </>
+          )}
+        </Section>
+
+        {/* ── Audio Conversations ── */}
+        <Section
+          title="Audio Conversations"
+          description="Group consecutive transcripts into a single rolling card and summarize the conversation when it goes quiet."
+        >
+          <FieldRow label="Conversation Gap" hint="Maximum silence between transcripts that still counts as the same conversation. Beyond this, a new conversation opens.">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={5}
+                max={300}
+                step={5}
+                value={conversationGapSeconds}
+                onChange={(e) => setConversationGapSeconds(Number(e.target.value))}
+                className="flex-1 accent-accent"
+              />
+              <span className="font-mono text-xs text-muted-foreground w-20 text-right">
+                {formatInterval(conversationGapSeconds)}
+              </span>
+            </div>
+          </FieldRow>
+
+          <FieldRow label="Generate Summary" hint="When the conversation closes, send the full transcript to the summary VLM and replace the live caption with a one-line recap.">
+            <Toggle
+              checked={conversationSummaryEnabled}
+              onChange={setConversationSummaryEnabled}
+              label={conversationSummaryEnabled ? "Enabled" : "Disabled"}
+            />
+          </FieldRow>
+
+          {conversationSummaryEnabled && (
+            <FieldRow label="Minimum Messages" hint="Skip the summary call for short conversations (one-liners) to save tokens.">
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  step={1}
+                  value={conversationMinMessages}
+                  onChange={(e) => setConversationMinMessages(Number(e.target.value))}
+                  className="flex-1 accent-accent"
+                />
+                <span className="font-mono text-xs text-muted-foreground w-20 text-right">
+                  {conversationMinMessages} msg
+                </span>
+              </div>
+            </FieldRow>
           )}
         </Section>
 

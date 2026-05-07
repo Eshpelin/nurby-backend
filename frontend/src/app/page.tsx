@@ -9,6 +9,7 @@ import { LiveCaptionOverlay } from "@/components/LiveCaptionOverlay";
 import { AudioActiveDot } from "@/components/AudioActiveDot";
 import { TranscriptCard } from "@/components/TranscriptCard";
 import { SummaryCard } from "@/components/SummaryCard";
+import { ConversationCard } from "@/components/ConversationCard";
 import { RecordingModal } from "@/components/RecordingModal";
 
 const WEBRTC_URL =
@@ -173,12 +174,24 @@ interface Summary {
   object_counts: Record<string, number> | null;
 }
 
+interface Conversation {
+  id: string;
+  camera_id: string;
+  started_at: string;
+  ended_at_provisional: string;
+  ended_at: string | null;
+  transcript_count: number;
+  finalized: boolean;
+  summary_text: string | null;
+  summary_provider_name: string | null;
+}
+
 interface TimelineEntry {
   id: string;
-  type: "recording" | "observation" | "status" | "search_result" | "notification" | "transcript" | "summary";
+  type: "recording" | "observation" | "status" | "search_result" | "notification" | "transcript" | "summary" | "conversation";
   camera_id: string;
   timestamp: string;
-  data: Recording | Observation | StatusLog | SearchResult | Notification | Transcript | Summary;
+  data: Recording | Observation | StatusLog | SearchResult | Notification | Transcript | Summary | Conversation;
 }
 
 interface ActivityEvent {
@@ -210,7 +223,7 @@ const STREAM_TYPES: { value: StreamType; label: string; hint: string; placeholde
 ];
 
 type TimeRange = "today" | "7d" | "30d";
-type EventFilter = "recordings" | "observations" | "status" | "transcripts" | "summaries";
+type EventFilter = "recordings" | "observations" | "status" | "transcripts" | "conversations" | "summaries";
 
 // ── Helpers ──
 
@@ -1704,11 +1717,12 @@ function DashboardContent() {
   const [statusLogs, setStatusLogs] = useState<StatusLog[]>([]);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [modalRecording, setModalRecording] = useState<Recording | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>("7d");
-  const [eventFilters, setEventFilters] = useState<Set<EventFilter>>(new Set(["recordings", "observations", "status", "transcripts"]));
+  const [eventFilters, setEventFilters] = useState<Set<EventFilter>>(new Set(["recordings", "observations", "status", "conversations", "summaries"]));
   const [timelineLoading, setTimelineLoading] = useState(true);
 
   // Filter modal state
@@ -1761,6 +1775,9 @@ function DashboardContent() {
             fetchTimeline();
           }
           if (data.type === "summary_created") {
+            fetchTimeline();
+          }
+          if (data.type === "conversation_updated" || data.type === "conversation_finalized") {
             fetchTimeline();
           }
         } catch { /* ignore */ }
@@ -1874,13 +1891,14 @@ function DashboardContent() {
       const statusParams = new URLSearchParams({ limit: "100" });
       if (selectedCamera) statusParams.set("camera_id", selectedCamera);
 
-      const [recRes, obsRes, statusRes, notifRes, tlRes, sumRes] = await Promise.all([
+      const [recRes, obsRes, statusRes, notifRes, tlRes, sumRes, convRes] = await Promise.all([
         authFetch(`/api/recordings?${params}`),
         authFetch(`/api/observations?${params}`),
         authFetch(`/api/cameras/status-logs?${statusParams}`),
         authFetch(`/api/notifications?limit=100`),
         authFetch(`/api/timeline?${params}`),
         authFetch(`/api/summaries?${params}`),
+        authFetch(`/api/conversations?${params}`),
       ]);
 
       const now = Date.now();
@@ -1899,6 +1917,14 @@ function DashboardContent() {
         setSummaries(
           (Array.isArray(all) ? all : []).filter(
             (s) => new Date(s.started_at).getTime() >= cutoff
+          )
+        );
+      }
+      if (convRes.ok) {
+        const all: Conversation[] = await convRes.json();
+        setConversations(
+          (Array.isArray(all) ? all : []).filter(
+            (c) => new Date(c.started_at).getTime() >= cutoff
           )
         );
       }
@@ -2002,7 +2028,7 @@ function DashboardContent() {
 
   const clearAllFilters = () => {
     setTimeRange("7d");
-    setEventFilters(new Set(["recordings", "observations", "status", "transcripts", "summaries"]));
+    setEventFilters(new Set(["recordings", "observations", "status", "conversations", "summaries"]));
     setFilterPerson("");
     setFilterObject("");
     setSelectedCamera(null);
@@ -2052,6 +2078,7 @@ function DashboardContent() {
     if (eventFilters.has("recordings")) entries.push(...recordings.map((r) => ({ id: `rec-${r.id}`, type: "recording" as const, camera_id: r.camera_id, timestamp: r.started_at, data: r })));
     if (eventFilters.has("observations")) entries.push(...observations.map((o) => ({ id: `obs-${o.id}`, type: "observation" as const, camera_id: o.camera_id, timestamp: o.started_at, data: o })));
     if (eventFilters.has("status")) entries.push(...statusLogs.map((s) => ({ id: `status-${s.id}`, type: "status" as const, camera_id: s.camera_id, timestamp: s.timestamp, data: s })));
+    if (eventFilters.has("conversations")) entries.push(...conversations.map((c) => ({ id: `conv-${c.id}`, type: "conversation" as const, camera_id: c.camera_id, timestamp: c.ended_at_provisional, data: c })));
     if (eventFilters.has("transcripts")) entries.push(...transcripts.map((t) => ({ id: `tx-${t.id}`, type: "transcript" as const, camera_id: t.camera_id, timestamp: t.started_at, data: t })));
     if (eventFilters.has("summaries")) entries.push(...summaries.map((s) => ({ id: `sum-${s.id}`, type: "summary" as const, camera_id: s.camera_id, timestamp: s.ended_at, data: s })));
     // Always include notifications. they are explicit rule fires and deserve
@@ -2388,7 +2415,7 @@ function DashboardContent() {
                 <div>
                   <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider block mb-2">Event Types</span>
                   <div className="flex flex-col gap-1">
-                    {([["recordings", "Recordings"], ["observations", "AI Observations"], ["transcripts", "Transcripts"], ["summaries", "Summaries"], ["status", "Status Changes"]] as [EventFilter, string][]).map(([value, label]) => (
+                    {([["recordings", "Recordings"], ["observations", "AI Observations"], ["conversations", "Conversations"], ["transcripts", "Raw Transcripts"], ["summaries", "Summaries"], ["status", "Status Changes"]] as [EventFilter, string][]).map(([value, label]) => (
                       <label key={value} className="flex items-center gap-2.5 px-3 py-2 text-xs rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
                         <input type="checkbox" checked={eventFilters.has(value)} onChange={() => toggleEventFilter(value)}
                           className="w-3.5 h-3.5 rounded border-border accent-accent" />
@@ -2943,6 +2970,25 @@ function DashboardContent() {
                                 {row}
                               </button>
                             </div>
+                          );
+                        }
+
+                        if (entry.type === "conversation") {
+                          const c = entry.data as Conversation;
+                          return (
+                            <ConversationCard
+                              key={entry.id}
+                              id={c.id}
+                              cameraId={c.camera_id}
+                              cameraName={cam?.name}
+                              startedAt={c.started_at}
+                              endedAtProvisional={c.ended_at_provisional}
+                              endedAt={c.ended_at}
+                              finalized={c.finalized}
+                              transcriptCount={c.transcript_count}
+                              summaryText={c.summary_text}
+                              summaryProviderName={c.summary_provider_name}
+                            />
                           );
                         }
 
