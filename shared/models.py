@@ -90,6 +90,10 @@ class Camera(Base):
     conversation_gap_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     conversation_summary_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     conversation_min_messages_for_summary: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    # Incident tracking. Persistent server-side grouping of related
+    # observations into one rolling artifact with a stable id.
+    incident_tracking_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    incident_idle_seconds: Mapped[int] = mapped_column(Integer, default=600, nullable=False)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fps: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -205,6 +209,12 @@ class Observation(Base):
     primary_vlm_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     refined_by_provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     refined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Incident link. Set by the perception pipeline at insert time
+    # when incident tracking is enabled on the camera. Null means the
+    # observation stands alone or tracking was off when it landed.
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class DigestEntry(Base):
@@ -480,6 +490,48 @@ class Conversation(Base):
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
     clip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     clip_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Incident(Base):
+    """Server-side rolling artifact that groups related observations.
+
+    Signature key + camera + idle window define when an incident
+    accepts another observation. The pipeline opens / extends rows
+    inline at observation insert time. The finalizer worker closes
+    rows whose ``last_seen_at`` is past the camera's idle window and
+    optionally generates a summary.
+    """
+
+    __tablename__ = "incidents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    camera_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    signature_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    signature_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    peak_observation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("observations.id", ondelete="SET NULL"), nullable=True
+    )
+    observation_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    thumbnails: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

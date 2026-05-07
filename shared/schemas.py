@@ -62,6 +62,8 @@ class CameraCreate(BaseModel):
     conversation_gap_seconds: int = Field(default=30, ge=5, le=600)
     conversation_summary_enabled: bool = True
     conversation_min_messages_for_summary: int = Field(default=2, ge=1, le=20)
+    incident_tracking_enabled: bool = True
+    incident_idle_seconds: int = Field(default=600, ge=30, le=86400)
 
 
 class CameraUpdate(BaseModel):
@@ -121,6 +123,8 @@ class CameraUpdate(BaseModel):
     conversation_gap_seconds: int | None = Field(default=None, ge=5, le=600)
     conversation_summary_enabled: bool | None = None
     conversation_min_messages_for_summary: int | None = Field(default=None, ge=1, le=20)
+    incident_tracking_enabled: bool | None = None
+    incident_idle_seconds: int | None = Field(default=None, ge=30, le=86400)
 
 
 class CameraReorderItem(BaseModel):
@@ -183,6 +187,8 @@ class CameraResponse(BaseModel):
     conversation_gap_seconds: int = 30
     conversation_summary_enabled: bool = True
     conversation_min_messages_for_summary: int = 2
+    incident_tracking_enabled: bool = True
+    incident_idle_seconds: int = 600
     width: int | None
     height: int | None
     fps: float | None
