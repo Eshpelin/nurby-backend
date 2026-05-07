@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { useWSSubscribe } from "@/lib/ws";
 
 interface Props {
   cameraId: string;
@@ -12,20 +13,21 @@ interface Props {
 
 interface Caption {
   text: string;
-  provider?: string;
+  speaker?: string | null;
   ts: number;
 }
 
 /**
- * Subscribes to /ws and renders the most recent transcript_created
- * payload for this camera as a translucent caption strip on top of
- * the camera tile. Auto-hides after holdMs of silence.
+ * Renders the most recent transcript_created payload for this camera
+ * as a translucent caption strip on top of the camera tile. The
+ * shown text reveals one character at a time (typewriter) so chunked
+ * captions feel live without the cost of true streaming STT.
  *
- * On mount, hydrates from REST so a page reload that lands inside an
- * active speech window still shows the last caption immediately.
- *
- * Reconnects with capped exponential backoff. Hold time stretches with
- * caption length so long sentences don't cut off mid-read.
+ * REST hydrate on mount so a page reload inside an active speech
+ * window shows the last caption immediately. Hold time stretches
+ * with caption length so long sentences finish on screen. Speaker
+ * name (when known via Tier A attribution) prefixes the text in
+ * emerald.
  */
 export function LiveCaptionOverlay({
   cameraId,
@@ -34,12 +36,46 @@ export function LiveCaptionOverlay({
 }: Props) {
   const { token } = useAuth();
   const [caption, setCaption] = useState<Caption | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [reveal, setReveal] = useState<string>("");
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setLine = useCallback(
+    (text: string, speaker?: string | null) => {
+      const ts = Date.now();
+      setCaption({ text, speaker: speaker ?? null, ts });
+      setReveal("");
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => setCaption(null), computeHold(text, holdMs));
+    },
+    [holdMs]
+  );
+
+  // Typewriter reveal. Step ~24 chars/sec; clamp total reveal to 1.5s
+  // for short lines and 5s for long ones. The full text is already in
+  // ``caption.text`` so the hold timer can keep the finished line
+  // on screen after the typewriter catches up.
+  useEffect(() => {
+    if (typeTimer.current) clearTimeout(typeTimer.current);
+    if (!caption) return;
+    const total = caption.text.length;
+    if (total === 0) return;
+    const totalMs = Math.max(800, Math.min(5000, total * 32));
+    const step = Math.max(8, totalMs / total);
+    let i = 0;
+    const tick = () => {
+      i = Math.min(total, i + Math.max(1, Math.round(step >= 24 ? 1 : 24 / step)));
+      setReveal(caption.text.slice(0, i));
+      if (i < total) typeTimer.current = setTimeout(tick, step);
+    };
+    tick();
+    return () => {
+      if (typeTimer.current) clearTimeout(typeTimer.current);
+    };
+  }, [caption]);
 
   // REST hydrate. Pull the most recent transcript so a fresh mount
-  // (e.g. after reload) shows the caption that was on screen before
-  // the WS connection re-establishes.
+  // (e.g. after reload) shows the caption that was on screen before.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -56,16 +92,9 @@ export function LiveCaptionOverlay({
         if (!last) return;
         const text = (last.text || "").trim();
         if (!text) return;
-        // Only seed if the last transcript is recent enough to still be
-        // worth showing. Stale captions just confuse the user.
         const ageMs = Date.now() - new Date(last.started_at).getTime();
         if (ageMs > holdMs) return;
-        setCaption({ text, provider: last.provider, ts: Date.now() });
-        if (hideTimer.current) clearTimeout(hideTimer.current);
-        const remaining = computeHold(text, holdMs) - ageMs;
-        if (remaining > 0) {
-          hideTimer.current = setTimeout(() => setCaption(null), remaining);
-        }
+        setLine(text);
       } catch {
         /* ignore */
       }
@@ -73,71 +102,26 @@ export function LiveCaptionOverlay({
     return () => {
       cancelled = true;
     };
-  }, [cameraId, token, holdMs]);
+  }, [cameraId, token, holdMs, setLine]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws`;
+  useWSSubscribe(
+    "transcript_created",
+    (msg) => {
+      const text = ((msg as { text?: string }).text || "").trim();
+      if (!text) return;
+      const speaker = (msg as { speaker_name?: string | null }).speaker_name;
+      setLine(text, speaker);
+    },
+    cameraId
+  );
 
-    let cancelled = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-
-    const scheduleReconnect = () => {
-      if (cancelled) return;
-      // Capped exponential backoff. 1s, 2s, 4s, ... up to 30s.
-      attempt = Math.min(attempt + 1, 6);
-      const delay = Math.min(30000, 1000 * 2 ** (attempt - 1));
-      reconnectTimer = setTimeout(connect, delay);
-    };
-
-    const connect = () => {
-      if (cancelled) return;
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
-        ws.onopen = () => {
-          attempt = 0;
-        };
-        ws.onmessage = (evt) => {
-          try {
-            const msg = JSON.parse(evt.data);
-            if (msg.type !== "transcript_created") return;
-            if (msg.camera_id !== cameraId) return;
-            const text = (msg.text || "").trim();
-            if (!text) return;
-            setCaption({ text, provider: msg.provider, ts: Date.now() });
-            if (hideTimer.current) clearTimeout(hideTimer.current);
-            hideTimer.current = setTimeout(
-              () => setCaption(null),
-              computeHold(text, holdMs)
-            );
-          } catch {
-            /* ignore */
-          }
-        };
-        ws.onclose = () => {
-          scheduleReconnect();
-        };
-        ws.onerror = () => ws.close();
-      } catch {
-        scheduleReconnect();
-      }
-    };
-
-    connect();
-    return () => {
-      cancelled = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+  useEffect(
+    () => () => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
-      try {
-        wsRef.current?.close();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [cameraId, holdMs]);
+      if (typeTimer.current) clearTimeout(typeTimer.current);
+    },
+    []
+  );
 
   if (!caption) return null;
 
@@ -169,14 +153,17 @@ export function LiveCaptionOverlay({
         <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       </svg>
       <span className="text-[11px] leading-snug text-white/90 line-clamp-2 italic">
-        {caption.text}
+        {caption.speaker && (
+          <span className="not-italic font-medium text-emerald-300 mr-1">
+            {caption.speaker}.
+          </span>
+        )}
+        {reveal || caption.text}
       </span>
     </div>
   );
 }
 
-// Stretch hold time for long captions so the user can finish reading.
-// Roughly 60ms per character on top of the floor, capped at 14s.
 function computeHold(text: string, floor: number): number {
   const stretched = floor + Math.min(8000, text.length * 60);
   return Math.min(14000, Math.max(floor, stretched));

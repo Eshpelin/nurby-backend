@@ -8,6 +8,7 @@ import { StarredStatusRow } from "@/components/StarredStatusRow";
 import { LiveCaptionOverlay } from "@/components/LiveCaptionOverlay";
 import { AudioActiveDot } from "@/components/AudioActiveDot";
 import { VLMStatusBadge } from "@/components/VLMStatusBadge";
+import { SummarizeNowButton } from "@/components/SummarizeNowButton";
 import { SystemHealthFooter } from "@/components/SystemHealthFooter";
 import { TranscriptCard } from "@/components/TranscriptCard";
 import { SummaryCard } from "@/components/SummaryCard";
@@ -817,6 +818,11 @@ function CameraSidebarCard({
             {camera.audio_capture_enabled && <AudioActiveDot cameraId={camera.id} />}
             <VLMStatusBadge cameraId={camera.id} />
           </div>
+        )}
+
+        {/* Summarize now. Hover-revealed top-right control. */}
+        {camera.status !== "offline" && (
+          <SummarizeNowButton cameraId={camera.id} variant="tile" />
         )}
 
         {/* Overlay toggle (eye icon) */}

@@ -31,7 +31,7 @@ from services.perception.audio.speaker_video import attribute_by_video
 from services.perception.audio.storage import write_opus
 from services.perception.audio.types import SpeechSegment, TranscriptResult
 from shared.database import async_session
-from shared.models import AudioCapture, Camera, Conversation, Transcript
+from shared.models import AudioCapture, Camera, Conversation, Person, Transcript
 
 logger = logging.getLogger("nurby.perception.audio.write")
 
@@ -147,8 +147,20 @@ async def _write(
         await db.commit()
         await db.refresh(transcript)
 
+    speaker_name: str | None = None
+    if keep and attribution and attribution.person_id:
+        try:
+            async with async_session() as db:
+                p = await db.get(Person, attribution.person_id)
+                if p:
+                    speaker_name = p.display_name
+        except Exception:
+            logger.debug("speaker name lookup failed", exc_info=True)
+
     if keep:
-        await _broadcast(camera_id, transcript.id, segment, result, conversation_id)
+        await _broadcast(
+            camera_id, transcript.id, segment, result, conversation_id, speaker_name
+        )
         # Schedule VLM re-enrichment for any observations this transcript
         # overlaps. Debounced inside the enrichment module so multiple
         # transcripts on the same observation do not amplify VLM load.
@@ -166,6 +178,7 @@ async def _broadcast(
     segment: SpeechSegment,
     result: TranscriptResult,
     conversation_id: uuid.UUID | None = None,
+    speaker_name: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "type": "transcript_created",
@@ -176,6 +189,7 @@ async def _broadcast(
         "ended_at": segment.ended_at.isoformat(),
         "text": result.text,
         "provider": result.provider,
+        "speaker_name": speaker_name,
     }
     try:
         await ws_broadcast(payload)
@@ -194,6 +208,7 @@ async def _broadcast(
                     "started_at": segment.started_at.isoformat(),
                     "ended_at": segment.ended_at.isoformat(),
                     "text": result.text,
+                    "speaker_name": speaker_name,
                 }
             )
         except Exception:

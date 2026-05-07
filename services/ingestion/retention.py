@@ -14,7 +14,7 @@ from sqlalchemy import select, func, and_
 
 from shared.config import settings
 from shared.database import async_session
-from shared.models import Camera, Recording
+from shared.models import AudioCapture, Camera, Recording, Transcript
 
 logger = logging.getLogger("nurby.ingestion.retention")
 
@@ -62,24 +62,112 @@ class RetentionManager:
 
     async def _enforce_all(self):
         async with async_session() as db:
-            result = await db.execute(
-                select(Camera).where(Camera.retention_mode != "none")
+            # Recordings retention only fires for cameras with a non-off
+            # policy. Audio + transcript retention runs on every camera
+            # because the columns always have a meaningful default and
+            # the user can lower them per camera.
+            all_cams = list((await db.execute(select(Camera))).scalars().all())
+
+        rec_cams = [c for c in all_cams if (c.retention_mode or "none") != "none"]
+        if rec_cams:
+            logger.info(
+                "Running recording retention cleanup for %d cameras", len(rec_cams)
             )
-            cameras = list(result.scalars().all())
+            for cam in rec_cams:
+                try:
+                    if cam.retention_mode == "time":
+                        await self._enforce_time(cam, cam.retention_days)
+                    elif cam.retention_mode == "size":
+                        await self._enforce_size(cam, cam.retention_gb)
+                except Exception:
+                    logger.exception(
+                        "Recording retention failed for camera %s", cam.id
+                    )
 
-        if not cameras:
-            return
-
-        logger.info("Running retention cleanup for %d cameras", len(cameras))
-
-        for cam in cameras:
+        # Audio + transcript retention. always time-based.
+        for cam in all_cams:
             try:
-                if cam.retention_mode == "time":
-                    await self._enforce_time(cam, cam.retention_days)
-                elif cam.retention_mode == "size":
-                    await self._enforce_size(cam, cam.retention_gb)
+                await self._enforce_audio_retention(cam)
             except Exception:
-                logger.exception("Retention cleanup failed for camera %s", cam.id)
+                logger.exception(
+                    "Audio retention failed for camera %s", cam.id
+                )
+            try:
+                await self._enforce_transcript_retention(cam)
+            except Exception:
+                logger.exception(
+                    "Transcript retention failed for camera %s", cam.id
+                )
+
+    async def _enforce_audio_retention(self, camera: Camera) -> None:
+        """Delete AudioCapture rows + opus blobs older than the camera's
+        ``audio_retention_days``.
+
+        Transcripts may keep a foreign key to the deleted capture.
+        ``ondelete=SET NULL`` on the FK takes care of the column. The
+        transcript text survives independently and falls under the
+        transcript retention window.
+        """
+        days = int(getattr(camera, "audio_retention_days", 0) or 0)
+        if days <= 0:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        async with async_session() as db:
+            rows = list(
+                (
+                    await db.execute(
+                        select(AudioCapture)
+                        .where(AudioCapture.camera_id == camera.id)
+                        .where(AudioCapture.started_at < cutoff)
+                    )
+                ).scalars().all()
+            )
+            if not rows:
+                return
+            freed_bytes = 0
+            deleted = 0
+            for cap in rows:
+                _, ok = _remove_file(cap.file_path)
+                if not ok:
+                    continue
+                freed_bytes += int(cap.size_bytes or 0)
+                await db.delete(cap)
+                deleted += 1
+            await db.commit()
+            if deleted:
+                logger.info(
+                    "Audio retention for camera %s. deleted %d captures, freed %.2f MB (cutoff %s, %d days)",
+                    camera.name or camera.id,
+                    deleted,
+                    freed_bytes / (1024 ** 2),
+                    cutoff.isoformat(),
+                    days,
+                )
+
+    async def _enforce_transcript_retention(self, camera: Camera) -> None:
+        days = int(getattr(camera, "transcript_retention_days", 0) or 0)
+        if days <= 0:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        async with async_session() as db:
+            rows = list(
+                (
+                    await db.execute(
+                        select(Transcript)
+                        .where(Transcript.camera_id == camera.id)
+                        .where(Transcript.started_at < cutoff)
+                    )
+                ).scalars().all()
+            )
+            if not rows:
+                return
+            for tx in rows:
+                await db.delete(tx)
+            await db.commit()
+            logger.info(
+                "Transcript retention for camera %s. deleted %d rows (cutoff %s, %d days)",
+                camera.name or camera.id, len(rows), cutoff.isoformat(), days,
+            )
 
     async def _enforce_time(self, camera: Camera, retention_days: int):
         """Delete recordings older than retention_days."""

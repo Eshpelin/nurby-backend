@@ -79,6 +79,84 @@ async def list_conversations(
     return [_serialize(r) for r in rows]
 
 
+@router.post("/{conversation_id}/resummarize")
+async def resummarize_conversation(
+    conversation_id: uuid.UUID,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run the conversation summarizer over an existing finalized
+    conversation. Useful when the cleaned text or summary looks wrong
+    and the user wants another pass (e.g. after switching the camera's
+    summary provider to a stronger model)."""
+    row = await db.get(Conversation, conversation_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    # Lazy import to avoid pulling perception deps at API import time.
+    from shared.models import Camera, Provider
+    from services.perception.conversation_finalizer import ConversationFinalizer
+    from services.perception.text_llm import call_text
+    from services.perception.token_budget import (
+        resolve_output_cap,
+    )
+    from services.perception.vlm import get_active_provider
+    from services.search.embeddings import (
+        generate_embedding,
+        get_embedding_provider,
+    )
+
+    cam = await db.get(Camera, row.camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    tx_rows = (
+        await db.execute(
+            select(Transcript)
+            .where(Transcript.conversation_id == conversation_id)
+            .where(Transcript.filtered.is_(False))
+            .order_by(Transcript.started_at.asc())
+        )
+    ).scalars().all()
+    if not tx_rows:
+        raise HTTPException(status_code=400, detail="no transcripts to summarize")
+
+    # Resolve provider with the same precedence the finalizer uses.
+    provider: Provider | None = None
+    for pid in (cam.summary_provider_id, cam.vlm_provider_id):
+        if pid:
+            provider = await db.get(Provider, pid)
+            if provider:
+                db.expunge(provider)
+                break
+    if provider is None:
+        provider = await get_active_provider()
+    if provider is None:
+        raise HTTPException(status_code=500, detail="no provider configured")
+
+    finalizer = ConversationFinalizer()
+    raw = await finalizer._call_summary(provider, tx_rows)  # noqa: SLF001
+    summary_text, cleaned_text = ConversationFinalizer._parse_summary_response(raw)
+    if not summary_text:
+        raise HTTPException(status_code=502, detail="summary call returned empty")
+
+    embedding = None
+    try:
+        ep = await get_embedding_provider()
+        embedding = await generate_embedding(summary_text, ep)
+    except Exception:
+        embedding = None
+
+    row.summary_text = summary_text
+    row.cleaned_text = cleaned_text
+    row.summary_provider_name = provider.name
+    if embedding is not None:
+        row.embedding = embedding
+    await db.commit()
+    await db.refresh(row)
+    return _serialize(row)
+
+
 @router.get("/{conversation_id}")
 async def get_conversation(
     conversation_id: uuid.UUID,

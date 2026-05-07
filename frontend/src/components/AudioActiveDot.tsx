@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useWSSubscribe } from "@/lib/ws";
 
 interface Props {
   cameraId: string;
@@ -9,73 +10,31 @@ interface Props {
 }
 
 /**
- * Subscribes to /ws and pulses an emerald dot whenever a vad_pulse
- * (or transcript_created) event lands for this camera. Drives the
- * "audio active" visual on a camera tile without needing an STT
- * round-trip.
+ * Subscribes to /ws and pulses an emerald dot whenever a vad_pulse,
+ * vad_speech_start, or transcript_created event lands for this
+ * camera. Uses the shared WebSocket context so N tiles share one
+ * socket.
  */
 export function AudioActiveDot({ cameraId, holdMs = 1500 }: Props) {
   const [active, setActive] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws`;
-
-    let cancelled = false;
-    let reconnect: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-
-    const scheduleReconnect = () => {
-      if (cancelled) return;
-      attempt = Math.min(attempt + 1, 6);
-      const delay = Math.min(30000, 1000 * 2 ** (attempt - 1));
-      reconnect = setTimeout(connect, delay);
-    };
-
-    const connect = () => {
-      if (cancelled) return;
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
-        ws.onopen = () => {
-          attempt = 0;
-        };
-        ws.onmessage = (evt) => {
-          try {
-            const msg = JSON.parse(evt.data);
-            if (msg.type !== "vad_pulse" && msg.type !== "transcript_created") return;
-            if (msg.camera_id !== cameraId) return;
-            setActive(true);
-            if (timer.current) clearTimeout(timer.current);
-            timer.current = setTimeout(() => setActive(false), holdMs);
-          } catch {
-            /* ignore */
-          }
-        };
-        ws.onclose = () => {
-          scheduleReconnect();
-        };
-        ws.onerror = () => ws.close();
-      } catch {
-        scheduleReconnect();
-      }
-    };
-
-    connect();
-    return () => {
-      cancelled = true;
-      if (reconnect) clearTimeout(reconnect);
+  useWSSubscribe(
+    ["vad_pulse", "vad_speech_start", "transcript_created"],
+    () => {
+      setActive(true);
       if (timer.current) clearTimeout(timer.current);
-      try {
-        wsRef.current?.close();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [cameraId, holdMs]);
+      timer.current = setTimeout(() => setActive(false), holdMs);
+    },
+    cameraId
+  );
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    []
+  );
 
   return (
     <div

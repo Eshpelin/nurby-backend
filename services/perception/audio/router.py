@@ -63,7 +63,7 @@ class CameraAudioRouter:
         self._write = write_callback
 
         self._capture = AudioCapture(camera_id, stream_url)
-        self._vad = VadSegmenter(camera_id)
+        self._vad = VadSegmenter(camera_id, on_speech_start=self._on_speech_start)
         self._segments: asyncio.Queue[SpeechSegment] = asyncio.Queue(
             maxsize=AUDIO_SEGMENT_QUEUE_MAX
         )
@@ -118,6 +118,33 @@ class CameraAudioRouter:
             for seg in self._vad.flush():
                 self._enqueue_segment(seg)
             raise
+
+    def _on_speech_start(self, started_at) -> None:
+        """Fire-and-forget speech-start pulse the moment VAD detects a
+        new segment opening. Runs in the segmenter's sync context so we
+        schedule the WS broadcast on the running loop.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                self._do_broadcast(
+                    {
+                        "type": "vad_speech_start",
+                        "camera_id": str(self.camera_id),
+                        "started_at": started_at.isoformat(),
+                    }
+                )
+            )
+        except RuntimeError:
+            pass
+
+    async def _do_broadcast(self, payload: dict) -> None:
+        try:
+            from services.api.ws import broadcast as ws_broadcast
+
+            await ws_broadcast(payload)
+        except Exception:
+            logger.debug("vad_speech_start broadcast failed", exc_info=True)
 
     async def _broadcast_vad_pulse(self, seg: SpeechSegment) -> None:
         # Lightweight UI signal. fires the moment a speech segment closes,

@@ -1,96 +1,54 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useWSSubscribe } from "@/lib/ws";
 
 interface Props {
   cameraId: string;
 }
 
 interface VLMState {
-  status: "idle" | "processing" | "slow" | "stalled" | string;
+  status: "idle" | "queued" | "processing" | "slow" | "stalled" | string;
   avg_latency?: number;
   last_latency?: number;
 }
 
 /**
- * Per-tile VLM status pill. Subscribes to /ws and listens for
- * vlm_status events. Renders nothing while idle so empty tiles stay
- * clean. Shows a spinning dot while processing and an amber warning
- * once the VLM crosses the slow threshold.
+ * Per-tile VLM status pill. Subscribes via the shared WS context for
+ * vlm_status events. Rendering rules.
  *
- * The ping animation comes from Tailwind's animate-ping plus a
- * static dot underneath, matching the AudioActiveDot pattern so the
- * two indicators feel cohesive.
+ *   idle        -> hidden
+ *   queued      -> violet "Queued"
+ *   processing  -> violet "Thinking"
+ *   slow        -> amber "VLM slow (12.4s)"
+ *   stalled     -> amber "VLM stalled"
  */
 export function VLMStatusBadge({ cameraId }: Props) {
   const [state, setState] = useState<VLMState | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws`;
-
-    let cancelled = false;
-    let reconnect: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-
-    const scheduleReconnect = () => {
-      if (cancelled) return;
-      attempt = Math.min(attempt + 1, 6);
-      reconnect = setTimeout(connect, Math.min(30000, 1000 * 2 ** (attempt - 1)));
-    };
-
-    const connect = () => {
-      if (cancelled) return;
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
-        ws.onopen = () => {
-          attempt = 0;
-        };
-        ws.onmessage = (evt) => {
-          try {
-            const msg = JSON.parse(evt.data);
-            if (msg.type !== "vlm_status") return;
-            if (msg.camera_id !== cameraId) return;
-            const v = msg.vlm || {};
-            setState(v);
-            // If status is processing/slow/stalled, hold visible until
-            // the next event flips us back to idle. If we somehow miss
-            // the idle event (worker shutdown), auto-clear after 30s
-            // so the badge does not stick forever.
-            if (idleTimer.current) clearTimeout(idleTimer.current);
-            if (v.status && v.status !== "idle") {
-              idleTimer.current = setTimeout(
-                () => setState((s) => (s ? { ...s, status: "idle" } : s)),
-                30000
-              );
-            }
-          } catch {
-            /* ignore */
-          }
-        };
-        ws.onclose = () => scheduleReconnect();
-        ws.onerror = () => ws.close();
-      } catch {
-        scheduleReconnect();
-      }
-    };
-
-    connect();
-    return () => {
-      cancelled = true;
-      if (reconnect) clearTimeout(reconnect);
+  useWSSubscribe(
+    "vlm_status",
+    (msg) => {
+      const v = (msg as { vlm?: VLMState }).vlm || ({} as VLMState);
+      setState(v);
       if (idleTimer.current) clearTimeout(idleTimer.current);
-      try {
-        wsRef.current?.close();
-      } catch {
-        /* ignore */
+      if (v.status && v.status !== "idle") {
+        idleTimer.current = setTimeout(
+          () => setState((s) => (s ? { ...s, status: "idle" } : s)),
+          30000
+        );
       }
-    };
-  }, [cameraId]);
+    },
+    cameraId
+  );
+
+  useEffect(
+    () => () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    },
+    []
+  );
 
   if (!state || state.status === "idle") return null;
 
@@ -103,7 +61,9 @@ export function VLMStatusBadge({ cameraId }: Props) {
       ? "VLM stalled"
       : state.status === "slow"
         ? `VLM slow (${state.avg_latency?.toFixed(1)}s)`
-        : "Thinking";
+        : state.status === "queued"
+          ? "Queued"
+          : "Thinking";
 
   return (
     <div

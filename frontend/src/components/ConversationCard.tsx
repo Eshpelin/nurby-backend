@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { useWSSubscribe } from "@/lib/ws";
 
 interface ConversationTranscript {
   id: string;
@@ -65,6 +66,7 @@ const ChevronDown = ({ className }: { className?: string }) => (
 export function ConversationCard(props: ConversationCardProps) {
   const {
     id,
+    cameraId,
     cameraName,
     startedAt,
     endedAtProvisional,
@@ -85,6 +87,65 @@ export function ConversationCard(props: ConversationCardProps) {
   const [loadingTx, setLoadingTx] = useState(false);
   const [view, setView] = useState<"cleaned" | "raw">(
     cleanedText ? "cleaned" : "raw"
+  );
+  // Live-append. Accumulate transcripts pushed via WS so the user sees
+  // new lines without a refetch. Latest line drives the headline while
+  // the conversation is still rolling.
+  const [livePulse, setLivePulse] = useState<string | null>(null);
+  const [liveTranscriptCount, setLiveTranscriptCount] = useState(transcriptCount);
+  useEffect(() => {
+    setLiveTranscriptCount(transcriptCount);
+  }, [transcriptCount]);
+
+  useWSSubscribe(
+    "conversation_updated",
+    (msg) => {
+      const cid = (msg as { conversation_id?: string }).conversation_id;
+      if (cid !== id) return;
+      const text = ((msg as { text?: string }).text || "").trim();
+      if (!text) return;
+      const txId = (msg as { transcript_id?: string | null }).transcript_id;
+      const speaker = (msg as { speaker_name?: string | null }).speaker_name ?? null;
+      const startedAtIso = (msg as { started_at?: string }).started_at || new Date().toISOString();
+      const endedAtIso = (msg as { ended_at?: string }).ended_at || startedAtIso;
+      setLivePulse(text);
+      setLiveTranscriptCount((n) => n + 1);
+      // Keep the inline transcript list in sync if the user has it
+      // expanded so the new line shows up without a refetch.
+      if (txId) {
+        setTranscripts((prev) =>
+          prev.some((t) => t.id === txId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  id: txId,
+                  started_at: startedAtIso,
+                  ended_at: endedAtIso,
+                  text,
+                  language: null,
+                  provider: null,
+                  audio_capture_id: null,
+                  speaker_person_id: null,
+                  speaker_source: speaker ? "video" : null,
+                },
+              ]
+        );
+      }
+    },
+    cameraId
+  );
+
+  useWSSubscribe(
+    "conversation_finalized",
+    (msg) => {
+      const cid = (msg as { conversation_id?: string }).conversation_id;
+      if (cid !== id) return;
+      // Clear the rolling pulse; finalized state will arrive via the
+      // next /api/conversations refetch the dashboard already triggers.
+      setLivePulse(null);
+    },
+    cameraId
   );
 
   useEffect(() => {
@@ -125,13 +186,16 @@ export function ConversationCard(props: ConversationCardProps) {
     });
   }
 
-  // While rolling, prefer the latest line as the at-a-glance text.
-  // After finalize, prefer the summary.
+  // While rolling, prefer the most recent live pulse, then the last
+  // loaded transcript, then a count placeholder. After finalize,
+  // prefer the summary.
   const headlineText = finalized && summaryText
     ? summaryText
-    : transcripts.length > 0
-      ? transcripts[transcripts.length - 1].text
-      : `${transcriptCount} message${transcriptCount === 1 ? "" : "s"}`;
+    : livePulse
+      ? livePulse
+      : transcripts.length > 0
+        ? transcripts[transcripts.length - 1].text
+        : `${liveTranscriptCount} message${liveTranscriptCount === 1 ? "" : "s"}`;
 
   return (
     <div
@@ -175,7 +239,7 @@ export function ConversationCard(props: ConversationCardProps) {
           </span>
           <span className="text-muted-foreground">·</span>
           <span className="text-muted-foreground">
-            {transcriptCount} msg
+            {liveTranscriptCount} msg
           </span>
           <ChevronDown
             className={`ml-auto w-3.5 h-3.5 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -197,38 +261,46 @@ export function ConversationCard(props: ConversationCardProps) {
 
       {expanded && (
         <div className="border-t border-border/50 bg-black/30">
-          {cleanedText && (
-            <div className="px-3 pt-2 flex items-center gap-1 text-[10px] uppercase tracking-wider">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setView("cleaned");
-                }}
-                className={`px-2 py-1 rounded ${
-                  view === "cleaned"
-                    ? "bg-emerald-600/20 text-emerald-300 border border-emerald-700/40"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Cleaned
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setView("raw");
-                }}
-                className={`px-2 py-1 rounded ${
-                  view === "raw"
-                    ? "bg-emerald-600/20 text-emerald-300 border border-emerald-700/40"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Raw transcript
-              </button>
-            </div>
-          )}
+          <div className="px-3 pt-2 flex items-center gap-1 text-[10px] uppercase tracking-wider">
+            {cleanedText && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setView("cleaned");
+                  }}
+                  className={`px-2 py-1 rounded ${
+                    view === "cleaned"
+                      ? "bg-emerald-600/20 text-emerald-300 border border-emerald-700/40"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Cleaned
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setView("raw");
+                  }}
+                  className={`px-2 py-1 rounded ${
+                    view === "raw"
+                      ? "bg-emerald-600/20 text-emerald-300 border border-emerald-700/40"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Raw transcript
+                </button>
+              </>
+            )}
+            {finalized && (
+              <ResummarizeButton
+                conversationId={id}
+                token={token}
+              />
+            )}
+          </div>
           <div className="px-3 py-2.5 space-y-1.5">
             {view === "cleaned" && cleanedText ? (
               <p className="text-xs leading-relaxed text-zinc-200 whitespace-pre-line">
@@ -247,6 +319,45 @@ export function ConversationCard(props: ConversationCardProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function ResummarizeButton({
+  conversationId,
+  token,
+}: {
+  conversationId: string;
+  token: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy || !token}
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (!token) return;
+        setBusy(true);
+        setDone(false);
+        try {
+          const res = await fetch(
+            `/api/conversations/${conversationId}/resummarize`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (res.ok) setDone(true);
+        } finally {
+          setBusy(false);
+          setTimeout(() => setDone(false), 2000);
+        }
+      }}
+      className="ml-auto px-2 py-1 rounded text-muted-foreground hover:text-violet-300 hover:bg-violet-500/10 disabled:opacity-50"
+    >
+      {busy ? "Re-running." : done ? "Done" : "Re-summarize"}
+    </button>
   );
 }
 

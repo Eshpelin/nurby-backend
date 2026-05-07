@@ -47,6 +47,7 @@ class VadSegmenter:
         camera_id: uuid.UUID,
         sample_rate: int = AUDIO_SAMPLE_RATE_HZ,
         rms_threshold: float = 0.015,
+        on_speech_start=None,
     ) -> None:
         if sample_rate != AUDIO_SAMPLE_RATE_HZ:
             raise ValueError(f"VAD requires {AUDIO_SAMPLE_RATE_HZ} Hz")
@@ -58,6 +59,10 @@ class VadSegmenter:
         self._seg_started: datetime | None = None
         self._silence_run_ms = 0
         self._frame_t: datetime | None = None  # wall-clock at start of next frame
+        # Synchronous callback fired the first frame of speech in a new
+        # segment. Used by the router to broadcast a mid-utterance
+        # "speech_start" pulse without waiting for VAD close + STT.
+        self._on_speech_start = on_speech_start
 
     def feed(self, chunk: PcmChunk) -> Iterator[SpeechSegment]:
         """Push a PCM chunk. Yields zero or more closed segments."""
@@ -94,6 +99,14 @@ class VadSegmenter:
             if self._seg_started is None:
                 self._seg_started = self._frame_t
                 self._seg_pcm.clear()
+                if self._on_speech_start is not None:
+                    try:
+                        self._on_speech_start(self._seg_started)
+                    except Exception:
+                        # Logging is in vad.py's logger but the
+                        # callback is plumbed in by the router; never
+                        # let a bad callback break segmentation.
+                        logger.debug("on_speech_start callback failed", exc_info=True)
             self._seg_pcm.extend(frame)
             self._silence_run_ms = 0
             # Force-close oversized segments. Long monologues split into
