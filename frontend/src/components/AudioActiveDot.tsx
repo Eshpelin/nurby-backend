@@ -26,12 +26,23 @@ export function AudioActiveDot({ cameraId, holdMs = 1500 }: Props) {
 
     let cancelled = false;
     let reconnect: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      attempt = Math.min(attempt + 1, 6);
+      const delay = Math.min(30000, 1000 * 2 ** (attempt - 1));
+      reconnect = setTimeout(connect, delay);
+    };
 
     const connect = () => {
       if (cancelled) return;
       try {
         const ws = new WebSocket(url);
         wsRef.current = ws;
+        ws.onopen = () => {
+          attempt = 0;
+        };
         ws.onmessage = (evt) => {
           try {
             const msg = JSON.parse(evt.data);
@@ -45,12 +56,11 @@ export function AudioActiveDot({ cameraId, holdMs = 1500 }: Props) {
           }
         };
         ws.onclose = () => {
-          if (cancelled) return;
-          reconnect = setTimeout(connect, 5000);
+          scheduleReconnect();
         };
         ws.onerror = () => ws.close();
       } catch {
-        reconnect = setTimeout(connect, 5000);
+        scheduleReconnect();
       }
     };
 
@@ -69,6 +79,9 @@ export function AudioActiveDot({ cameraId, holdMs = 1500 }: Props) {
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-label={active ? "Audio active on camera" : "Audio idle"}
       title={active ? "Audio active" : "Audio idle"}
       className={`flex items-center gap-1 rounded-full bg-black/60 backdrop-blur-sm px-1.5 py-0.5 border ${
         active ? "border-emerald-400/60" : "border-white/10"
