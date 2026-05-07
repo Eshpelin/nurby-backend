@@ -133,15 +133,30 @@ interface StatusLog {
 }
 
 interface SearchResult {
+  // kind absent on legacy observations endpoint, present on union.
+  kind?: "observation" | "transcript" | "conversation" | "summary";
   id: string;
   camera_id: string;
   camera_name: string;
   started_at: string;
-  object_detections: { objects: { label: string; confidence: number; plate_text?: string | null }[]; count: number } | null;
-  person_detections: { faces: FaceDetection[]; count: number } | null;
-  vlm_description: string | null;
-  confidence: number | null;
-  thumbnail_path: string | null;
+  // Observation-only fields.
+  object_detections?: { objects: { label: string; confidence: number; plate_text?: string | null }[]; count: number } | null;
+  person_detections?: { faces: FaceDetection[]; count: number } | null;
+  vlm_description?: string | null;
+  confidence?: number | null;
+  thumbnail_path?: string | null;
+  // Transcript-only fields.
+  text?: string | null;
+  language?: string | null;
+  provider?: string | null;
+  // Conversation-only fields.
+  summary_text?: string | null;
+  transcript_count?: number | null;
+  // Summary-only fields.
+  summary_kind?: string | null;
+  // Common.
+  ended_at?: string | null;
+  distance?: number | null;
 }
 
 interface Digest {
@@ -2020,7 +2035,13 @@ function DashboardContent() {
 
     const searchTask = (async () => {
       try {
-        const res = await authFetch(`/api/search?${params}`);
+        // Union search across observations + transcripts + conversations
+        // + summaries. Each kind capped at limit_per_kind so latency
+        // stays bounded. The legacy /api/search endpoint stays for
+        // tools that only want observations.
+        const unionParams = new URLSearchParams(params);
+        unionParams.set("limit_per_kind", "10");
+        const res = await authFetch(`/api/search/union?${unionParams}`);
         if (res.ok) setSearchResults((await res.json()).results);
       } catch { /* silent */ }
       finally { setIsSearching(false); }
@@ -2886,6 +2907,61 @@ function DashboardContent() {
 
                         if (entry.type === "search_result") {
                           const r = entry.data as SearchResult;
+                          // Branch on union-search discriminator. Non-
+                          // observation kinds render as simpler cards
+                          // tinted by their type.
+                          if (r.kind === "transcript") {
+                            return (
+                              <div
+                                key={entry.id}
+                                className="rounded-lg border border-emerald-700/30 bg-emerald-950/15 p-3"
+                              >
+                                <div className="flex items-center gap-2 text-[10px] text-emerald-300 uppercase tracking-wider mb-1">
+                                  <span>Transcript</span>
+                                  <span className="text-muted-foreground">·</span>
+                                  <span className="text-muted-foreground">{r.camera_name || cam?.name || "Camera"}</span>
+                                  <span className="ml-auto font-mono text-muted-foreground">{formatTime(r.started_at)}</span>
+                                </div>
+                                <p className="text-xs italic text-zinc-100 leading-relaxed">{r.text || ""}</p>
+                              </div>
+                            );
+                          }
+                          if (r.kind === "conversation") {
+                            return (
+                              <div
+                                key={entry.id}
+                                className="rounded-lg border border-emerald-700/40 bg-emerald-950/20 p-3"
+                              >
+                                <div className="flex items-center gap-2 text-[10px] text-emerald-300 uppercase tracking-wider mb-1">
+                                  <span>Conversation</span>
+                                  <span className="text-muted-foreground">·</span>
+                                  <span className="text-muted-foreground">{r.camera_name || cam?.name || "Camera"}</span>
+                                  {r.transcript_count != null && (
+                                    <span className="text-muted-foreground">· {r.transcript_count} msg</span>
+                                  )}
+                                  <span className="ml-auto font-mono text-muted-foreground">{formatTime(r.started_at)}</span>
+                                </div>
+                                <p className="text-xs leading-relaxed text-foreground">{r.summary_text || "(no summary)"}</p>
+                              </div>
+                            );
+                          }
+                          if (r.kind === "summary") {
+                            return (
+                              <div
+                                key={entry.id}
+                                className="rounded-lg border border-indigo-500/40 bg-indigo-500/5 p-3"
+                              >
+                                <div className="flex items-center gap-2 text-[10px] text-indigo-300 uppercase tracking-wider mb-1">
+                                  <span>{r.summary_kind === "event" ? "Event recap" : "Recap"}</span>
+                                  <span className="text-muted-foreground">·</span>
+                                  <span className="text-muted-foreground">{r.camera_name || cam?.name || "Camera"}</span>
+                                  <span className="ml-auto font-mono text-muted-foreground">{formatTime(r.started_at)}</span>
+                                </div>
+                                <p className="text-xs leading-relaxed text-foreground">{r.summary_text || ""}</p>
+                              </div>
+                            );
+                          }
+                          // Default: observation shape.
                           const srFaces = r.person_detections?.faces || [];
                           const srNamed = srFaces.filter((f) => f.person_name);
                           const srUnknown = srFaces.filter((f) => !f.person_name);

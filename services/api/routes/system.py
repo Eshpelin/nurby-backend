@@ -100,11 +100,16 @@ async def get_vlm_queue_stats(_current_user: User = Depends(get_current_user)):
 
 @router.get("/health")
 async def get_health(_current_user: User = Depends(get_current_user)):
-    """Lightweight host-level CPU / RAM / disk snapshot for the footer.
+    """Lightweight host-level CPU / RAM / disk / GPU snapshot for the
+    footer.
 
     Sampled with psutil. cpu_percent uses interval=None so the call
     returns immediately (uses the value since the last call). The
     frontend polls on a coarse cadence so this stays cheap.
+
+    GPU stats are best-effort. ``nvidia-smi`` is queried with a 1.5s
+    timeout when present. NULL on non-NVIDIA hosts and on hosts where
+    the binary is not on PATH; the UI hides the GPU pill in that case.
     """
     import psutil
 
@@ -125,8 +130,10 @@ async def get_health(_current_user: User = Depends(get_current_user)):
     try:
         load_avg = list(psutil.getloadavg())
     except (AttributeError, OSError):
-        # getloadavg is unavailable on Windows.
         pass
+
+    gpus = _read_nvidia_smi()
+
     return {
         "cpu_percent": round(cpu, 1),
         "cpu_count": psutil.cpu_count(logical=True),
@@ -144,7 +151,54 @@ async def get_health(_current_user: User = Depends(get_current_user)):
             "free_bytes": disk.free,
             "percent": disk.percent,
         },
+        "gpus": gpus,
     }
+
+
+def _read_nvidia_smi() -> list[dict] | None:
+    """Shell out to nvidia-smi for a tight CSV. Returns None when the
+    binary is missing or fails. Cached implicitly on every call so the
+    cost is just a fork; ~30ms when the driver is up. Frontend polls
+    every 10s so this is fine.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,utilization.gpu,memory.total,memory.used,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=True,
+        ).stdout
+    except Exception:
+        return None
+    rows: list[dict] = []
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 6:
+            continue
+        try:
+            rows.append(
+                {
+                    "index": int(parts[0]),
+                    "name": parts[1],
+                    "util_percent": float(parts[2]),
+                    "mem_total_mb": float(parts[3]),
+                    "mem_used_mb": float(parts[4]),
+                    "temp_c": float(parts[5]),
+                }
+            )
+        except ValueError:
+            continue
+    return rows or None
 
 
 @router.get("/smtp")

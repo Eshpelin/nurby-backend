@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 
+interface GPU {
+  index: number;
+  name: string;
+  util_percent: number;
+  mem_total_mb: number;
+  mem_used_mb: number;
+  temp_c: number;
+}
+
 interface Health {
   cpu_percent: number;
   cpu_count: number;
@@ -20,6 +29,7 @@ interface Health {
     free_bytes: number;
     percent: number;
   };
+  gpus: GPU[] | null;
 }
 
 const POLL_MS = 10000;
@@ -117,6 +127,19 @@ export function SystemHealthFooter() {
         toneClass={tone(diskP)}
         title={`${fmtBytes(health.disk.used_bytes)} / ${fmtBytes(health.disk.total_bytes)} used · ${fmtBytes(health.disk.free_bytes)} free on ${health.disk.path}`}
       />
+      {health.gpus && health.gpus.length > 0 && (
+        <>
+          {health.gpus.map((g) => (
+            <Pill
+              key={g.index}
+              label={`GPU${health.gpus!.length > 1 ? g.index : ""}`}
+              value={`${g.util_percent.toFixed(0)}%`}
+              toneClass={tone(g.util_percent)}
+              title={`${g.name} · ${g.util_percent.toFixed(0)}% util · ${(g.mem_used_mb / 1024).toFixed(1)} / ${(g.mem_total_mb / 1024).toFixed(1)} GB VRAM · ${g.temp_c.toFixed(0)}°C`}
+            />
+          ))}
+        </>
+      )}
     </div>
   );
 }
