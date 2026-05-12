@@ -228,6 +228,56 @@ class FaceClusterSample(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BodyCluster(Base):
+    """Cross-camera body re-identification cluster.
+
+    Sibling of FaceCluster. Built from OSNet appearance embeddings on
+    full-person bounding boxes. Lets the system recognize the same
+    individual across cameras even when the face is not visible, by
+    matching clothing, body shape, and color.
+
+    A BodyCluster carries `status` and `confidence`. A "tentative"
+    cluster has not yet been face-confirmed. Once a co-occurring face
+    cluster gets linked to the same `person_id`, the body cluster is
+    promoted to "confirmed".
+    """
+    __tablename__ = "body_clusters"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    representative_embedding = mapped_column(Vector(512), nullable=False)
+    representative_color: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sample_thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sighting_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    first_camera_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    person_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    linked_face_cluster_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("face_clusters.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    confidence: Mapped[str] = mapped_column(String(16), default="tentative", nullable=False)
+    auto_label_number: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
+    appearance_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BodyClusterSample(Base):
+    __tablename__ = "body_cluster_samples"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cluster_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("body_clusters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    camera_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    embedding = mapped_column(Vector(512), nullable=False)
+    color_histogram: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    bbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Observation(Base):
     __tablename__ = "observations"
 

@@ -18,6 +18,7 @@ from shared.database import async_session
 from shared.models import Camera, Observation, Provider, Transcript
 from services.perception.detector import ObjectDetector
 from services.perception.faces import FaceRecognizer
+from services.perception.reid import BodyReID
 from services.perception.plates import detect_plates
 from services.perception.vlm import VLMClient, get_active_provider
 from services.perception.vlm_queue import VLMQueue, VLMJob
@@ -39,6 +40,7 @@ class PerceptionPipeline:
         self._redis = None
         self._detector = ObjectDetector()
         self._face = FaceRecognizer()
+        self._body = BodyReID()
         self._vlm = VLMClient()
         self._vlm_queue = VLMQueue(self._vlm)
         self._rule_engine = RuleEngine()
@@ -405,6 +407,38 @@ class PerceptionPipeline:
                         if cluster_id:
                             face["cluster_id"] = str(cluster_id)
 
+        # Step 2b. Body re-identification. For every YOLO person bbox,
+        # compute an OSNet appearance embedding and cluster it. This
+        # builds a cross-camera identity graph that survives even when
+        # the face is not visible. When a face hit lands on the same
+        # frame, its cluster's Person link is used as a strong prior so
+        # the body cluster gets confirmed and tagged with that Person.
+        person_dets = [d for d in detections if d.get("label") == "person"]
+        if person_dets:
+            try:
+                await self._body.embed_persons(frame, person_dets)
+                frame_face_cluster_ids: list[uuid.UUID] = []
+                for f in faces or []:
+                    cid = f.get("cluster_id")
+                    if cid:
+                        try:
+                            frame_face_cluster_ids.append(uuid.UUID(cid))
+                        except Exception:
+                            pass
+                for det in person_dets:
+                    if not det.get("body_embedding"):
+                        continue
+                    body_cluster_id = await self._body.cluster_body(
+                        det=det,
+                        camera_id=camera_id,
+                        frame=frame,
+                        face_cluster_ids=frame_face_cluster_ids,
+                    )
+                    if body_cluster_id:
+                        det["body_cluster_id"] = str(body_cluster_id)
+            except Exception:
+                logger.exception("body re-id failed camera=%s", camera_id)
+
         # Smart privacy zones. Refresh auto-detected zones from the
         # current frame's detections and apply Gaussian blur BEFORE
         # the thumbnail + VLM encode paths see the frame. Anything
@@ -466,7 +500,14 @@ class PerceptionPipeline:
 
         # Step 4. Store observation in database (immediately, without waiting for VLM)
         person_detections = None
-        if faces:
+        bodies_payload = [
+            {
+                "bbox": d.get("bbox"),
+                "body_cluster_id": d.get("body_cluster_id"),
+            }
+            for d in person_dets if d.get("body_cluster_id")
+        ]
+        if faces or bodies_payload:
             person_detections = {
                 "faces": [
                     {
@@ -476,9 +517,10 @@ class PerceptionPipeline:
                         "match_distance": f.get("match_distance"),
                         "cluster_id": f.get("cluster_id"),
                     }
-                    for f in faces
+                    for f in (faces or [])
                 ],
-                "count": len(faces),
+                "bodies": bodies_payload,
+                "count": len(faces or []) + len(bodies_payload),
             }
 
         observation_id = await self._store_observation(
