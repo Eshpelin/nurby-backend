@@ -114,10 +114,55 @@ def matches_targets(label: str | None, targets: list[str] | None) -> bool:
     return False
 
 
-async def get_active_zones(camera_id: uuid.UUID | str) -> list[dict]:
-    """Pull active privacy zones for the camera. Returns dicts ready
-    for ``apply_privacy_blur``. Cheap one-shot query; cache hot if
-    you ever need more throughput."""
+# PTZ pose match tolerance. Defaults assume degrees for pan/tilt
+# and a 0-1 normalized zoom from ONVIF. Tweak per-deployment via
+# camera settings if presets are tighter / wider apart.
+PTZ_PAN_TOLERANCE_DEG = 5.0
+PTZ_TILT_TOLERANCE_DEG = 5.0
+PTZ_ZOOM_TOLERANCE = 0.1
+
+
+def ptz_pose_matches(a: dict | None, b: dict | None) -> bool:
+    """Compare two PTZ poses with tolerance. Returns True when both
+    are missing (fixed camera) OR when pan/tilt/zoom all fall within
+    the configured slop. Missing keys count as zero / wildcard so a
+    camera that doesn't report zoom still matches.
+    """
+    if not a and not b:
+        return True
+    if not a or not b:
+        # One side has a pose, the other doesn't. Be strict so a
+        # PTZ-tagged zone doesn't apply on a frame where the camera
+        # could not report its pose (e.g. ONVIF read failure).
+        return False
+    try:
+        if abs(float(a.get("pan", 0)) - float(b.get("pan", 0))) > PTZ_PAN_TOLERANCE_DEG:
+            return False
+        if abs(float(a.get("tilt", 0)) - float(b.get("tilt", 0))) > PTZ_TILT_TOLERANCE_DEG:
+            return False
+        if abs(float(a.get("zoom", 0)) - float(b.get("zoom", 0))) > PTZ_ZOOM_TOLERANCE:
+            return False
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+async def get_active_zones(
+    camera_id: uuid.UUID | str,
+    current_pose: dict | None = None,
+) -> list[dict]:
+    """Pull active privacy zones for the camera, filtered to ones
+    that should fire on the current frame.
+
+    Filters applied in this order.
+    1. ``active=True``.
+    2. Freshness. auto zones whose ``last_seen_at`` is older than
+       their ``stale_after_seconds`` are skipped. Manual / locked
+       zones ignore freshness.
+    3. PTZ pose. zones with a stored ``ptz_pose`` only fire when the
+       camera's current pose matches. Zones with null pose fire
+       regardless (fixed cameras, manual zones).
+    """
     if isinstance(camera_id, str):
         try:
             camera_id = uuid.UUID(camera_id)
@@ -132,16 +177,34 @@ async def get_active_zones(camera_id: uuid.UUID | str) -> list[dict]:
                     .where(PrivacyZone.active.is_(True))
                 )
             ).scalars().all()
-        return [
-            {
-                "id": str(z.id),
-                "label": z.label,
-                "polygon": z.polygon,
-                "source": z.source,
-                "locked": z.locked,
-            }
-            for z in rows
-        ]
+        now = datetime.now(timezone.utc)
+        out: list[dict] = []
+        for z in rows:
+            is_manual_or_locked = z.source != "auto" or z.locked
+            if not is_manual_or_locked:
+                # Freshness gate for auto zones.
+                last = z.last_seen_at
+                if last is not None and last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                stale_s = int(z.stale_after_seconds or 60)
+                if last is None or (now - last).total_seconds() > stale_s:
+                    continue
+            # PTZ pose match. When the zone has a pose, only apply
+            # at that pose. When the zone has no pose, it applies
+            # whether or not the camera reports one.
+            if z.ptz_pose and not ptz_pose_matches(z.ptz_pose, current_pose):
+                continue
+            out.append(
+                {
+                    "id": str(z.id),
+                    "label": z.label,
+                    "polygon": z.polygon,
+                    "source": z.source,
+                    "locked": z.locked,
+                    "ptz_pose": z.ptz_pose,
+                }
+            )
+        return out
     except Exception:
         logger.debug("privacy zone lookup failed", exc_info=True)
         return []
@@ -201,6 +264,7 @@ async def refresh_privacy_zones(
     frame_shape: tuple[int, int],
     targets: list[str] | None,
     min_score: float = 0.4,
+    current_pose: dict | None = None,
 ) -> None:
     """Upsert auto privacy zones from the current detection set.
 
@@ -249,13 +313,20 @@ async def refresh_privacy_zones(
                     .where(PrivacyZone.source == "auto")
                 )
             ).scalars().all()
-            existing_by_label: dict[str, list[PrivacyZone]] = {}
+            # Bucket by label AND pose so a PTZ camera with the same
+            # label seen at two different presets keeps two zones.
+            existing_by_key: dict[tuple, list[PrivacyZone]] = {}
             for z in existing:
-                existing_by_label.setdefault(z.label.lower(), []).append(z)
+                pose_key = _pose_key(z.ptz_pose)
+                existing_by_key.setdefault(
+                    (z.label.lower(), pose_key), []
+                ).append(z)
 
             now = datetime.now(timezone.utc)
+            pose_key = _pose_key(current_pose)
             for inc in incoming:
-                matches = existing_by_label.get(inc["label"], [])
+                bucket_key = (inc["label"], pose_key)
+                matches = existing_by_key.get(bucket_key, [])
                 best: PrivacyZone | None = None
                 best_iou = 0.0
                 for ez in matches:
@@ -267,6 +338,8 @@ async def refresh_privacy_zones(
                     best.polygon = inc["polygon"]
                     best.auto_score = inc["score"]
                     best.last_seen_at = now
+                    if current_pose is not None:
+                        best.ptz_pose = current_pose
                 elif best is None or best_iou < 0.4:
                     db.add(
                         PrivacyZone(
@@ -279,8 +352,26 @@ async def refresh_privacy_zones(
                             locked=False,
                             detected_at=now,
                             last_seen_at=now,
+                            ptz_pose=current_pose,
                         )
                     )
             await db.commit()
     except Exception:
         logger.exception("privacy zone refresh failed cam=%s", camera_id)
+
+
+def _pose_key(pose: dict | None) -> tuple:
+    """Discretize a PTZ pose so two near-identical poses bucket
+    together. Buckets are 10° pan/tilt and 0.2 zoom slots — wider
+    than the apply-time tolerance so the upsert is forgiving while
+    the apply gate is strict."""
+    if not pose:
+        return ("fixed",)
+    try:
+        return (
+            round(float(pose.get("pan", 0)) / 10.0),
+            round(float(pose.get("tilt", 0)) / 10.0),
+            round(float(pose.get("zoom", 0)) / 0.2),
+        )
+    except (TypeError, ValueError):
+        return ("fixed",)

@@ -238,6 +238,27 @@ class PerceptionPipeline:
 
         return " ".join(parts) if parts else None
 
+    async def _get_ptz_pose(self, camera_id: str) -> dict | None:
+        """Read the most recent known PTZ pose for the camera from
+        Redis. Returns None when nothing is cached. The PTZ control
+        endpoints write this key whenever the user moves the camera
+        to a preset; a future ONVIF GetStatus poller can refresh it
+        between presets.
+        """
+        try:
+            r = await self._get_redis()
+            raw = await r.get(f"nurby:ptz_pose:{camera_id}")
+            if not raw:
+                return None
+            import json as _json
+
+            data = _json.loads(raw)
+            if not isinstance(data, dict):
+                return None
+            return data
+        except Exception:
+            return None
+
     async def _recent_heard_text(
         self, camera_id: str, ts: datetime, lookback_seconds: int = 8
     ) -> str | None:
@@ -396,14 +417,21 @@ class PerceptionPipeline:
                 if cam and getattr(cam, "privacy_zone_targets", None)
                 else []
             )
+            # Optional. Read a cached PTZ pose from Redis. Set by
+            # the PTZ control endpoints + (future) ONVIF GetStatus
+            # poller. When present, auto zones tag themselves with
+            # this pose so they only fire when the camera returns
+            # to it. When absent, falls back to freshness alone.
+            current_pose = await self._get_ptz_pose(camera_id)
             if targets:
                 await refresh_privacy_zones(
                     camera_id=camera_id,
                     detections=detections,
                     frame_shape=frame.shape,
                     targets=targets,
+                    current_pose=current_pose,
                 )
-            zones = await get_active_zones(camera_id)
+            zones = await get_active_zones(camera_id, current_pose=current_pose)
             if zones:
                 strength = (
                     int(cam.privacy_zone_blur_strength)

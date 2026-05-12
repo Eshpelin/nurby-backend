@@ -631,3 +631,10 @@ class PrivacyZone(Base):
     locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # PTZ pose at detection time. {pan, tilt, zoom} or null. Cameras
+    # without PTZ leave this null and rely on freshness alone.
+    ptz_pose: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Freshness gate. Auto zones not re-detected within this window
+    # stop applying so a camera that panned away does not keep blurring
+    # the wrong region. Manual and locked zones ignore it.
+    stale_after_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)

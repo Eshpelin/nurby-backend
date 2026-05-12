@@ -14,6 +14,8 @@ interface Zone {
   locked: boolean;
   detected_at: string | null;
   last_seen_at: string | null;
+  ptz_pose: { pan?: number; tilt?: number; zoom?: number } | null;
+  stale_after_seconds: number;
 }
 
 interface Props {

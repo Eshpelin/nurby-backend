@@ -37,6 +37,8 @@ def _serialize(z: PrivacyZone) -> dict[str, Any]:
         "locked": z.locked,
         "detected_at": z.detected_at.isoformat() if z.detected_at else None,
         "last_seen_at": z.last_seen_at.isoformat() if z.last_seen_at else None,
+        "ptz_pose": z.ptz_pose,
+        "stale_after_seconds": z.stale_after_seconds,
     }
 
 
@@ -67,6 +69,8 @@ class ZonePatch(BaseModel):
     locked: bool | None = None
     label: str | None = None
     polygon: list[list[float]] | None = None
+    ptz_pose: dict | None = None
+    stale_after_seconds: int | None = None
 
 
 @router.patch("/{zone_id}")
@@ -91,6 +95,10 @@ async def patch_zone(
         z.active = bool(updates["active"])
     if "locked" in updates and updates["locked"] is not None:
         z.locked = bool(updates["locked"])
+    if "ptz_pose" in updates:
+        z.ptz_pose = updates["ptz_pose"]
+    if "stale_after_seconds" in updates and updates["stale_after_seconds"] is not None:
+        z.stale_after_seconds = max(5, int(updates["stale_after_seconds"]))
     await db.commit()
     await db.refresh(z)
     return _serialize(z)
