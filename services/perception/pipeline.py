@@ -379,6 +379,41 @@ class PerceptionPipeline:
                         if cluster_id:
                             face["cluster_id"] = str(cluster_id)
 
+        # Smart privacy zones. Refresh auto-detected zones from the
+        # current frame's detections and apply Gaussian blur BEFORE
+        # the thumbnail + VLM encode paths see the frame. Anything
+        # downstream (thumbnail, VLM call, embedding) only ever sees
+        # the redacted version.
+        try:
+            from services.perception.privacy import (
+                apply_privacy_blur,
+                get_active_zones,
+                refresh_privacy_zones,
+            )
+
+            targets = (
+                list(cam.privacy_zone_targets or [])
+                if cam and getattr(cam, "privacy_zone_targets", None)
+                else []
+            )
+            if targets:
+                await refresh_privacy_zones(
+                    camera_id=camera_id,
+                    detections=detections,
+                    frame_shape=frame.shape,
+                    targets=targets,
+                )
+            zones = await get_active_zones(camera_id)
+            if zones:
+                strength = (
+                    int(cam.privacy_zone_blur_strength)
+                    if cam and getattr(cam, "privacy_zone_blur_strength", None)
+                    else 55
+                )
+                frame = apply_privacy_blur(frame, zones, strength=strength)
+        except Exception:
+            logger.exception("privacy blur failed camera=%s", camera_id)
+
         # Step 3. Save thumbnail
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
 

@@ -1,0 +1,286 @@
+"""Smart privacy zones. detection + frame blur.
+
+Two responsibilities.
+
+1. ``refresh_privacy_zones(camera_id, detections, frame_shape)``
+   walks the YOLO detections for the current frame, matches them
+   against the camera's ``privacy_zone_targets`` list, and upserts
+   PrivacyZone rows. Auto-zones are short-lived. they refresh on
+   every keyframe so a bed scoped in the early morning still
+   matches the bed at noon even if the camera nudges slightly.
+
+2. ``apply_privacy_blur(frame, zones, strength)`` returns a copy of
+   the frame with the listed zones gaussian-blurred. Polygon coords
+   are normalized 0-1 so the same zone applies across resolution
+   changes. Called from the perception pipeline BEFORE VLM encode
+   + thumbnail write.
+
+Recording pipeline blur is a follow-up. ffmpeg stream-copy means
+we'd need to decode-blur-reencode the rolling clips, which is hot.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+import cv2
+import numpy as np
+from sqlalchemy import select
+
+from shared.database import async_session
+from shared.models import PrivacyZone
+
+logger = logging.getLogger("nurby.perception.privacy")
+
+
+# Object labels we recognize as private targets. The camera's
+# ``privacy_zone_targets`` list filters this set further. Lowercase.
+# Keep tight. each entry should be something OIV7 / common YOLO
+# models actually detect with reasonable confidence.
+SUPPORTED_TARGETS: set[str] = {
+    "bed",
+    "tv",
+    "monitor",
+    "laptop",
+    "computer monitor",
+    "computer keyboard",
+    "cell phone",
+    "mobile phone",
+    "window",
+    "door",
+    "toilet",
+    "bathtub",
+    "mirror",
+    "picture frame",
+}
+
+
+def bbox_to_polygon(
+    bbox: list[float] | list[int],
+    frame_w: int,
+    frame_h: int,
+) -> list[list[float]]:
+    """Convert [x1, y1, x2, y2] (pixel) into a 4-point polygon in
+    normalized 0-1 coords. Slight outward padding (4%) so the blur
+    fully covers the object even when the bbox is tight."""
+    if not bbox or len(bbox) < 4:
+        return []
+    x1, y1, x2, y2 = bbox[:4]
+    pad_x = (x2 - x1) * 0.04
+    pad_y = (y2 - y1) * 0.04
+    x1 = max(0.0, (x1 - pad_x) / max(1, frame_w))
+    y1 = max(0.0, (y1 - pad_y) / max(1, frame_h))
+    x2 = min(1.0, (x2 + pad_x) / max(1, frame_w))
+    y2 = min(1.0, (y2 + pad_y) / max(1, frame_h))
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+def _iou_norm(a: list[list[float]], b: list[list[float]]) -> float:
+    """Cheap IOU for normalized rect polygons."""
+    if not a or not b:
+        return 0.0
+    ax1 = min(p[0] for p in a)
+    ay1 = min(p[1] for p in a)
+    ax2 = max(p[0] for p in a)
+    ay2 = max(p[1] for p in a)
+    bx1 = min(p[0] for p in b)
+    by1 = min(p[1] for p in b)
+    bx2 = max(p[0] for p in b)
+    by2 = max(p[1] for p in b)
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    area_a = max(1e-9, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1e-9, (bx2 - bx1) * (by2 - by1))
+    return inter / (area_a + area_b - inter)
+
+
+def matches_targets(label: str | None, targets: list[str] | None) -> bool:
+    if not label or not targets:
+        return False
+    lbl = label.lower()
+    for t in targets:
+        if not t:
+            continue
+        if lbl == t.lower():
+            return True
+    return False
+
+
+async def get_active_zones(camera_id: uuid.UUID | str) -> list[dict]:
+    """Pull active privacy zones for the camera. Returns dicts ready
+    for ``apply_privacy_blur``. Cheap one-shot query; cache hot if
+    you ever need more throughput."""
+    if isinstance(camera_id, str):
+        try:
+            camera_id = uuid.UUID(camera_id)
+        except ValueError:
+            return []
+    try:
+        async with async_session() as db:
+            rows = (
+                await db.execute(
+                    select(PrivacyZone)
+                    .where(PrivacyZone.camera_id == camera_id)
+                    .where(PrivacyZone.active.is_(True))
+                )
+            ).scalars().all()
+        return [
+            {
+                "id": str(z.id),
+                "label": z.label,
+                "polygon": z.polygon,
+                "source": z.source,
+                "locked": z.locked,
+            }
+            for z in rows
+        ]
+    except Exception:
+        logger.debug("privacy zone lookup failed", exc_info=True)
+        return []
+
+
+def apply_privacy_blur(
+    frame: np.ndarray,
+    zones: list[dict],
+    strength: int = 55,
+) -> np.ndarray:
+    """Return a copy of ``frame`` with each zone's polygon
+    gaussian-blurred. Polygons are normalized 0-1; we scale to the
+    actual frame size on the fly.
+
+    Strength is the Gaussian kernel size (odd; capped). 55 is heavy
+    enough to obscure faces on a monitor; 25 just softens. Defaults
+    favor privacy.
+    """
+    if frame is None or frame.size == 0 or not zones:
+        return frame
+    h, w = frame.shape[:2]
+    k = max(5, int(strength) | 1)  # force odd
+    k = min(151, k)
+    out = frame.copy()
+    for z in zones:
+        poly = z.get("polygon") or []
+        if len(poly) < 3:
+            continue
+        try:
+            pts = np.array(
+                [[int(p[0] * w), int(p[1] * h)] for p in poly],
+                dtype=np.int32,
+            )
+        except (TypeError, ValueError):
+            continue
+        x1 = max(0, int(pts[:, 0].min()))
+        y1 = max(0, int(pts[:, 1].min()))
+        x2 = min(w, int(pts[:, 0].max()))
+        y2 = min(h, int(pts[:, 1].max()))
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            continue
+        # Blur the bounding rect, then mask via polygon so non-
+        # rectangular zones look natural.
+        roi = out[y1:y2, x1:x2]
+        blurred = cv2.GaussianBlur(roi, (k, k), 0)
+        mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+        local_pts = pts - np.array([x1, y1])
+        cv2.fillPoly(mask, [local_pts], 255)
+        mask3 = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) if roi.ndim == 3 else mask
+        out[y1:y2, x1:x2] = np.where(mask3 > 0, blurred, roi)
+    return out
+
+
+async def refresh_privacy_zones(
+    camera_id: uuid.UUID | str,
+    detections: list[dict],
+    frame_shape: tuple[int, int],
+    targets: list[str] | None,
+    min_score: float = 0.4,
+) -> None:
+    """Upsert auto privacy zones from the current detection set.
+
+    For each detection whose label is in ``targets`` and exceeds
+    ``min_score``, find a matching auto zone (same label, IOU > 0.5)
+    and refresh its last_seen_at + polygon. Otherwise insert a new
+    auto zone. Locked or manual zones are never touched.
+    """
+    if not detections or not targets:
+        return
+    target_set = {str(t).lower() for t in targets if t}
+    if not target_set:
+        return
+    if isinstance(camera_id, str):
+        try:
+            camera_id = uuid.UUID(camera_id)
+        except ValueError:
+            return
+    fh, fw = frame_shape[:2]
+    incoming: list[dict[str, Any]] = []
+    for d in detections:
+        lbl = (d.get("label") or "").lower()
+        if lbl not in target_set:
+            continue
+        score = float(d.get("confidence") or 0.0)
+        if score < min_score:
+            continue
+        bbox = d.get("bbox")
+        if not bbox:
+            continue
+        poly = bbox_to_polygon(bbox, fw, fh)
+        if not poly:
+            continue
+        incoming.append(
+            {"label": lbl, "polygon": poly, "score": score}
+        )
+    if not incoming:
+        return
+
+    try:
+        async with async_session() as db:
+            existing = (
+                await db.execute(
+                    select(PrivacyZone)
+                    .where(PrivacyZone.camera_id == camera_id)
+                    .where(PrivacyZone.source == "auto")
+                )
+            ).scalars().all()
+            existing_by_label: dict[str, list[PrivacyZone]] = {}
+            for z in existing:
+                existing_by_label.setdefault(z.label.lower(), []).append(z)
+
+            now = datetime.now(timezone.utc)
+            for inc in incoming:
+                matches = existing_by_label.get(inc["label"], [])
+                best: PrivacyZone | None = None
+                best_iou = 0.0
+                for ez in matches:
+                    iou = _iou_norm(ez.polygon or [], inc["polygon"])
+                    if iou > best_iou:
+                        best = ez
+                        best_iou = iou
+                if best is not None and best_iou >= 0.4 and not best.locked:
+                    best.polygon = inc["polygon"]
+                    best.auto_score = inc["score"]
+                    best.last_seen_at = now
+                elif best is None or best_iou < 0.4:
+                    db.add(
+                        PrivacyZone(
+                            camera_id=camera_id,
+                            label=inc["label"],
+                            polygon=inc["polygon"],
+                            source="auto",
+                            auto_score=inc["score"],
+                            active=True,
+                            locked=False,
+                            detected_at=now,
+                            last_seen_at=now,
+                        )
+                    )
+            await db.commit()
+    except Exception:
+        logger.exception("privacy zone refresh failed cam=%s", camera_id)

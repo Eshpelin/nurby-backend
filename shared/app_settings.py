@@ -24,6 +24,9 @@ DEFAULTS: dict[str, Any] = {
     "daily_digest_enabled": True,
     "daily_digest_hour": 7,  # 0-23 local time
     "daily_digest_provider_id": None,
+    # IANA timezone for the household (anchors daily digest hour
+    # selection). Null = use the perception host's locale.
+    "system_timezone": None,
     # PANNs audio tagging master switch.
     "audio_events": True,
 }

@@ -25,6 +25,7 @@ import asyncio
 import logging
 from collections import Counter
 from datetime import datetime, time as dtime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any
 
 from sqlalchemy import select
@@ -103,7 +104,18 @@ class DailyDigestScheduler:
             return
         hour = int(await get_setting("daily_digest_hour", 7))
         hour = max(0, min(23, hour))
-        now_local = datetime.now().astimezone()
+        # Pull the system timezone setting, falling back to the
+        # process locale. Per-camera timezones still drive timestamp
+        # rendering everywhere else; this one anchors the household
+        # digest hour.
+        tz_name = await get_setting("system_timezone", None)
+        tz = None
+        if tz_name:
+            try:
+                tz = ZoneInfo(str(tz_name))
+            except ZoneInfoNotFoundError:
+                tz = None
+        now_local = datetime.now(tz).astimezone() if tz else datetime.now().astimezone()
         if now_local.hour != hour:
             return
         # Window. previous day same-hour through now.

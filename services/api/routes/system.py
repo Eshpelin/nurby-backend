@@ -250,6 +250,9 @@ class AppSettingsBody(BaseModel):
     daily_digest_enabled: bool | None = None
     daily_digest_hour: int | None = None
     daily_digest_provider_id: str | None = None
+    # IANA timezone string (e.g. "America/Los_Angeles"). Anchors
+    # daily digest hour selection.
+    system_timezone: str | None = None
     # PANNs audio tagging master switch (already in app_settings).
     audio_events: bool | None = None
 

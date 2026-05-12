@@ -72,6 +72,15 @@ class Camera(Base):
     # skip video decode and run only the audio path (VAD, STT, audio
     # events, clap pattern, speech phrase). UI hides the video tile.
     audio_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Smart privacy zones. AI auto-detects regions on every keyframe
+    # matching one of these target labels and blurs them before the
+    # frame is encoded for VLM, thumbnail, or recording.
+    privacy_zone_targets: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    privacy_zone_blur_strength: Mapped[int] = mapped_column(Integer, default=55, nullable=False)
+    # IANA timezone string for this camera. Null = use the system
+    # timezone setting. Drives timestamp rendering + daily digest
+    # anchor selection.
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Audio transcription config (Phase 1)
     audio_capture_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     audio_transcribe_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -593,3 +602,32 @@ class DailyDigest(Base):
     summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
+
+
+class PrivacyZone(Base):
+    """Per-camera private region. Polygon stored in normalized 0-1
+    coordinates so the same zone applies across resolution changes.
+
+    ``source`` distinguishes ``auto`` (AI-proposed) from ``manual``
+    (user-drawn). ``locked`` makes the zone immune to the auto
+    refresh path so the user can pin a tight bathroom door bbox
+    without the detector overwriting it on the next frame.
+    """
+
+    __tablename__ = "privacy_zones"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    camera_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    polygon: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), default="auto", nullable=False)
+    auto_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
