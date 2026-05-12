@@ -336,6 +336,13 @@ class BodyReID:
                 face_prior_person_id=person_id,
                 face_cluster_id=face_cluster_id,
             )
+            # Stamp Person identity on the detection when we can. Lets
+            # downstream (Smart Track identity gate, UI) treat body
+            # matches as first-class identity hits.
+            resolved_pid = person_id or await self._cluster_person_id(best_id)
+            if resolved_pid is not None:
+                det["person_id"] = str(resolved_pid)
+                det.setdefault("person_via", "face" if person_id else "body")
             return best_id
 
         new_id = await self._create_cluster(
@@ -343,7 +350,33 @@ class BodyReID:
             face_prior_person_id=person_id,
             face_cluster_id=face_cluster_id,
         )
+        if new_id and person_id:
+            det["person_id"] = str(person_id)
+            det.setdefault("person_via", "face")
         return new_id
+
+    async def _cluster_person_id(self, cluster_id: uuid.UUID) -> uuid.UUID | None:
+        """Small cached lookup of cluster -> person_id."""
+        cache = getattr(self, "_pid_cache", None)
+        if cache is None:
+            cache = {}
+            self._pid_cache = cache
+        if cluster_id in cache:
+            return cache[cluster_id]
+        try:
+            async with async_session() as db:
+                row = (
+                    await db.execute(
+                        select(BodyCluster.person_id).where(BodyCluster.id == cluster_id)
+                    )
+                ).first()
+                pid = row[0] if row else None
+                if len(cache) > 2000:
+                    cache.clear()
+                cache[cluster_id] = pid
+                return pid
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Internals

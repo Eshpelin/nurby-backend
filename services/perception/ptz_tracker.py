@@ -24,8 +24,11 @@ Caveats.
 - Move budget caps mechanical wear. Default 30 moves/minute.
 - No-go pan/tilt boxes block follow if we have a current pose. Without
   a known pose, no-go is silently ignored.
-- Identity-gated tracking (require_face) is reserved for a future pass.
-  The plumbing reads the camera field but does not yet filter.
+- Identity-gated tracking. When `ptz_smart_track_require_face` lists
+  one or more Person UUIDs, only detections stamped with a matching
+  `person_id` are eligible follow targets. The stamp comes from the
+  body re-id pass, so the gate works whether the match was via face
+  ArcFace or via body cluster confirmation.
 """
 
 from __future__ import annotations
@@ -81,8 +84,16 @@ def _pick_target(
     min_confidence: float,
     frame_w: int,
     frame_h: int,
+    allowed_person_ids: set[str] | None = None,
 ) -> dict | None:
-    """Pick the single best detection to follow."""
+    """Pick the single best detection to follow.
+
+    `allowed_person_ids` enforces identity-gated tracking. When set,
+    only detections whose `person_id` is in the set are eligible. The
+    `person_id` is stamped by the body re-id pass for both face matches
+    and body-only confirmed matches, so the gate works whether or not
+    a face is visible this frame.
+    """
     candidates = []
     for d in detections:
         label = d.get("label")
@@ -92,6 +103,10 @@ def _pick_target(
             continue
         if d.get("confidence", 0.0) < min_confidence:
             continue
+        if allowed_person_ids:
+            pid = d.get("person_id")
+            if not pid or pid not in allowed_person_ids:
+                continue
         candidates.append(d)
     if not candidates:
         return None
@@ -176,8 +191,13 @@ class PTZTrackerManager:
         priority = list(camera.ptz_smart_track_priority or [])
         min_conf = float(camera.ptz_smart_track_min_confidence or 0.45)
 
+        allowed = camera.ptz_smart_track_require_face or []
+        allowed_person_ids = (
+            {str(p) for p in allowed} if allowed else None
+        )
         target = _pick_target(
             detections, targets, ignore, priority, min_conf, w, h,
+            allowed_person_ids=allowed_person_ids,
         )
 
         now = time.monotonic()
