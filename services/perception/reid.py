@@ -68,6 +68,12 @@ class BodyReID:
         self._device = "cpu"
         # Sticky flag. Once load fails we don't retry every frame.
         self._load_failed = False
+        # Tracklet centroid buffer. Maps (camera_id, tracker_id) to
+        # {embs, color, cluster_id, finalized, last_at}. Avoids the
+        # per-frame "one bad embedding spawns a stray cluster" bug by
+        # waiting until we have N samples for a tracklet before
+        # locking in a cluster decision.
+        self._tracklets: dict[tuple[str, int], dict] = {}
 
     def _load(self):
         if self._model is not None:
@@ -175,6 +181,95 @@ class BodyReID:
             det["body_embedding"] = emb.tolist()
             det["color_histogram"] = _hsv_histogram(crop)
         return persons
+
+    async def cluster_body_tracklet(
+        self,
+        det: dict,
+        camera_id: str,
+        tracker_id: int | None,
+        frame: np.ndarray | None,
+        face_cluster_ids: list[uuid.UUID] | None = None,
+        min_samples: int = 5,
+    ) -> uuid.UUID | None:
+        """Tracklet-aware variant of `cluster_body`.
+
+        Strategy.
+        - Frame 1 of a tracklet. Run normal single-sample cluster so
+          live UI gets a body_cluster_id immediately. Mark unfinalized.
+        - Buffer subsequent embeddings against (camera_id, tracker_id).
+        - On frame `min_samples`. Compute the mean embedding, rerun the
+          cluster search, lock in the centroid decision. If different
+          from the tentative assignment, return the new cluster_id and
+          let downstream callers replace it on the detection dict.
+        - After lock-in. Return the cached id without re-clustering.
+
+        Falls back to `cluster_body` when tracker_id is None.
+        """
+        if tracker_id is None:
+            return await self.cluster_body(
+                det=det, camera_id=camera_id, frame=frame,
+                face_cluster_ids=face_cluster_ids,
+            )
+        emb = det.get("body_embedding")
+        if not emb:
+            return None
+        key = (camera_id, int(tracker_id))
+        now = _now()
+        st = self._tracklets.get(key)
+        if st is None:
+            st = {
+                "embs": [],
+                "colors": [],
+                "cluster_id": None,
+                "finalized": False,
+                "last_at": now,
+            }
+            self._tracklets[key] = st
+            self._gc_tracklets(now)
+        st["embs"].append(np.array(emb, dtype=np.float32))
+        if det.get("color_histogram"):
+            st["colors"].append(det["color_histogram"])
+        st["last_at"] = now
+
+        # Already finalized. Just return the cached cluster id.
+        if st["finalized"] and st["cluster_id"]:
+            return st["cluster_id"]
+
+        # First-frame tentative cluster. Keeps live UX snappy.
+        if st["cluster_id"] is None:
+            cluster_id = await self.cluster_body(
+                det=det, camera_id=camera_id, frame=frame,
+                face_cluster_ids=face_cluster_ids,
+            )
+            st["cluster_id"] = cluster_id
+            return cluster_id
+
+        # Centroid lock-in once we have enough samples.
+        if len(st["embs"]) >= max(2, min_samples):
+            centroid = np.mean(np.stack(st["embs"], axis=0), axis=0)
+            norm = np.linalg.norm(centroid)
+            if norm > 0:
+                centroid = centroid / norm
+            centroid_det = {
+                "body_embedding": centroid.tolist(),
+                "color_histogram": _merge_color(st["colors"]),
+                "bbox": det.get("bbox"),
+            }
+            centroid_cluster = await self.cluster_body(
+                det=centroid_det, camera_id=camera_id, frame=frame,
+                face_cluster_ids=face_cluster_ids,
+            )
+            st["finalized"] = True
+            if centroid_cluster:
+                st["cluster_id"] = centroid_cluster
+            return st["cluster_id"]
+
+        return st["cluster_id"]
+
+    def _gc_tracklets(self, now: float, max_idle: float = 300.0) -> None:
+        stale = [k for k, v in self._tracklets.items() if now - v["last_at"] > max_idle]
+        for k in stale:
+            self._tracklets.pop(k, None)
 
     async def cluster_body(
         self,
@@ -414,6 +509,42 @@ class BodyReID:
 
 # ------------------------------------------------------------------
 # Helpers
+
+def _now() -> float:
+    import time
+    return time.monotonic()
+
+
+def _merge_color(colors: list[dict]) -> dict:
+    """Average a list of HSV histogram dicts produced by `_hsv_histogram`."""
+    if not colors:
+        return {}
+    h_acc = None
+    s_acc = None
+    n = 0
+    for c in colors:
+        hv = c.get("h") or []
+        sv = c.get("s") or []
+        if not hv or not sv:
+            continue
+        h_arr = np.asarray(hv, dtype=np.float32)
+        s_arr = np.asarray(sv, dtype=np.float32)
+        if h_acc is None:
+            h_acc = h_arr
+            s_acc = s_arr
+        else:
+            if h_arr.shape == h_acc.shape:
+                h_acc = h_acc + h_arr
+            if s_arr.shape == s_acc.shape:
+                s_acc = s_acc + s_arr
+        n += 1
+    if n == 0 or h_acc is None:
+        return {}
+    return {
+        "h": (h_acc / max(1, h_acc.sum())).round(4).tolist(),
+        "s": (s_acc / max(1, s_acc.sum())).round(4).tolist(),
+    }
+
 
 def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
     na = np.linalg.norm(a)

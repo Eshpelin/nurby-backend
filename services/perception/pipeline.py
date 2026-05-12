@@ -407,6 +407,16 @@ class PerceptionPipeline:
                         if cluster_id:
                             face["cluster_id"] = str(cluster_id)
 
+        # Step 2a. Per-camera tracker. Runs before body re-id so each
+        # person detection carries a `tracker_id` for the centroid
+        # buffer. spatial_events still consumes the same tracker state
+        # downstream.
+        tracker = self._trackers.get(camera_id)
+        if tracker is None:
+            tracker = self._ObjectTracker()
+            self._trackers[camera_id] = tracker
+        tracker.update(detections)
+
         # Step 2b. Body re-identification. For every YOLO person bbox,
         # compute an OSNet appearance embedding and cluster it. This
         # builds a cross-camera identity graph that survives even when
@@ -425,14 +435,20 @@ class PerceptionPipeline:
                             frame_face_cluster_ids.append(uuid.UUID(cid))
                         except Exception:
                             pass
+                from shared.app_settings import get_setting
+                min_samples = int(await get_setting(
+                    "body_reid_tracklet_min_samples", 5,
+                ))
                 for det in person_dets:
                     if not det.get("body_embedding"):
                         continue
-                    body_cluster_id = await self._body.cluster_body(
+                    body_cluster_id = await self._body.cluster_body_tracklet(
                         det=det,
                         camera_id=camera_id,
+                        tracker_id=det.get("tracker_id"),
                         frame=frame,
                         face_cluster_ids=frame_face_cluster_ids,
+                        min_samples=min_samples,
                     )
                     if body_cluster_id:
                         det["body_cluster_id"] = str(body_cluster_id)
@@ -597,12 +613,8 @@ class PerceptionPipeline:
                 )
             )
 
-        # Step 6b. Update per-camera tracker and evaluate spatial events.
-        tracker = self._trackers.get(camera_id)
-        if tracker is None:
-            tracker = self._ObjectTracker()
-            self._trackers[camera_id] = tracker
-        tracker.update(detections)
+        # Step 6b. Evaluate spatial events. The tracker was already
+        # updated in Step 2a so body re-id could read tracker_id.
         from services.perception.spatial_events import evaluate as eval_spatial
         loitering_events, line_cross_events = eval_spatial(
             tracker, cam.motion_zones if cam else None
