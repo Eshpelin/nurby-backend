@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { useWSSubscribe } from "@/lib/ws";
+import { ReinterpretButton } from "@/components/ReinterpretButton";
 
 interface Segment {
   camera_id: string;
@@ -132,16 +133,25 @@ export function JourneyCard({ journey }: Props) {
           <span className="text-muted-foreground font-mono">
             {live.cameras_seen_count} cameras · {durationLabel}
           </span>
-          {journey.subject_kind === "person" && (
-            <Link
-              href={`/follow/person/${encodeURIComponent(journey.subject_key)}`}
-              onClick={(e) => e.stopPropagation()}
-              className="ml-auto text-[10px] text-accent hover:underline"
-              title="Follow this person across all time"
-            >
-              follow ↗
-            </Link>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {live.finalized && (
+              <ReinterpretButton
+                endpoint={`/api/journeys/${journey.id}/reinterpret`}
+                label="Reinterpret"
+                variant="compact"
+              />
+            )}
+            {journey.subject_kind === "person" && (
+              <Link
+                href={`/follow/person/${encodeURIComponent(journey.subject_key)}`}
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-accent hover:underline"
+                title="Follow this person across all time"
+              >
+                follow ↗
+              </Link>
+            )}
+          </div>
         </div>
 
         {live.finalized && live.summary_text && (

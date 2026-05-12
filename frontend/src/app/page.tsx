@@ -15,6 +15,7 @@ import { RefinedBadge } from "@/components/RefinedBadge";
 import { ObservationGroupCard } from "@/components/ObservationGroupCard";
 import { IncidentCard } from "@/components/IncidentCard";
 import { JourneyCard, type Journey } from "@/components/JourneyCard";
+import { DailyDigestCard } from "@/components/DailyDigestCard";
 import {
   coalesceObservations,
   isObservationGroup,
@@ -2544,6 +2545,10 @@ function DashboardContent() {
 
   return (
     <div className="px-4 py-4 h-[calc(100vh-3.5rem)] flex flex-col">
+
+      <div className="mb-3">
+        <DailyDigestCard />
+      </div>
 
       <StarredStatusRow />
 

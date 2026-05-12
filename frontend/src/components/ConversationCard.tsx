@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useWSSubscribe } from "@/lib/ws";
+import { ReinterpretButton } from "@/components/ReinterpretButton";
 
 interface ConversationTranscript {
   id: string;
@@ -297,10 +298,13 @@ export function ConversationCard(props: ConversationCardProps) {
               </>
             )}
             {finalized && (
-              <ResummarizeButton
-                conversationId={id}
-                token={token}
-              />
+              <div className="ml-auto">
+                <ReinterpretButton
+                  endpoint={`/api/conversations/${id}/reinterpret`}
+                  label="Reinterpret"
+                  variant="compact"
+                />
+              </div>
             )}
           </div>
           <div className="px-3 py-2.5 space-y-2">

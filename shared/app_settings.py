@@ -17,6 +17,15 @@ from shared.models import AppSetting
 DEFAULTS: dict[str, Any] = {
     "nudity_blur": True,  # default-on safety feature
     "nudity_blur_min_score": 0.5,
+    # Cross-camera journey idle window. Formerly hardcoded
+    # JOURNEY_IDLE_SECONDS = 300 in journey_tracker.py.
+    "journey_idle_seconds": 300,
+    # Household-wide daily AI digest.
+    "daily_digest_enabled": True,
+    "daily_digest_hour": 7,  # 0-23 local time
+    "daily_digest_provider_id": None,
+    # PANNs audio tagging master switch.
+    "audio_events": True,
 }
 
 

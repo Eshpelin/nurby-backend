@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useWSSubscribe } from "@/lib/ws";
+import { ReinterpretButton } from "@/components/ReinterpretButton";
 
 interface IncidentObs {
   id: string;
@@ -257,6 +258,15 @@ export function IncidentCard({ incident, cameraName }: Props) {
               <p className="mt-1 text-[10px] text-muted-foreground/70">
                 summary by {live.summary_provider_name}
               </p>
+            )}
+            {live.finalized && (
+              <div className="mt-2">
+                <ReinterpretButton
+                  endpoint={`/api/incidents/${incident.id}/reinterpret`}
+                  label="Reinterpret"
+                  variant="compact"
+                />
+              </div>
             )}
           </div>
         </div>

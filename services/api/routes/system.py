@@ -244,6 +244,14 @@ async def test_smtp(body: SmtpTestRequest, _current_user: User = Depends(require
 class AppSettingsBody(BaseModel):
     nudity_blur: bool | None = None
     nudity_blur_min_score: float | None = None
+    # Cross-camera journey idle window. Formerly hardcoded.
+    journey_idle_seconds: int | None = None
+    # Daily household digest.
+    daily_digest_enabled: bool | None = None
+    daily_digest_hour: int | None = None
+    daily_digest_provider_id: str | None = None
+    # PANNs audio tagging master switch (already in app_settings).
+    audio_events: bool | None = None
 
 
 @router.get("/settings")

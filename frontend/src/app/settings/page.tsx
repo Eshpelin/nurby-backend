@@ -148,6 +148,11 @@ export default function SettingsPage() {
   const [nudityMinScore, setNudityMinScore] = useState<number>(0.5);
   const [nudityLoading, setNudityLoading] = useState<boolean>(true);
   const [nuditySaving, setNuditySaving] = useState<boolean>(false);
+  const [journeyIdleSeconds, setJourneyIdleSeconds] = useState<number>(300);
+  const [dailyDigestEnabled, setDailyDigestEnabled] = useState<boolean>(true);
+  const [dailyDigestHour, setDailyDigestHour] = useState<number>(7);
+  const [dailyDigestProviderId, setDailyDigestProviderId] = useState<string>("");
+  const [extraSaving, setExtraSaving] = useState<boolean>(false);
 
   // Ollama auto-deploy state
   const [ollamaStatus, setOllamaStatus] = useState<{
@@ -309,9 +314,25 @@ export default function SettingsPage() {
         const data = await res.json();
         if (typeof data.nudity_blur === "boolean") setNudityBlur(data.nudity_blur);
         if (typeof data.nudity_blur_min_score === "number") setNudityMinScore(data.nudity_blur_min_score);
+        if (typeof data.journey_idle_seconds === "number") setJourneyIdleSeconds(data.journey_idle_seconds);
+        if (typeof data.daily_digest_enabled === "boolean") setDailyDigestEnabled(data.daily_digest_enabled);
+        if (typeof data.daily_digest_hour === "number") setDailyDigestHour(data.daily_digest_hour);
+        if (typeof data.daily_digest_provider_id === "string") setDailyDigestProviderId(data.daily_digest_provider_id);
       }
     } catch { /* silent */ }
     finally { setNudityLoading(false); }
+  }, [authFetch]);
+
+  const saveExtra = useCallback(async (patch: Record<string, unknown>) => {
+    setExtraSaving(true);
+    try {
+      await authFetch("/api/system/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    } catch { /* silent */ }
+    finally { setExtraSaving(false); }
   }, [authFetch]);
 
   const saveNudityBlur = useCallback(async (next: boolean, score?: number) => {
@@ -939,6 +960,105 @@ export default function SettingsPage() {
           >
             <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${nudityBlur ? "left-[1.375rem]" : "left-0.5"}`} />
           </button>
+        </div>
+
+        {/* Cross-camera journey idle */}
+        <div className="rounded-lg border border-border bg-card px-4 py-3.5">
+          <div className="text-sm font-medium mb-2">Journey idle window</div>
+          <p className="text-xs text-muted-foreground mb-3">
+            How long a subject can stay off-camera before a cross-camera
+            journey closes. Bigger properties want a longer window so a
+            walk between cameras doesn&apos;t end the trip prematurely.
+          </p>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={60}
+              max={1800}
+              step={30}
+              value={journeyIdleSeconds}
+              onChange={(e) => setJourneyIdleSeconds(Number(e.target.value))}
+              onMouseUp={() => saveExtra({ journey_idle_seconds: journeyIdleSeconds })}
+              onTouchEnd={() => saveExtra({ journey_idle_seconds: journeyIdleSeconds })}
+              className="flex-1 accent-accent"
+            />
+            <span className="font-mono text-xs text-muted-foreground w-16 text-right">
+              {Math.round(journeyIdleSeconds / 60)} min
+            </span>
+          </div>
+        </div>
+
+        {/* Daily digest */}
+        <div className="rounded-lg border border-border bg-card px-4 py-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium flex items-center gap-2">
+                Morning digest
+                <span className="text-[10px] font-normal uppercase tracking-wider text-amber-500/80 bg-amber-500/10 border border-amber-500/30 rounded px-1 py-0.5">household</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {dailyDigestEnabled
+                  ? `Bullet-point recap of the last 24h, generated at ${String(dailyDigestHour).padStart(2, "0")}:00 local time.`
+                  : "Disabled. No daily digest will be generated automatically."}
+              </div>
+            </div>
+            <button
+              disabled={extraSaving}
+              onClick={() => {
+                const next = !dailyDigestEnabled;
+                setDailyDigestEnabled(next);
+                saveExtra({ daily_digest_enabled: next });
+              }}
+              className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${dailyDigestEnabled ? "bg-amber-500" : "bg-muted"}`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${dailyDigestEnabled ? "left-[1.375rem]" : "left-0.5"}`} />
+            </button>
+          </div>
+          {dailyDigestEnabled && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-muted-foreground block mb-1">
+                  Hour of day (local)
+                </label>
+                <select
+                  value={dailyDigestHour}
+                  onChange={(e) => {
+                    const h = Number(e.target.value);
+                    setDailyDigestHour(h);
+                    saveExtra({ daily_digest_hour: h });
+                  }}
+                  className="w-full px-2 py-1.5 text-xs rounded border border-border bg-background"
+                >
+                  {Array.from({ length: 24 }).map((_, h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, "0")}:00
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground block mb-1">
+                  Provider override
+                </label>
+                <select
+                  value={dailyDigestProviderId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDailyDigestProviderId(v);
+                    saveExtra({ daily_digest_provider_id: v || null });
+                  }}
+                  className="w-full px-2 py-1.5 text-xs rounded border border-border bg-background"
+                >
+                  <option value="">(system default)</option>
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
