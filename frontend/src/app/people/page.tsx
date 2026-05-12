@@ -52,6 +52,20 @@ interface FaceSuggestion {
   status: string;
 }
 
+interface BodySuggestion {
+  id: string;
+  sample_thumbnail_path: string | null;
+  sighting_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  first_camera_id: string | null;
+  status: string;
+  confidence: string;
+  person_id: string | null;
+  linked_face_cluster_id: string | null;
+  auto_label: string;
+}
+
 interface ClusterSample {
   id: string;
   camera_id: string;
@@ -120,6 +134,13 @@ export default function PeoplePage() {
   >({});
   const [namingSubmitting, setNamingSubmitting] = useState<string | null>(null);
 
+  // Body cluster suggestions (cross-camera re-id without face).
+  const [bodySuggestions, setBodySuggestions] = useState<BodySuggestion[]>([]);
+  const [bodySamples, setBodySamples] = useState<Record<string, ClusterSample[]>>({});
+  const [bodyNameInputs, setBodyNameInputs] = useState<Record<string, string>>({});
+  const [bodyLinkInputs, setBodyLinkInputs] = useState<Record<string, string>>({});
+  const [bodySubmitting, setBodySubmitting] = useState<string | null>(null);
+
   const fetchPersons = useCallback(async () => {
     try {
       const res = await authFetch("/api/persons");
@@ -162,6 +183,71 @@ export default function PeoplePage() {
     }
   }, [authFetch]);
 
+  const fetchBodySuggestions = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await authFetch("/api/body-clusters/suggestions?min_sightings=2");
+      if (!res.ok || signal?.aborted) return;
+      const data: BodySuggestion[] = await res.json();
+      if (signal?.aborted) return;
+      setBodySuggestions(data);
+      const samplesMap: Record<string, ClusterSample[]> = {};
+      await Promise.all(data.map(async (s) => {
+        if (signal?.aborted) return;
+        try {
+          const sRes = await authFetch(`/api/body-clusters/suggestions/${s.id}/samples`);
+          if (sRes.ok && !signal?.aborted) samplesMap[s.id] = await sRes.json();
+        } catch { /* silent */ }
+      }));
+      if (!signal?.aborted) setBodySamples(samplesMap);
+    } catch {
+      /* silent */
+    }
+  }, [authFetch]);
+
+  const handleBodyName = async (clusterId: string) => {
+    const name = bodyNameInputs[clusterId]?.trim();
+    if (!name) return;
+    setBodySubmitting(clusterId);
+    try {
+      const res = await authFetch(`/api/body-clusters/suggestions/${clusterId}/name`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: name }),
+      });
+      if (res.ok) {
+        setBodySuggestions((prev) => prev.filter((s) => s.id !== clusterId));
+        fetchPersons();
+      }
+    } catch { /* silent */ }
+    finally { setBodySubmitting(null); }
+  };
+
+  const handleBodyLink = async (clusterId: string) => {
+    const personId = bodyLinkInputs[clusterId];
+    if (!personId) return;
+    setBodySubmitting(clusterId);
+    try {
+      const res = await authFetch(`/api/body-clusters/suggestions/${clusterId}/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: personId }),
+      });
+      if (res.ok) {
+        setBodySuggestions((prev) => prev.filter((s) => s.id !== clusterId));
+      }
+    } catch { /* silent */ }
+    finally { setBodySubmitting(null); }
+  };
+
+  const handleBodyIgnore = async (clusterId: string) => {
+    try {
+      await authFetch(`/api/body-clusters/suggestions/${clusterId}/ignore`, {
+        method: "POST",
+      });
+      setBodySuggestions((prev) => prev.filter((s) => s.id !== clusterId));
+    } catch { /* silent */ }
+  };
+
   const fetchActivity = useCallback(async (personId: string) => {
     setLoadingActivity(true);
     try {
@@ -181,6 +267,7 @@ export default function PeoplePage() {
     fetchPersons();
     fetchSummaries();
     fetchSuggestions(controller.signal);
+    fetchBodySuggestions(controller.signal);
     const interval = setInterval(() => {
       fetchSummaries();
     }, 30000);
@@ -188,7 +275,7 @@ export default function PeoplePage() {
       controller.abort();
       clearInterval(interval);
     };
-  }, [fetchPersons, fetchSummaries, fetchSuggestions]);
+  }, [fetchPersons, fetchSummaries, fetchSuggestions, fetchBodySuggestions]);
 
   const toggleExpand = (personId: string) => {
     if (expandedPerson === personId) {
@@ -429,6 +516,116 @@ export default function PeoplePage() {
                   </button>
                   <button
                     onClick={() => handleIgnoreSuggestion(s.id)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Not a person / Ignore
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Body-only suggestions. Cross-camera identities seen via body
+          appearance (clothing, gait, shape) without a clear face match.
+          Tentative until face confirmation arrives via the fusion
+          sweeper or the user names / links them here. */}
+      {bodySuggestions.length > 0 && (
+        <div className="mb-10">
+          <div className="mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Body-only sightings</h2>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 font-mono">
+                no face
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              People recognized across cameras by clothing, shape, and
+              gait. Their face was never clearly visible. Link to an
+              existing person or name them to confirm.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {bodySuggestions.map((s) => (
+              <div
+                key={s.id}
+                className="rounded-lg border border-amber-500/30 bg-card p-4 space-y-3"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <div className="text-sm font-medium">{s.auto_label}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Seen {s.sighting_count} time{s.sighting_count !== 1 ? "s" : ""}
+                        {" · "}First {timeAgo(s.first_seen_at)} / Last {timeAgo(s.last_seen_at)}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                      {s.confidence}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(bodySamples[s.id] && bodySamples[s.id].length > 0
+                      ? bodySamples[s.id]
+                      : [{ id: "main", camera_id: "", thumbnail_path: s.sample_thumbnail_path, captured_at: null }]
+                    ).slice(0, 8).map((sample) => (
+                      <div key={sample.id} className="aspect-square rounded-md overflow-hidden border border-border bg-muted">
+                        {sample.thumbnail_path ? (
+                          <img
+                            src={sample.id === "main"
+                              ? `/api/body-clusters/suggestions/${s.id}/thumbnail${token ? `?token=${token}` : ""}`
+                              : `/api/body-clusters/suggestions/${s.id}/samples/${sample.id}/thumbnail${token ? `?token=${token}` : ""}`}
+                            alt="Body sighting"
+                            className="w-full h-full object-cover"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-muted" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <select
+                    value={bodyLinkInputs[s.id] || ""}
+                    onChange={(e) => setBodyLinkInputs((p) => ({ ...p, [s.id]: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground"
+                  >
+                    <option value="">Link to existing person...</option>
+                    {persons.map((p) => (
+                      <option key={p.id} value={p.id}>{p.display_name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleBodyLink(s.id)}
+                    disabled={!bodyLinkInputs[s.id] || bodySubmitting === s.id}
+                    className="w-full px-3 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {bodySubmitting === s.id ? "Linking" : "Link to selected person"}
+                  </button>
+
+                  <div className="text-[11px] text-muted-foreground text-center my-1">or name as new person</div>
+                  <input
+                    type="text"
+                    value={bodyNameInputs[s.id] || ""}
+                    onChange={(e) => setBodyNameInputs((p) => ({ ...p, [s.id]: e.target.value }))}
+                    placeholder="Name for this body match"
+                    className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                    onKeyDown={(e) => { if (e.key === "Enter") handleBodyName(s.id); }}
+                  />
+                  <button
+                    onClick={() => handleBodyName(s.id)}
+                    disabled={!bodyNameInputs[s.id]?.trim() || bodySubmitting === s.id}
+                    className="w-full px-3 py-1.5 text-xs rounded-md border border-border text-foreground font-medium hover:bg-muted disabled:opacity-50 transition-colors"
+                  >
+                    {bodySubmitting === s.id ? "Saving" : "Name as new"}
+                  </button>
+                  <button
+                    onClick={() => handleBodyIgnore(s.id)}
                     className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Not a person / Ignore
