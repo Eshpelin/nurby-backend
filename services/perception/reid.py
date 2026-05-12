@@ -60,26 +60,47 @@ class BodyReID:
         self._transform = None
         self._torch = None
         self._device = "cpu"
+        # Sticky flag. Once load fails we don't retry every frame.
+        self._load_failed = False
 
     def _load(self):
         if self._model is not None:
             return self._model
+        if self._load_failed:
+            return None
+        # Import torch and torchreid separately so the log clearly says
+        # which one is missing. Both are heavy. Either being absent
+        # disables body re-id without breaking the rest of perception.
         try:
             import torch  # type: ignore
+        except ImportError:
+            logger.warning(
+                "torch not installed. Body re-identification disabled. "
+                "Install torch + torchreid in the perception container."
+            )
+            self._load_failed = True
+            return None
+        try:
             from torchreid.utils import FeatureExtractor  # type: ignore
         except ImportError:
             logger.warning(
                 "torchreid not installed. Body re-identification disabled. "
                 "Install with. pip install torchreid"
             )
+            self._load_failed = True
             return None
         try:
             self._torch = torch
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
-            # osnet_x1_0 trained on Market1501 + MSMT17 covers most home
-            # scenes. ~2M params, ~5ms CPU per crop. Switch to
-            # osnet_ain_x1_0 for slightly better cross-domain results
-            # if you have GPU headroom.
+            # Pick the best device once and stick with it. cuda > mps > cpu.
+            if torch.cuda.is_available():
+                self._device = "cuda"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                self._device = "mps"
+            else:
+                self._device = "cpu"
+            # osnet_x1_0. Market1501 + MSMT17 pretrained. ~2M params,
+            # ~5ms CPU per crop. Swap to osnet_ain_x1_0 for slightly
+            # better cross-domain results when GPU headroom allows.
             extractor = FeatureExtractor(
                 model_name="osnet_x1_0",
                 model_path="",
@@ -88,7 +109,8 @@ class BodyReID:
             self._model = extractor
             logger.info("OSNet body ReID loaded on %s", self._device)
         except Exception:
-            logger.exception("Failed to load OSNet")
+            logger.exception("Failed to load OSNet. Body re-identification disabled.")
+            self._load_failed = True
             return None
         return self._model
 
