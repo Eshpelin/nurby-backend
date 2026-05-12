@@ -21,5 +21,6 @@ from services.perception.audio.tagger import (  # noqa: F401
     WINDOW_SAMPLES,
     WINDOW_SECONDS,
     classify,
+    count_clap_peaks,
     is_available,
 )

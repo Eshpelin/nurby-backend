@@ -130,6 +130,53 @@ def classify(waveform: np.ndarray, min_score: float = 0.2) -> list[dict]:
     return sorted(best.values(), key=lambda e: -e["score"])
 
 
+def count_clap_peaks(
+    waveform: np.ndarray,
+    sample_rate: int,
+    min_separation_ms: int = 120,
+    rel_threshold: float = 0.6,
+    abs_floor: float = 0.05,
+) -> int:
+    """Count distinct clap transients inside a 1s window.
+
+    PANNs classifies the whole 1s window as ``Clapping`` with one
+    score, so two physical claps within the same second look like one
+    event to the tagger. This is a cheap envelope-peak detector run on
+    the same window. Counts rising-edge peaks above
+    ``max(abs_floor, rel_threshold * peak_envelope)`` separated by at
+    least ``min_separation_ms``.
+
+    Returns at least 1 when called (caller already knows PANNs flagged
+    a clap, so something is in there). Capped at 6 to avoid a noise
+    burst counting like 30 claps.
+    """
+    if waveform.ndim > 1:
+        waveform = waveform.mean(axis=0)
+    if waveform.size == 0:
+        return 1
+    # 20ms boxcar envelope. Smooths individual cycles, keeps clap
+    # transients sharp.
+    env_size = max(1, sample_rate // 50)
+    envelope = np.convolve(
+        np.abs(waveform.astype(np.float32)),
+        np.ones(env_size, dtype=np.float32) / env_size,
+        mode="same",
+    )
+    peak = float(envelope.max())
+    if peak <= abs_floor:
+        return 1
+    threshold = max(abs_floor, rel_threshold * peak)
+    above = envelope > threshold
+    min_sep = max(1, sample_rate * min_separation_ms // 1000)
+    count = 0
+    last_peak_idx = -min_sep
+    for i in range(1, len(above)):
+        if above[i] and not above[i - 1] and (i - last_peak_idx) >= min_sep:
+            count += 1
+            last_peak_idx = i
+    return max(1, min(6, count))
+
+
 def is_available() -> bool:
     """True if the tagger is loaded and ready, or can still be tried."""
     return not _disabled

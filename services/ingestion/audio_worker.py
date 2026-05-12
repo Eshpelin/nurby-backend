@@ -45,11 +45,13 @@ REDIS_STREAM_MAXLEN = 500
 
 
 class AudioWorker:
-    # Clap aggregation. count claps that land within CLAP_WINDOW_S
-    # seconds of each other. Counter resets on idle. The result drives
-    # clap_pattern rule triggers (double-clap = workflow A,
-    # triple-clap = workflow B, etc.). 2s tracks the "intentional"
-    # clap cadence well without false-merging applause bursts.
+    # Clap aggregation. Count claps that land within CLAP_WINDOW_S of
+    # each other. Sub-second resolution comes from a transient peak
+    # detector inside each 1s PANNs window so a fast double-clap is
+    # not collapsed by the model's window size. Debounce-emit. wait
+    # for CLAP_WINDOW_S of quiet after the last clap, then fire the
+    # rule engine ONCE with the final count. Avoids the
+    # "1->2->3 count" cascade firing the wrong rules.
     CLAP_WINDOW_S = 2.0
 
     def __init__(self, camera_id: uuid.UUID, stream_url: str):
@@ -60,6 +62,9 @@ class AudioWorker:
         self._redis = None
         # (count, last_clap_monotonic).
         self._clap_run: tuple[int, float] = (0, 0.0)
+        # Pending finalize task. Cancelled + rescheduled on every new
+        # clap so the rolling pattern fires once after the user stops.
+        self._clap_finalize_task: Optional[asyncio.Task] = None
 
     def stop(self):
         self._running = False
@@ -179,17 +184,30 @@ class AudioWorker:
         now = time.monotonic()
         to_emit = []
         for ev in events:
-            last = self._last_emit.get(ev["label"], 0.0)
-            if now - last < AUDIO_COOLDOWN:
-                continue
-            self._last_emit[ev["label"]] = now
+            # Clap is exempt from the same-label cooldown. The cooldown
+            # is there to prevent notification spam for ongoing alarms
+            # (baby_cry, glass_break). For clap pattern triggers we
+            # need every individual clap to land in the counter.
+            if ev["label"] != "clap":
+                last = self._last_emit.get(ev["label"], 0.0)
+                if now - last < AUDIO_COOLDOWN:
+                    continue
+                self._last_emit[ev["label"]] = now
+            else:
+                # For clap, count individual transients inside the
+                # 1s window. Two physical claps in the same second
+                # otherwise look like one event to PANNs.
+                try:
+                    peaks = audio_cls.count_clap_peaks(window, audio_cls.SAMPLE_RATE)
+                except Exception:
+                    peaks = 1
+                ev = {**ev, "sub_count": peaks}
             to_emit.append(ev)
 
         if not to_emit:
             return
 
         # Dispatch to async tasks without blocking the decode loop.
-        loop = asyncio.new_event_loop() if False else None  # placeholder
         for ev in to_emit:
             asyncio.run_coroutine_threadsafe(
                 self._emit(ev),
@@ -241,30 +259,68 @@ class AudioWorker:
             "confidence": score,
         }
 
-        # Clap pattern. Roll a count when consecutive claps land within
-        # CLAP_WINDOW_S of each other. Fire the rule engine ONCE per
-        # closing count so two claps = one evaluate with count=2, three
-        # claps = one evaluate with count=3, etc. Reset on gap.
+        # Clap pattern. Accumulate sub-window peak counts in a rolling
+        # run bounded by CLAP_WINDOW_S of quiet. A finalize task fires
+        # the rule engine ONCE with the final count when the user
+        # stops clapping. Avoids the count-cascade problem where a
+        # rule expecting 2 claps would fire mid-way through a 3-clap
+        # gesture.
         if label == "clap":
             import time as _t
 
             now = _t.monotonic()
             cnt, last = self._clap_run
+            sub_count = max(1, int(event.get("sub_count", 1)))
             if last > 0 and (now - last) <= self.CLAP_WINDOW_S:
-                cnt = cnt + 1
+                cnt = cnt + sub_count
             else:
-                cnt = 1
+                cnt = sub_count
             self._clap_run = (cnt, now)
-            if cnt >= 2:
-                rule_data["clap_pattern"] = {
-                    "count": cnt,
-                    "window_seconds": self.CLAP_WINDOW_S,
-                }
+            # Reschedule the finalize. Latest clap wins.
+            if self._clap_finalize_task is not None and not self._clap_finalize_task.done():
+                self._clap_finalize_task.cancel()
+            self._clap_finalize_task = asyncio.create_task(
+                self._finalize_clap_run(self.CLAP_WINDOW_S)
+            )
+            # Audio event still fires for vanilla audio_event rules.
+            # clap_pattern is delivered separately on finalize.
+            try:
+                await _get_rule_engine().evaluate(rule_data)
+            except Exception:
+                logger.exception("Rule engine failed for audio event")
+            return
 
         try:
             await _get_rule_engine().evaluate(rule_data)
         except Exception:
             logger.exception("Rule engine failed for audio event")
+
+    async def _finalize_clap_run(self, delay: float) -> None:
+        """Wait for quiet, then fire the rule engine with the final
+        rolling count. Cancellable. each new clap resets the timer."""
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+        cnt, _ = self._clap_run
+        self._clap_run = (0, 0.0)
+        if cnt < 2:
+            return
+        logger.info("Clap pattern finalized camera=%s count=%d", self.camera_id, cnt)
+        rule_data = {
+            "observation_id": None,
+            "camera_id": str(self.camera_id),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "clap_pattern": {
+                "count": cnt,
+                "window_seconds": self.CLAP_WINDOW_S,
+            },
+            "confidence": 1.0,
+        }
+        try:
+            await _get_rule_engine().evaluate(rule_data)
+        except Exception:
+            logger.exception("Rule engine failed for clap pattern")
 
 
 # Module-level main-loop reference so threaded PyAV pump can schedule coroutines.
