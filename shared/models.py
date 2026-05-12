@@ -535,6 +535,39 @@ class Incident(Base):
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
+    journey_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("journeys.id", ondelete="SET NULL"), nullable=True
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Journey(Base):
+    """Cross-camera story for one subject.
+
+    Groups Incident rows for the same named person or face cluster
+    across multiple cameras within an idle window. Segments are
+    time-ordered slices of presence on each camera; transitions
+    capture camera-to-camera movement gaps.
+    """
+
+    __tablename__ = "journeys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    subject_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    segments: Mapped[dict] = mapped_column(JSON, nullable=False)
+    transitions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    cameras_seen_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    incidents_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
