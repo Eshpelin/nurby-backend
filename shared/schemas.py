@@ -53,6 +53,7 @@ class CameraCreate(BaseModel):
     audio_only: bool = False
     privacy_zone_targets: list[str] | None = None
     privacy_zone_blur_strength: int = Field(default=55, ge=5, le=151)
+    yolo_world_prompts: list[str] | None = None
     timezone: str | None = Field(default=None, max_length=64)
     # Summary config
     summary_provider_id: uuid.UUID | None = None
@@ -117,6 +118,7 @@ class CameraUpdate(BaseModel):
     audio_only: bool | None = None
     privacy_zone_targets: list[str] | None = None
     privacy_zone_blur_strength: int | None = Field(default=None, ge=5, le=151)
+    yolo_world_prompts: list[str] | None = None
     timezone: str | None = Field(default=None, max_length=64)
     display_order: int | None = None
     # Summary config
@@ -188,6 +190,7 @@ class CameraResponse(BaseModel):
     audio_only: bool = False
     privacy_zone_targets: list[str] | None = None
     privacy_zone_blur_strength: int = 55
+    yolo_world_prompts: list[str] | None = None
     timezone: str | None = None
     summary_provider_id: uuid.UUID | None = None
     summary_mode: str = "off"

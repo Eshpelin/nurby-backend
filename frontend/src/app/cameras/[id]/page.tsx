@@ -135,7 +135,7 @@ interface DetectionModelOption {
   value: string;
   label: string;
   hint: string;
-  family: "yolov8" | "yolo11" | "yolo-world" | "rtdetr" | "oiv7";
+  family: "yolov8" | "yolo11" | "yolo-world" | "rtdetr" | "oiv7" | "yolo11-seg";
 }
 
 const DETECTION_MODEL_CATALOG: DetectionModelOption[] = [
@@ -151,10 +151,20 @@ const DETECTION_MODEL_CATALOG: DetectionModelOption[] = [
   { value: "yolo11x.pt", label: "YOLO11 XLarge", hint: "Top-tier detection, GPU needed for realtime.",  family: "yolo11" },
   { value: "yolov8n-oiv7.pt", label: "YOLOv8n Open Images", hint: "600+ classes (furniture, tools, food, animals).", family: "oiv7" },
   { value: "yolov8s-oiv7.pt", label: "YOLOv8s Open Images", hint: "600+ classes, better accuracy.",     family: "oiv7" },
-  { value: "yolov8s-world.pt", label: "YOLO-World Small", hint: "Open-vocabulary. Detect arbitrary class names.", family: "yolo-world" },
-  { value: "yolov8m-world.pt", label: "YOLO-World Medium", hint: "Open-vocabulary, better recall.",    family: "yolo-world" },
-  { value: "yolov8l-worldv2.pt", label: "YOLO-World v2 Large", hint: "Top open-vocab accuracy.",        family: "yolo-world" },
-  { value: "rtdetr-l.pt", label: "RT-DETR Large",  hint: "Transformer-based. Strong accuracy.",          family: "rtdetr" },
+  { value: "yolov8m-oiv7.pt", label: "YOLOv8m Open Images", hint: "600+ classes, medium accuracy.",     family: "oiv7" },
+  { value: "yolov8x-oiv7.pt", label: "YOLOv8x Open Images", hint: "600+ classes, TOP OIV7 accuracy. GPU recommended.", family: "oiv7" },
+  { value: "yolov8s-world.pt", label: "YOLO-World v1 Small", hint: "Open-vocabulary v1. Older, kept for back-compat.", family: "yolo-world" },
+  { value: "yolov8m-world.pt", label: "YOLO-World v1 Medium", hint: "Open-vocabulary v1, better recall.", family: "yolo-world" },
+  { value: "yolov8s-worldv2.pt", label: "YOLO-World v2 Small", hint: "Open-vocab v2. Faster, decent accuracy.", family: "yolo-world" },
+  { value: "yolov8m-worldv2.pt", label: "YOLO-World v2 Medium", hint: "Open-vocab v2 balanced.", family: "yolo-world" },
+  { value: "yolov8l-worldv2.pt", label: "YOLO-World v2 Large", hint: "Open-vocab v2 large.", family: "yolo-world" },
+  { value: "yolov8x-worldv2.pt", label: "YOLO-World v2 XLarge ★", hint: "RECOMMENDED. Top open-vocab accuracy across LVIS. Prompt any class by English name. GPU recommended.", family: "yolo-world" },
+  { value: "yolo11n-seg.pt", label: "YOLO11n Seg", hint: "Segmentation masks. Tighter privacy blur shapes.", family: "yolo11-seg" },
+  { value: "yolo11s-seg.pt", label: "YOLO11s Seg", hint: "Segmentation, balanced. Recommended for mask-based privacy.", family: "yolo11-seg" },
+  { value: "yolo11m-seg.pt", label: "YOLO11m Seg", hint: "Segmentation, better accuracy.",                family: "yolo11-seg" },
+  { value: "yolo11l-seg.pt", label: "YOLO11l Seg", hint: "Segmentation, large. GPU recommended.",         family: "yolo11-seg" },
+  { value: "yolo11x-seg.pt", label: "YOLO11x Seg ★", hint: "Top segmentation accuracy. GPU required.",     family: "yolo11-seg" },
+  { value: "rtdetr-l.pt", label: "RT-DETR Large",  hint: "Transformer-based. Strong on small / crowded objects.", family: "rtdetr" },
   { value: "rtdetr-x.pt", label: "RT-DETR XLarge", hint: "Top RT-DETR. GPU required for realtime.",      family: "rtdetr" },
 ];
 
@@ -218,14 +228,15 @@ function DetectionModelSelect({
       </button>
       {open && (
         <div className="absolute z-30 mt-1 w-[28rem] max-w-[80vw] right-0 rounded-md border border-border bg-card shadow-lg max-h-80 overflow-y-auto py-1">
-          {(["yolov8", "yolo11", "yolo-world", "oiv7", "rtdetr"] as const).map((fam) => {
+          {(["yolo-world", "yolo11", "yolov8", "oiv7", "yolo11-seg", "rtdetr"] as const).map((fam) => {
             const group = DETECTION_MODEL_CATALOG.filter((m) => m.family === fam);
             if (group.length === 0) return null;
             const famLabel = {
               "yolov8": "YOLOv8 (COCO 80 classes)",
               "yolo11": "YOLO11 (COCO 80 classes, newer)",
-              "yolo-world": "YOLO-World (open vocabulary)",
+              "yolo-world": "YOLO-World (open vocabulary, prompt-driven)",
               "oiv7": "Open Images V7 (600+ classes)",
+              "yolo11-seg": "YOLO11 Segmentation (masks for tighter blur)",
               "rtdetr": "RT-DETR (transformer detector)",
             }[fam];
             return (
@@ -1090,6 +1101,7 @@ export default function CameraConfigPage() {
   const [incidentIdleSeconds, setIncidentIdleSeconds] = useState(600);
   const [privacyZoneTargets, setPrivacyZoneTargets] = useState<string[]>([]);
   const [privacyZoneBlurStrength, setPrivacyZoneBlurStrength] = useState(55);
+  const [yoloWorldPrompts, setYoloWorldPrompts] = useState<string[]>([]);
   const [cameraTimezone, setCameraTimezone] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"settings" | "activity">("settings");
   const [motionZones, setMotionZones] = useState<MotionZone[]>([]);
@@ -1166,6 +1178,7 @@ export default function CameraConfigPage() {
       setIncidentIdleSeconds(cam.incident_idle_seconds ?? 600);
       setPrivacyZoneTargets(cam.privacy_zone_targets ?? []);
       setPrivacyZoneBlurStrength(cam.privacy_zone_blur_strength ?? 55);
+      setYoloWorldPrompts((cam as Camera & { yolo_world_prompts?: string[] | null }).yolo_world_prompts ?? []);
       setCameraTimezone(cam.timezone ?? "");
       setMotionZones(cam.motion_zones ?? []);
     } catch {
@@ -1235,6 +1248,8 @@ export default function CameraConfigPage() {
     if (patch.summary_event_min_duration_seconds !== undefined) setSummaryEventMinDurationSeconds(patch.summary_event_min_duration_seconds);
     if (patch.conversation_gap_seconds !== undefined) setConversationGapSeconds(patch.conversation_gap_seconds);
     if (patch.conversation_summary_enabled !== undefined) setConversationSummaryEnabled(patch.conversation_summary_enabled);
+    if (patch.yolo_world_prompts !== undefined) setYoloWorldPrompts(patch.yolo_world_prompts);
+    if (patch.privacy_zone_targets !== undefined) setPrivacyZoneTargets(patch.privacy_zone_targets);
   }
 
   // Autosave plumbing. firstLoadDone flips true after fetchData
@@ -1302,6 +1317,7 @@ export default function CameraConfigPage() {
         incident_idle_seconds: incidentIdleSeconds,
         privacy_zone_targets: privacyZoneTargets.length > 0 ? privacyZoneTargets : null,
         privacy_zone_blur_strength: privacyZoneBlurStrength,
+        yolo_world_prompts: yoloWorldPrompts.length > 0 ? yoloWorldPrompts : null,
         timezone: cameraTimezone.trim() || null,
         motion_zones: motionZones.length > 0 ? motionZones : null,
       };
@@ -1363,7 +1379,7 @@ export default function CameraConfigPage() {
     summaryEventMinDurationSeconds, summaryMaxTokens,
     conversationGapSeconds, conversationSummaryEnabled, conversationMinMessages,
     incidentTrackingEnabled, incidentIdleSeconds,
-    privacyZoneTargets, privacyZoneBlurStrength, cameraTimezone,
+    privacyZoneTargets, privacyZoneBlurStrength, yoloWorldPrompts, cameraTimezone,
     motionZones,
   ]);
 
@@ -2458,6 +2474,27 @@ export default function CameraConfigPage() {
             </FieldRow>
           )}
         </Section>
+
+        {/* ── YOLO-World prompts ── */}
+        {detectionModels.some((m) => m.model.includes("world")) && (
+          <Section
+            title="Open-vocabulary prompts"
+            description="When a YOLO-World model is in this camera's detection list, these phrases drive what it detects. Plain English. Add anything you want flagged."
+          >
+            <FieldRow label="Class names to detect">
+              <KeywordChipInput
+                values={yoloWorldPrompts}
+                onChange={setYoloWorldPrompts}
+                placeholder="person, package, delivery driver, raccoon, ..."
+              />
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Each phrase becomes a detection class. Combine with the
+                existing Detection Models picker to pair YOLO-World
+                with a faster general-purpose model.
+              </p>
+            </FieldRow>
+          </Section>
+        )}
 
         {/* ── Privacy zones ── */}
         <Section

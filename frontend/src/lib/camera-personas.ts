@@ -16,6 +16,8 @@ export interface PersonaPatch {
   scene_mode?: "indoor" | "outdoor";
   object_confidence?: number;
   detection_models?: { model: string; confidence: number; enabled: boolean; label_filter: string[] }[];
+  yolo_world_prompts?: string[];
+  privacy_zone_targets?: string[];
   // VLM
   vlm_trigger?: "always" | "on_object";
   vlm_trigger_objects?: string[];
@@ -66,10 +68,14 @@ export const CAMERA_PERSONAS: Persona[] = [
       scene_mode: "outdoor",
       object_confidence: 0.4,
       detection_models: [
-        { model: "yolov8s.pt", confidence: 0.4, enabled: true, label_filter: [] },
+        { model: "yolov8x-worldv2.pt", confidence: 0.4, enabled: true, label_filter: [] },
+      ],
+      yolo_world_prompts: [
+        "person", "package", "delivery driver", "mail truck",
+        "bicycle", "stroller", "dog", "cat", "weapon",
       ],
       vlm_trigger: "on_object",
-      vlm_trigger_objects: ["person", "backpack", "handbag", "suitcase"],
+      vlm_trigger_objects: ["person", "package", "delivery driver"],
       vlm_max_tokens: 200,
       recording_mode: "on_object",
       recording_trigger_objects: ["person"],
@@ -85,6 +91,7 @@ export const CAMERA_PERSONAS: Persona[] = [
       audio_transcribe_enabled: true,
       conversation_gap_seconds: 30,
       conversation_summary_enabled: true,
+      privacy_zone_targets: ["window"],
     },
   },
   {

@@ -77,6 +77,10 @@ class Camera(Base):
     # frame is encoded for VLM, thumbnail, or recording.
     privacy_zone_targets: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     privacy_zone_blur_strength: Mapped[int] = mapped_column(Integer, default=55, nullable=False)
+    # YOLO-World v2 prompt list. Plain-English class names this
+    # camera should detect. Only consulted when a yolov8*-worldv2
+    # model is in the detection_models list.
+    yolo_world_prompts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # IANA timezone string for this camera. Null = use the system
     # timezone setting. Drives timestamp rendering + daily digest
     # anchor selection.
