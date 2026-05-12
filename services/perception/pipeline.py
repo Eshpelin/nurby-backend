@@ -283,6 +283,16 @@ class PerceptionPipeline:
         if not frame_bytes or not camera_id:
             return
 
+        # Skip audio-only cameras. Their ingestion path doesn't publish
+        # video keyframes today, but defensive in case a stray frame
+        # arrives during a mode flip.
+        try:
+            cam_quick = await self._get_camera_config(camera_id)
+            if cam_quick is not None and getattr(cam_quick, "audio_only", False):
+                return
+        except Exception:
+            pass
+
         # Decode JPEG frame
         frame_arr = np.frombuffer(frame_bytes, dtype=np.uint8)
         frame = cv2.imdecode(frame_arr, cv2.IMREAD_COLOR)

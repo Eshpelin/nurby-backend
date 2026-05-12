@@ -30,7 +30,7 @@ import { RecordingModal } from "@/components/RecordingModal";
 const WEBRTC_URL =
   process.env.NEXT_PUBLIC_WEBRTC_URL || "http://localhost:8889";
 
-type StreamType = "rtsp" | "http_mjpeg" | "http_snapshot" | "hls" | "usb" | "file" | "webcam";
+type StreamType = "rtsp" | "http_mjpeg" | "http_snapshot" | "hls" | "usb" | "file" | "webcam" | "audio_rtsp" | "browser_mic";
 
 interface Camera {
   id: string;
@@ -46,6 +46,7 @@ interface Camera {
   digest_enabled: boolean;
   digest_period: string;
   audio_capture_enabled?: boolean;
+  audio_only?: boolean;
   audio_transcribe_enabled?: boolean;
   created_at: string;
   updated_at: string;
@@ -294,6 +295,8 @@ const STREAM_TYPES: { value: StreamType; label: string; hint: string; placeholde
   { value: "hls", label: "HLS", hint: "HTTP Live Streaming. Cloud cameras, Wyze, Ring", placeholder: "http://192.168.1.100/live/stream.m3u8" },
   { value: "usb", label: "USB / Local", hint: "Locally attached USB or CSI cameras", placeholder: "0" },
   { value: "file", label: "File / Test", hint: "Local video file for testing", placeholder: "/path/to/video.mp4" },
+  { value: "browser_mic", label: "Phone Mic", hint: "Use a phone or laptop as a wireless mic. No camera needed.", placeholder: "" },
+  { value: "audio_rtsp", label: "Network Mic", hint: "Audio-only RTSP, HTTP, or ESP32 mic. No video.", placeholder: "rtsp://mic.local:8554/audio" },
 ];
 
 type TimeRange = "today" | "7d" | "30d";
@@ -796,7 +799,16 @@ function CameraSidebarCard({
       >
         {/* Tiny preview */}
         <div className="relative w-16 h-10 bg-black rounded overflow-hidden flex-shrink-0">
-          {isWebcam && localStream ? (
+          {camera.audio_only ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-emerald-900/30 to-zinc-900">
+              <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </div>
+          ) : isWebcam && localStream ? (
             <video ref={webcamVideoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-cover" />
           ) : camera.status !== "offline" ? (
             <iframe src={iframeSrc} className="absolute inset-0 w-full h-full border-0 pointer-events-none scale-[1.5] origin-center" allow="autoplay; encrypted-media" sandbox="allow-scripts allow-same-origin" />
@@ -835,7 +847,31 @@ function CameraSidebarCard({
     >
       {/* Feed preview */}
       <div className="relative aspect-video bg-black">
-        {isWebcam && localStream ? (
+        {camera.audio_only ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-emerald-950/40 via-zinc-950 to-zinc-900">
+            <div className="relative">
+              <span className="absolute inset-0 rounded-full animate-ping bg-emerald-500/30" />
+              <svg className="relative w-12 h-12 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-emerald-300/80">
+              Audio-only mic
+            </div>
+            {camera.stream_type === "browser_mic" && (
+              <Link
+                href={`/mic/${camera.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="text-[11px] px-2.5 py-1 rounded-md border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+              >
+                Open mic page →
+              </Link>
+            )}
+          </div>
+        ) : isWebcam && localStream ? (
           <video
             ref={webcamVideoRef}
             autoPlay
@@ -1529,6 +1565,42 @@ function AddCameraModal({ onClose, onSuccess, initialStreamType }: { onClose: ()
   async function handleManualSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (streamType === "webcam") return handleWebcamSubmit(e);
+    if (streamType === "browser_mic") {
+      // Phone-as-mic. No URL needed; backend derives the tcp:// path
+      // from the camera id. audio_only flag skips the video pipeline.
+      if (!name.trim()) return;
+      await handleSubmitCamera({
+        name: name.trim(),
+        stream_url: "", // not used for browser_mic; manager derives it
+        stream_type: "browser_mic",
+        location_label: locationLabel.trim() || null,
+        audio_only: true,
+        audio_capture_enabled: true,
+        audio_transcribe_enabled: true,
+      });
+      return;
+    }
+    if (streamType === "audio_rtsp") {
+      if (!name.trim() || !streamUrl.trim()) return;
+      const ap: Record<string, unknown> = {
+        name: name.trim(),
+        stream_url: streamUrl.trim(),
+        // Reuse rtsp transport. PyAV av.open() handles RTSP/HTTP/file
+        // uniformly so anything ffmpeg can read works.
+        stream_type: "rtsp",
+        location_label: locationLabel.trim() || null,
+        audio_only: true,
+        audio_capture_enabled: true,
+        audio_transcribe_enabled: true,
+      };
+      if (supportsAuth && username.trim()) {
+        ap.username = username.trim();
+        if (password) ap.password = password;
+      }
+      if (supportsAuth && authToken.trim()) ap.auth_token = authToken.trim();
+      await handleSubmitCamera(ap);
+      return;
+    }
     if (!name.trim() || !streamUrl.trim()) return;
     const payload: Record<string, unknown> = {
       name: name.trim(),
@@ -1634,10 +1706,17 @@ function AddCameraModal({ onClose, onSuccess, initialStreamType }: { onClose: ()
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1.5">Stream stays live while this tab is open. Closing the tab stops it.</p>
               </div>
+            ) : streamType === "browser_mic" ? (
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+                <p className="font-medium text-foreground mb-1">No URL needed.</p>
+                After you save, open the camera and tap the &quot;Open mic page&quot; button.
+                On your phone, hit Start mic to publish audio over WebSocket.
+                The phone stays live while the tab is open.
+              </div>
             ) : (
             <div>
               <label className="block text-sm text-muted-foreground mb-1.5">
-                {streamType === "usb" ? "Device Index or Path" : streamType === "file" ? "File Path" : "Stream URL"}
+                {streamType === "usb" ? "Device Index or Path" : streamType === "file" ? "File Path" : streamType === "audio_rtsp" ? "Audio Stream URL" : "Stream URL"}
               </label>
               {streamType === "usb" && !manualInput ? (
                 <div className="space-y-3">
@@ -1713,7 +1792,7 @@ function AddCameraModal({ onClose, onSuccess, initialStreamType }: { onClose: ()
             {error && <p className="text-sm text-danger">{error}</p>}
 
             <div className="flex flex-col items-end gap-1.5 pt-2">
-              {(!name.trim() || (streamType === "webcam" ? !webcamStream : !streamUrl.trim())) && !submitting && (
+              {(!name.trim() || (streamType === "webcam" ? !webcamStream : streamType === "browser_mic" ? false : !streamUrl.trim())) && !submitting && (
                 <p className="text-xs text-muted-foreground">
                   {!name.trim()
                     ? "Enter a Name above to continue."
@@ -1724,7 +1803,7 @@ function AddCameraModal({ onClose, onSuccess, initialStreamType }: { onClose: ()
               )}
               <div className="flex gap-2">
                 <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted transition-colors">Cancel</button>
-                <button type="submit" disabled={submitting || !name.trim() || (streamType === "webcam" ? !webcamStream : !streamUrl.trim())} className="px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 disabled:opacity-50">
+                <button type="submit" disabled={submitting || !name.trim() || (streamType === "webcam" ? !webcamStream : streamType === "browser_mic" ? false : !streamUrl.trim())} className="px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 disabled:opacity-50">
                   {submitting ? "Adding..." : streamType === "webcam" ? "Start Streaming" : "Add Camera"}
                 </button>
               </div>

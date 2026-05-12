@@ -50,6 +50,7 @@ class CameraCreate(BaseModel):
     retention_gb: float = Field(default=50.0, ge=1.0, le=10000.0)
     motion_zones: list[dict] | None = None
     webcam_device: str | None = Field(default=None, max_length=255)
+    audio_only: bool = False
     # Summary config
     summary_provider_id: uuid.UUID | None = None
     summary_mode: str = Field(default="off", max_length=16)
@@ -110,6 +111,7 @@ class CameraUpdate(BaseModel):
     retention_gb: float | None = Field(default=None, ge=1.0, le=10000.0)
     motion_zones: list[dict] | None = None
     webcam_device: str | None = Field(default=None, max_length=255)
+    audio_only: bool | None = None
     display_order: int | None = None
     # Summary config
     summary_provider_id: uuid.UUID | None = None
@@ -177,6 +179,7 @@ class CameraResponse(BaseModel):
     status: str
     display_order: int = 0
     webcam_device: str | None = None
+    audio_only: bool = False
     summary_provider_id: uuid.UUID | None = None
     summary_mode: str = "off"
     summary_period_seconds: int = 1800

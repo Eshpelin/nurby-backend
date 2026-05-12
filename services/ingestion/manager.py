@@ -37,6 +37,7 @@ def _stream_config_hash(cam: Camera) -> str:
         cam.auth_token or "",
         str(cam.snapshot_interval or 2.0),
         getattr(cam, "webcam_device", "") or "",
+        "audio_only" if getattr(cam, "audio_only", False) else "av",
     ]
     return hashlib.md5("|".join(parts).encode()).hexdigest()
 
@@ -73,39 +74,63 @@ class CameraManager:
             await asyncio.sleep(POLL_INTERVAL)
 
     def _create_worker(self, cam_id: uuid.UUID, cam: Camera):
-        """Create and start a StreamWorker for a camera."""
-        worker = StreamWorker(
-            camera_id=cam_id,
-            stream_url=cam.stream_url,
-            recording_enabled=cam.recording_enabled,
-            recording_mode=getattr(cam, "recording_mode", "always"),
-            recording_trigger_objects=getattr(cam, "recording_trigger_objects", None),
-            recording_clip_pre=getattr(cam, "recording_clip_pre", 5),
-            recording_clip_post=getattr(cam, "recording_clip_post", 10),
-            stream_type=getattr(cam, "stream_type", "rtsp"),
-            username=getattr(cam, "username", None),
-            password=getattr(cam, "password", None),
-            auth_token=getattr(cam, "auth_token", None),
-            snapshot_interval=getattr(cam, "snapshot_interval", 2.0),
-            webcam_device=getattr(cam, "webcam_device", None),
-        )
-        self._workers[cam_id] = worker
-        self._tasks[cam_id] = asyncio.create_task(worker.run())
+        """Create and start the workers for a camera.
+
+        For ``audio_only`` cameras we skip the video StreamWorker
+        entirely (no motion, no perception, no recording) and only
+        spin up the AudioWorker. The mic is the whole feed.
+        """
+        is_audio_only = bool(getattr(cam, "audio_only", False))
+        if not is_audio_only:
+            worker = StreamWorker(
+                camera_id=cam_id,
+                stream_url=cam.stream_url,
+                recording_enabled=cam.recording_enabled,
+                recording_mode=getattr(cam, "recording_mode", "always"),
+                recording_trigger_objects=getattr(cam, "recording_trigger_objects", None),
+                recording_clip_pre=getattr(cam, "recording_clip_pre", 5),
+                recording_clip_post=getattr(cam, "recording_clip_post", 10),
+                stream_type=getattr(cam, "stream_type", "rtsp"),
+                username=getattr(cam, "username", None),
+                password=getattr(cam, "password", None),
+                auth_token=getattr(cam, "auth_token", None),
+                snapshot_interval=getattr(cam, "snapshot_interval", 2.0),
+                webcam_device=getattr(cam, "webcam_device", None),
+            )
+            self._workers[cam_id] = worker
+            self._tasks[cam_id] = asyncio.create_task(worker.run())
         self._config_hashes[cam_id] = _stream_config_hash(cam)
 
-        # Audio listener. RTSP/HLS + webcam + USB-bridged all pull through
-        # MediaMTX so the camera only sees one upstream session.
-        audio_url = mux_rtsp_url(
-            cam.id, cam.stream_type,
-            stream_url=cam.stream_url,
-            webcam_device=getattr(cam, "webcam_device", None),
-        )
-        if audio_url is None and cam.stream_type in ("rtsp", "hls") and cam.stream_url:
-            # Safety fallback for the window between camera create and
-            # mux path registration. Prefer direct URL once, retry via
-            # mux on next restart.
+        # Audio listener. For audio_only cameras we use cam.stream_url
+        # directly because the video pipeline is skipped (no MediaMTX
+        # mux path is registered for those). For normal A/V cameras
+        # the audio comes through the MediaMTX mux so the upstream
+        # camera only sees one session.
+        if is_audio_only:
+            from services.api.ws import mic_stream_url
             from services.ingestion.stream import build_auth_url
-            audio_url = build_auth_url(cam.stream_url, cam.username, cam.password)
+
+            if getattr(cam, "stream_type", "") == "browser_mic":
+                # Browser-published mic. The /ws/mic endpoint runs an
+                # ffmpeg session that serves audio on a deterministic
+                # TCP port derived from the camera id.
+                audio_url = mic_stream_url(cam.id)
+            else:
+                audio_url = build_auth_url(
+                    cam.stream_url, cam.username, cam.password
+                )
+        else:
+            audio_url = mux_rtsp_url(
+                cam.id, cam.stream_type,
+                stream_url=cam.stream_url,
+                webcam_device=getattr(cam, "webcam_device", None),
+            )
+            if audio_url is None and cam.stream_type in ("rtsp", "hls") and cam.stream_url:
+                # Safety fallback for the window between camera create and
+                # mux path registration. Prefer direct URL once, retry via
+                # mux on next restart.
+                from services.ingestion.stream import build_auth_url
+                audio_url = build_auth_url(cam.stream_url, cam.username, cam.password)
         if audio_url:
             aw = AudioWorker(cam_id, audio_url)
             self._audio_workers[cam_id] = aw
