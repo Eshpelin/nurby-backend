@@ -134,6 +134,18 @@ async def assign_incident(
             if len(thumbs) > 24:
                 thumbs = thumbs[-24:]
         existing.thumbnails = thumbs
+        # Update the journey link for this incident. If a journey is
+        # already attached the call advances the segment for this
+        # camera; if not, it stitches into a cross-camera journey
+        # when a sibling exists for the same subject.
+        try:
+            from services.perception.journey_tracker import assign_journey
+
+            jid = await assign_journey(db, existing, cam)
+            if jid is not None and existing.journey_id != jid:
+                existing.journey_id = jid
+        except Exception:
+            logger.exception("journey assignment failed inc=%s", existing.id)
         # Fire-and-forget WS append. The dashboard refetches on this
         # event to splice the new occurrence into the live card.
         try:
@@ -167,6 +179,16 @@ async def assign_incident(
     )
     db.add(new_inc)
     await db.flush()
+    # Stitch into a journey when one is already open for the same
+    # subject across any camera. Otherwise opens a fresh journey row.
+    try:
+        from services.perception.journey_tracker import assign_journey
+
+        jid = await assign_journey(db, new_inc, cam)
+        if jid is not None:
+            new_inc.journey_id = jid
+    except Exception:
+        logger.exception("journey assignment failed new inc=%s", new_inc.id)
     try:
         asyncio.create_task(_broadcast_opened(new_inc))
     except RuntimeError:

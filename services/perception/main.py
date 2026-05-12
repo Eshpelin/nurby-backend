@@ -11,6 +11,7 @@ import logging
 
 from services.perception.conversation_finalizer import ConversationFinalizer
 from services.perception.incident_tracker import IncidentFinalizer
+from services.perception.journey_tracker import JourneyFinalizer
 from services.perception.live_detector import LiveDetector
 from services.perception.pipeline import PerceptionPipeline
 from services.perception.summarizer import CameraSummarizer
@@ -34,12 +35,14 @@ async def main():
         summarizer = CameraSummarizer()
     finalizer = ConversationFinalizer()
     incident_finalizer = IncidentFinalizer()
+    journey_finalizer = JourneyFinalizer()
     await asyncio.gather(
         pipeline.run(),
         live.run(),
         summarizer.run(),
         finalizer.run(),
         incident_finalizer.run(),
+        journey_finalizer.run(),
     )
 
 
