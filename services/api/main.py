@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from shared.config import settings
-from services.api.routes import admin_stats, audio, auth, body_clusters, cameras, conversations, daily_digest, detection_models, digests, events, incidents, invites, journeys, notifications, observations, ollama_deploy, persons, privacy_zones, providers, recordings, rules, search, summaries, system, timeline, transcripts, users
+from services.api.routes import admin_stats, audio, auth, body_clusters, cameras, conversations, daily_digest, detection_models, digests, events, incidents, invites, journeys, notifications, observations, ollama_deploy, persons, privacy_zones, providers, recordings, rules, search, summaries, system, telegram, timeline, transcripts, users
 from services.digest.scheduler import run_digest_loop
 from services.api.ws import router as ws_router
 
@@ -50,10 +50,22 @@ async def lifespan(app: FastAPI):
     from services.perception.reid_sweeper import BodyReIDSweeper
     reid_sweeper = BodyReIDSweeper()
     reid_task = asyncio.create_task(reid_sweeper.run())
+    # Telegram long-poll supervisor. One asyncio task per enabled bot
+    # token, reconciled every 30s against telegram_channels.
+    from services.notify.telegram_poller import TelegramPollerManager
+    from services.notify.telegram import shutdown_client as _tg_shutdown
+    tg_manager = TelegramPollerManager()
+    tg_task = asyncio.create_task(tg_manager.run())
     yield
     digest_task.cancel()
     reid_sweeper.stop()
     reid_task.cancel()
+    tg_manager.stop()
+    tg_task.cancel()
+    try:
+        await _tg_shutdown()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -125,5 +137,6 @@ app.include_router(incidents.router, prefix="/api/incidents", tags=["incidents"]
 app.include_router(journeys.router, prefix="/api/journeys", tags=["journeys"])
 app.include_router(daily_digest.router, prefix="/api/daily-digest", tags=["daily-digest"])
 app.include_router(privacy_zones.router, prefix="/api/privacy-zones", tags=["privacy-zones"])
+app.include_router(telegram.router, prefix="/api/telegram", tags=["telegram"])
 app.include_router(admin_stats.router, prefix="/api/admin", tags=["admin"])
 app.include_router(ws_router, tags=["websocket"])

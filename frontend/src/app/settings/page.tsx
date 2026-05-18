@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import TelegramSection from "@/components/TelegramSection";
 
 const COMMON_TIMEZONES = [
   "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
@@ -900,6 +901,9 @@ export default function SettingsPage() {
             {smtpConfigured ? "View" : "Configure"}
           </button>
         </div>
+
+        {/* Telegram notifications */}
+        <TelegramSection />
 
         {/* Invite Keys card */}
         <div className="rounded-lg border border-border bg-card px-4 py-3.5 flex items-center justify-between">

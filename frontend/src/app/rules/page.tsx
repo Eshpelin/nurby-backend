@@ -155,8 +155,30 @@ const ACTION_TYPES = [
   { value: "broadcast", label: "WebSocket broadcast" },
   { value: "notify", label: "Notification" },
   { value: "email", label: "Email" },
+  { value: "telegram", label: "Telegram" },
   { value: "vlm_call", label: "VLM Call" },
 ];
+
+// Variables available in Telegram message templates. Kept in sync
+// with TELEGRAM_TEMPLATE_VARS in services/events/actions.py.
+const TELEGRAM_TEMPLATE_VARS = [
+  { key: "rule_name", desc: "Name of the rule that fired" },
+  { key: "camera_name", desc: "Camera that produced the observation" },
+  { key: "timestamp_local", desc: "Time of the observation in the camera's timezone" },
+  { key: "vlm_description", desc: "Scene description from the VLM, if any" },
+  { key: "detections_summary", desc: "Compact list of objects and faces detected" },
+  { key: "observation_id", desc: "Database id of the observation" },
+  { key: "event_id", desc: "Database id of the fired event" },
+];
+
+interface TelegramChannelOption {
+  id: string;
+  label: string;
+  bot_username: string | null;
+  chat_title: string | null;
+  enabled: boolean;
+  pairing_status: string;
+}
 
 const VLM_PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -322,6 +344,10 @@ function describeActions(actions: Record<string, unknown> | Record<string, unkno
       if (a.type === "broadcast") return "Broadcast via WebSocket";
       if (a.type === "notify") return `Notify. "${(a.message as string) || "..."}"`;
       if (a.type === "email") return `Email to ${(a.to as string) || "..."}`;
+      if (a.type === "telegram") {
+        const cid = (a.channel_id as string) || "";
+        return cid ? `Telegram via channel ${cid.slice(0, 8)}` : "Telegram (no channel selected)";
+      }
       return String(a.type);
     })
     .join(", ");
@@ -709,6 +735,16 @@ export default function RulesPage() {
   const [formActionEmailSubject, setFormActionEmailSubject] = useState("");
   const [formActionEmailBody, setFormActionEmailBody] = useState("");
 
+  // Telegram action fields
+  const [telegramChannels, setTelegramChannels] = useState<TelegramChannelOption[]>([]);
+  const [telegramChannelsLoading, setTelegramChannelsLoading] = useState(false);
+  const [formActionTelegramChannelId, setFormActionTelegramChannelId] = useState("");
+  const [formActionTelegramTemplate, setFormActionTelegramTemplate] = useState(
+    "<b>{rule_name}</b> on {camera_name}\n{vlm_description}\n{detections_summary}",
+  );
+  const [formActionTelegramSilent, setFormActionTelegramSilent] = useState(false);
+  const [formActionTelegramThumbnail, setFormActionTelegramThumbnail] = useState(false);
+
   // VLM call action fields
   const [formVlmProvider, setFormVlmProvider] = useState("openai");
   const [formVlmModel, setFormVlmModel] = useState("gpt-4o-mini");
@@ -812,11 +848,27 @@ export default function RulesPage() {
     }
   }, []);
 
+  const fetchTelegramChannels = useCallback(async () => {
+    setTelegramChannelsLoading(true);
+    try {
+      const res = await authFetch("/api/telegram/channels");
+      if (res.ok) {
+        const list: TelegramChannelOption[] = await res.json();
+        setTelegramChannels(list);
+      }
+    } catch {
+      /* silent */
+    } finally {
+      setTelegramChannelsLoading(false);
+    }
+  }, [authFetch]);
+
   useEffect(() => {
     fetchRules();
     fetchCameras();
     fetchPersons();
-  }, [fetchRules, fetchCameras, fetchPersons]);
+    fetchTelegramChannels();
+  }, [fetchRules, fetchCameras, fetchPersons, fetchTelegramChannels]);
 
   // Fetch events when a rule is selected, auto-refresh every 30s
   useEffect(() => {
@@ -866,6 +918,12 @@ export default function RulesPage() {
     setFormActionEmailTo("");
     setFormActionEmailSubject("");
     setFormActionEmailBody("");
+    setFormActionTelegramChannelId("");
+    setFormActionTelegramTemplate(
+      "<b>{rule_name}</b> on {camera_name}\n{vlm_description}\n{detections_summary}",
+    );
+    setFormActionTelegramSilent(false);
+    setFormActionTelegramThumbnail(false);
     setFormCooldown("300");
     setFormError("");
   };
@@ -957,6 +1015,15 @@ export default function RulesPage() {
     setFormActionEmailTo((acts?.to as string) || "");
     setFormActionEmailSubject((acts?.subject as string) || "");
     setFormActionEmailBody((acts?.body as string) || "");
+
+    // Restore telegram fields
+    setFormActionTelegramChannelId((acts?.channel_id as string) || "");
+    setFormActionTelegramTemplate(
+      (acts?.template as string) ||
+        "<b>{rule_name}</b> on {camera_name}\n{vlm_description}\n{detections_summary}",
+    );
+    setFormActionTelegramSilent(Boolean(acts?.silent));
+    setFormActionTelegramThumbnail(Boolean(acts?.include_thumbnail));
 
     // Restore payload template
     const pt = acts?.payload_template;
@@ -1124,6 +1191,13 @@ export default function RulesPage() {
       action.subject = formActionEmailSubject || "Nurby alert. {{rule_name}}";
       action.body = formActionEmailBody || "Rule {{rule_name}} fired at {{timestamp}}";
     }
+    if (formActionType === "telegram") {
+      action.channel_id = formActionTelegramChannelId;
+      action.template = formActionTelegramTemplate;
+      action.silent = formActionTelegramSilent;
+      // Phase 1 sends text only. We persist the flag for Phase 2.
+      action.include_thumbnail = formActionTelegramThumbnail;
+    }
     if (formActionType === "vlm_call") {
       action.provider = formVlmProvider;
       action.model = formVlmModel;
@@ -1165,6 +1239,16 @@ export default function RulesPage() {
     if (formActionType === "email" && !formActionEmailTo.trim()) {
       setFormError("Recipient email is required");
       return;
+    }
+    if (formActionType === "telegram") {
+      if (!formActionTelegramChannelId) {
+        setFormError("Pick a Telegram channel");
+        return;
+      }
+      if (!formActionTelegramTemplate.trim()) {
+        setFormError("Telegram message template cannot be empty");
+        return;
+      }
     }
     if (formActionUseCustomPayload && formActionPayloadTemplate.trim()) {
       try {
@@ -2407,6 +2491,111 @@ export default function RulesPage() {
                     <div className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5">
                       SMTP must be configured in Settings for email delivery to work.
                     </div>
+                  </div>
+                )}
+
+                {/* Telegram fields */}
+                {formActionType === "telegram" && (
+                  <div className="space-y-3">
+                    {telegramChannelsLoading ? (
+                      <div className="text-xs text-muted-foreground">Loading Telegram channels.</div>
+                    ) : telegramChannels.filter((c) => c.enabled && c.pairing_status === "paired").length === 0 ? (
+                      <div className="text-xs text-muted-foreground bg-muted/40 border border-border rounded px-3 py-2">
+                        No Telegram channels yet. Add one in{" "}
+                        <a href="/settings" className="underline text-accent">
+                          Settings → Notifications →
+                        </a>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="text-xs text-muted-foreground block mb-1">
+                            Telegram channel
+                          </label>
+                          <StyledSelect
+                            value={formActionTelegramChannelId}
+                            onChange={setFormActionTelegramChannelId}
+                            options={[
+                              { value: "", label: "Pick a channel..." },
+                              ...telegramChannels
+                                .filter((c) => c.enabled && c.pairing_status === "paired")
+                                .sort((a, b) => a.label.localeCompare(b.label))
+                                .map((c) => ({
+                                  value: c.id,
+                                  label: `${c.label} · ${c.chat_title || "@" + (c.bot_username || "")}`,
+                                })),
+                            ]}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-muted-foreground block mb-1">
+                            Message template
+                          </label>
+                          <textarea
+                            value={formActionTelegramTemplate}
+                            onChange={(e) => setFormActionTelegramTemplate(e.target.value)}
+                            rows={4}
+                            className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm resize-y"
+                            placeholder="<b>{rule_name}</b> on {camera_name}"
+                          />
+                          <div className="text-[10px] text-muted-foreground mt-1">
+                            HTML formatting is supported (e.g. &lt;b&gt;bold&lt;/b&gt;). Variables. click to insert.
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {TELEGRAM_TEMPLATE_VARS.map((v) => (
+                              <button
+                                key={v.key}
+                                type="button"
+                                title={v.desc}
+                                onClick={() =>
+                                  setFormActionTelegramTemplate((prev) => prev + `{${v.key}}`)
+                                }
+                                className="px-1.5 py-0.5 text-[10px] rounded border border-border hover:bg-muted text-muted-foreground font-mono"
+                              >
+                                {`{${v.key}}`}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={formActionTelegramSilent}
+                              onChange={(e) => setFormActionTelegramSilent(e.target.checked)}
+                              className="accent-green-500"
+                            />
+                            <span className="text-xs">Silent (no sound, overrides channel default)</span>
+                          </label>
+                          <label
+                            className="flex items-center gap-2 cursor-not-allowed opacity-60"
+                            title="Coming soon. Phase 2."
+                          >
+                            <input
+                              type="checkbox"
+                              disabled
+                              checked={formActionTelegramThumbnail}
+                              onChange={(e) => setFormActionTelegramThumbnail(e.target.checked)}
+                              className="accent-green-500"
+                            />
+                            <span className="text-xs">Include snapshot (Phase 2)</span>
+                          </label>
+                        </div>
+
+                        <div className="text-[11px] text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
+                          {(() => {
+                            const ch = telegramChannels.find(
+                              (c) => c.id === formActionTelegramChannelId,
+                            );
+                            if (!ch) return "Send a Telegram message to the selected channel.";
+                            const target = ch.chat_title || `@${ch.bot_username || "bot"}`;
+                            return `Send a Telegram message to ${target}.`;
+                          })()}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 

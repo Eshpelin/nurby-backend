@@ -370,7 +370,7 @@ class NotificationResponse(BaseModel):
 # ── Rule schemas ──
 
 _VALID_ACTION_TYPES = {
-    "webhook", "api_call", "broadcast", "notify", "email", "vlm_call",
+    "webhook", "api_call", "broadcast", "notify", "email", "vlm_call", "telegram",
 }
 
 
@@ -635,6 +635,51 @@ class CameraShareRequest(BaseModel):
 
 class SetCameraAccessRequest(BaseModel):
     camera_ids: list[uuid.UUID]
+
+
+# -- Telegram channel schemas --
+
+class TelegramChannelCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=64)
+    bot_token: str = Field(min_length=20, max_length=512)
+
+
+class TelegramChannelUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=64)
+    default_silent: bool | None = None
+    enabled: bool | None = None
+
+
+class TelegramChannelResponse(BaseModel):
+    id: uuid.UUID
+    label: str
+    bot_username: str | None
+    chat_id: str | None
+    chat_title: str | None
+    chat_type: str | None
+    default_silent: bool
+    enabled: bool
+    paired_at: datetime | None
+    last_test_at: datetime | None
+    last_test_ok: bool | None
+    last_error: str | None
+    pairing_status: str  # pending | paired | blocked | disabled | error
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TelegramPairInitResponse(BaseModel):
+    nonce: str
+    deep_link: str
+    qr_payload: str
+    expires_in_seconds: int
+
+
+class TelegramTestResponse(BaseModel):
+    ok: bool
+    message_id: int | None = None
+    error: str | None = None
 
 
 # -- Digest entry schemas --

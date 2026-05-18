@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -715,3 +715,40 @@ class PrivacyZone(Base):
     # stop applying so a camera that panned away does not keep blurring
     # the wrong region. Manual and locked zones ignore it.
     stale_after_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+
+
+class TelegramChannel(Base):
+    """User-owned Telegram bot channel for rule notifications.
+
+    The bot token is stored Fernet-encrypted in ``bot_token_enc``. The
+    target chat is established via the pairing flow. ``chat_id`` stays
+    null until the user invokes ``/start <nonce>`` (DM) or
+    ``/pair <nonce>`` (group) and the long-poller binds the chat. Once
+    paired, the channel can be used as the target of a ``telegram``
+    rule action.
+    """
+
+    __tablename__ = "telegram_channels"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    bot_token_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    bot_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    chat_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    default_silent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    paired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

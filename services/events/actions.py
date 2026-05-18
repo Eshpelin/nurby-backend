@@ -11,6 +11,14 @@ Supported action types.
     notify      Store notification + broadcast via WebSocket
     email       Send email via SMTP with template subject and body
     vlm_call    Ask a VLM provider a question, optionally structured JSON output
+    telegram    Send a chat message via a paired Telegram bot channel.
+                Phase 1 is text only. Action shape.
+                    {"type": "telegram", "channel_id": uuid, "template": str,
+                     "include_thumbnail": bool, "silent": bool}
+                Template variables available. {rule_name}, {camera_name},
+                {timestamp_local}, {vlm_description}, {detections_summary},
+                {observation_id}, {event_id}. Both {{var}} and {var}
+                shorthand are accepted for parity with the notify action.
 """
 
 import asyncio
@@ -58,6 +66,11 @@ def _build_template_context(
         "camera_id": observation_data.get("camera_id", ""),
         "camera_name": observation_data.get("camera_name") or observation_data.get("camera_id", ""),
         "timestamp": observation_data.get("timestamp", ""),
+        "timestamp_local": observation_data.get("timestamp_local")
+        or _localize_timestamp(
+            observation_data.get("timestamp"),
+            observation_data.get("camera_timezone"),
+        ),
         "motion_score": observation_data.get("motion_score", 0),
         "object_detections": observation_data.get("object_detections"),
         "person_detections": observation_data.get("person_detections"),
@@ -65,6 +78,7 @@ def _build_template_context(
         "faces": observation_data.get("person_detections"),
         "description": observation_data.get("vlm_description", ""),
         "vlm_description": observation_data.get("vlm_description", ""),
+        "detections_summary": _summarize_detections(observation_data),
         "confidence": observation_data.get("confidence"),
         "observation_id": observation_data.get("observation_id", ""),
         "thumbnail_url": observation_data.get("thumbnail_url") or observation_data.get("thumbnail_path", ""),
@@ -73,6 +87,50 @@ def _build_template_context(
         "defaults": {"system": DEFAULT_VLM_SYSTEM},
     }
     return ctx
+
+
+def _localize_timestamp(ts_value, tz_name: str | None) -> str:
+    """Render an observation timestamp in the camera's timezone.
+
+    Falls back to the raw value if parsing fails so templates never
+    silently produce empty strings.
+    """
+    if not ts_value:
+        return ""
+    try:
+        from datetime import datetime
+        if isinstance(ts_value, datetime):
+            dt = ts_value
+        else:
+            dt = datetime.fromisoformat(str(ts_value).replace("Z", "+00:00"))
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                dt = dt.astimezone(ZoneInfo(tz_name))
+            except Exception:
+                pass
+        return dt.strftime("%Y-%m-%d %H:%M:%S %Z").strip()
+    except Exception:
+        return str(ts_value)
+
+
+def _summarize_detections(observation_data: dict) -> str:
+    """Compact, human-friendly summary of what was seen. Used by the
+    Telegram and email templates so users don't have to format
+    detection dicts themselves."""
+    pieces: list[str] = []
+    objs = observation_data.get("object_detections") or {}
+    olist = objs.get("objects") if isinstance(objs, dict) else None
+    if olist:
+        counts: dict[str, int] = {}
+        for det in olist:
+            label = str(det.get("label") or "object")
+            counts[label] = counts.get(label, 0) + 1
+        pieces.extend(f"{n} {label}" for label, n in sorted(counts.items()))
+    faces = observation_data.get("person_detections") or {}
+    if isinstance(faces, dict) and faces.get("count"):
+        pieces.append(f"{faces['count']} face(s)")
+    return ", ".join(pieces) if pieces else "no detections"
 
 
 def _render_template(template, context: dict):
@@ -171,6 +229,8 @@ async def execute_action(
         await _execute_email(action, observation_data, rule, event_id, ctx)
     elif action_type == "vlm_call":
         await _execute_vlm_call(action, observation_data, rule, event_id, ctx)
+    elif action_type == "telegram":
+        await _execute_telegram(action, observation_data, rule, event_id, ctx)
     else:
         logger.warning("Unknown action type '%s' in rule '%s'", action_type, rule.name)
         await _update_event_status(event_id, action_type or "unknown", "failed", f"Unknown action type '{action_type}'")
@@ -624,3 +684,130 @@ def _apply_vlm_error(observation_data, output_name, on_error, fallback_value, er
     if on_error == "stop":
         raise RuntimeError(f"vlm_call stopped chain. {err_msg}")
     # continue. no-op
+
+
+# ── Telegram action ──
+
+# Variables documented for the rule builder UI. Kept in sync with the
+# frontend rule-builder chip list.
+TELEGRAM_TEMPLATE_VARS = (
+    "rule_name",
+    "camera_name",
+    "timestamp_local",
+    "vlm_description",
+    "detections_summary",
+    "observation_id",
+    "event_id",
+)
+
+
+def _expand_telegram_template(template: str, ctx: dict) -> str:
+    """Render a template using both `{var}` and `{{var}}` styles.
+
+    Mirrors the back-compat behaviour in the notify action so users
+    who learned the single-brace shorthand in Notification templates
+    don't have to learn a new dialect for Telegram."""
+    legacy = template
+    for key in TELEGRAM_TEMPLATE_VARS:
+        legacy = legacy.replace("{" + key + "}", _stringify_ctx(ctx.get(key)))
+    rendered = render(legacy, ctx, strict=False)
+    return rendered if isinstance(rendered, str) else str(rendered)
+
+
+def _stringify_ctx(val) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, (dict, list)):
+        try:
+            return json.dumps(val, default=str)
+        except Exception:
+            return str(val)
+    return str(val)
+
+
+async def _execute_telegram(action, observation_data, rule, event_id, ctx):
+    """Resolve a paired Telegram channel and send the rendered message."""
+    from shared.crypto import InvalidToken, decrypt_secret
+    from shared.models import TelegramChannel
+    from services.notify.telegram import TelegramAPI, TelegramError
+
+    channel_id_raw = action.get("channel_id")
+    if not channel_id_raw:
+        await _update_event_status(event_id, "telegram", "failed", "Missing channel_id")
+        return
+
+    try:
+        channel_uuid = uuid.UUID(str(channel_id_raw))
+    except (ValueError, TypeError):
+        await _update_event_status(event_id, "telegram", "failed", "Invalid channel_id")
+        return
+
+    template = action.get("template") or "Rule {rule_name} fired on {camera_name}"
+    silent = bool(action.get("silent"))
+    include_thumbnail = bool(action.get("include_thumbnail"))
+    if include_thumbnail:
+        # Phase 1 is text only. We accept the flag for forward
+        # compatibility but log so users see why the photo never lands.
+        logger.warning(
+            "telegram action for rule '%s' has include_thumbnail=true. "
+            "Photo attachments arrive in Phase 2; sending text only.",
+            rule.name,
+        )
+
+    async with async_session() as db:
+        ch = await db.get(TelegramChannel, channel_uuid)
+        if ch is None:
+            await _update_event_status(event_id, "telegram", "failed", "Channel not found")
+            return
+        if not ch.enabled:
+            await _update_event_status(event_id, "telegram", "failed", "Channel is disabled")
+            return
+        if ch.paired_at is None or not ch.chat_id:
+            await _update_event_status(event_id, "telegram", "failed", "Channel is not paired")
+            return
+        try:
+            token = decrypt_secret(ch.bot_token_enc)
+        except InvalidToken:
+            await _update_event_status(
+                event_id, "telegram", "failed",
+                "Bot token unreadable (jwt_secret rotated?). Replace it on the channel.",
+            )
+            return
+        chat_id = ch.chat_id
+        default_silent = bool(ch.default_silent)
+        channel_label = ch.label
+
+    text = _expand_telegram_template(template, ctx)
+    if not text.strip():
+        await _update_event_status(event_id, "telegram", "failed", "Rendered template is empty")
+        return
+
+    try:
+        result = await TelegramAPI.send_message(
+            token,
+            chat_id,
+            text,
+            parse_mode="HTML",
+            disable_notification=silent or default_silent,
+        )
+        logger.info(
+            "Telegram sent for rule '%s' channel='%s' message_id=%s",
+            rule.name, channel_label, result.get("message_id"),
+        )
+        await _update_event_status(event_id, "telegram", "success")
+    except TelegramError as exc:
+        await _update_event_status(event_id, "telegram", "failed", exc.description[:500])
+        if exc.is_forbidden:
+            # Bot blocked or chat gone. Disable channel + persist error
+            # so the settings UI flips to "Blocked" and stops alerts
+            # until the user re-enables.
+            try:
+                async with async_session() as db:
+                    refreshed = await db.get(TelegramChannel, channel_uuid)
+                    if refreshed is not None:
+                        refreshed.enabled = False
+                        refreshed.last_test_ok = False
+                        refreshed.last_error = exc.description[:500]
+                        await db.commit()
+            except Exception:
+                logger.exception("Failed to mark telegram channel %s blocked", channel_uuid)
