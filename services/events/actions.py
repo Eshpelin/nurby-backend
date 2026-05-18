@@ -59,8 +59,15 @@ def _build_template_context(
 ) -> dict:
     """Build nested context dict available for template interpolation."""
     vars_bag = observation_data.get("vars") or {}
+    # Resolve {event_url} from the configured public base URL. When
+    # unset, downstream template renderers see an empty string and
+    # the Telegram action editor surfaces a one-line warning.
+    from shared.config import settings as _settings
+    _base = (_settings.public_base_url or "").rstrip("/")
+    event_url = f"{_base}/rules?event={event_id}" if _base else ""
     ctx = {
         "event_id": str(event_id),
+        "event_url": event_url,
         "rule_id": str(rule.id),
         "rule_name": rule.name,
         "camera_id": observation_data.get("camera_id", ""),
@@ -698,7 +705,28 @@ TELEGRAM_TEMPLATE_VARS = (
     "detections_summary",
     "observation_id",
     "event_id",
+    "event_url",
 )
+
+
+# Phase 2 inline button action enum. Extending this tuple in later
+# phases (e.g. ``name_cluster`` for Phase 4 face cluster naming) is
+# the documented extension point. The verify path in
+# ``telegram_poller._handle_callback_query`` and the schema validator
+# in ``shared.schemas._VALID_TELEGRAM_BUTTON_ACTIONS`` must be kept in
+# lockstep.
+TELEGRAM_BUTTON_ACTIONS = ("ack", "mute_event", "snooze_rule", "open")
+
+
+def _resolve_event_url(event_id) -> str | None:
+    """Build a web UI deep link for an event. Returns None when the
+    operator has not configured ``public_base_url``; callers must
+    decide whether to render a button or surface a warning."""
+    from shared.config import settings
+    base = (settings.public_base_url or "").rstrip("/")
+    if not base:
+        return None
+    return f"{base}/rules?event={event_id}"
 
 
 def _expand_telegram_template(template: str, ctx: dict) -> str:
@@ -725,11 +753,130 @@ def _stringify_ctx(val) -> str:
     return str(val)
 
 
+def _build_inline_keyboard(buttons, event_id, rule_id, ctx) -> dict | None:
+    """Render the action's button spec to a Telegram
+    InlineKeyboardMarkup with HMAC-signed callback_data.
+
+    One row per button (Telegram allows multi-column, but stacking
+    works on every client width and matches the 4-button vertical
+    layout used in the rule builder mock).
+
+    Buttons of action ``open`` use ``url=`` (no callback signing).
+    Other actions get a base64 JSON payload with short keys ``a, e,
+    r, d`` to stay under Telegram's 64-byte ``callback_data`` cap.
+    """
+    if not buttons:
+        return None
+    from services.notify.telegram import sign_callback, CALLBACK_DATA_MAX
+    from services.events.templates import render as _render
+    rows = []
+    for spec in buttons:
+        if not isinstance(spec, dict):
+            continue
+        action = str(spec.get("action") or "")
+        label = str(spec.get("label") or action or "Button")
+        if action == "open":
+            url_tpl = spec.get("url") or "{event_url}"
+            try:
+                url = _render(url_tpl, ctx, strict=False)
+            except Exception:
+                url = ""
+            url = url.strip() if isinstance(url, str) else ""
+            # Skip the open button when {event_url} resolves empty
+            # (operator has not set public_base_url). Better to drop
+            # the button than ship a 400-on-tap broken URL.
+            if not url or not (url.startswith("http://") or url.startswith("https://")):
+                logger.debug(
+                    "telegram open button skipped. unresolved url for rule=%s", rule_id,
+                )
+                continue
+            rows.append([{"text": label, "url": url}])
+            continue
+
+        if action not in TELEGRAM_BUTTON_ACTIONS:
+            continue
+        payload: dict = {"a": action, "e": str(event_id), "r": str(rule_id)}
+        duration = spec.get("duration_seconds")
+        if duration is not None:
+            try:
+                payload["d"] = int(duration)
+            except (TypeError, ValueError):
+                pass
+        signed = sign_callback(json.dumps(payload, separators=(",", ":")))
+        # Telegram rejects callback_data > 64 bytes. Drop the button
+        # rather than silently breaking it; this only happens if a
+        # rule ships extra payload keys we did not plan for.
+        if len(signed.encode("utf-8")) > CALLBACK_DATA_MAX:
+            logger.warning(
+                "telegram button '%s' callback_data exceeds 64 bytes. dropping",
+                label,
+            )
+            continue
+        rows.append([{"text": label, "callback_data": signed}])
+    if not rows:
+        return None
+    return {"inline_keyboard": rows}
+
+
+async def _telegram_suppression_reason(rule, event_id, observation_data) -> str | None:
+    """Check rule-level snooze and per-event mute. Returns a short
+    reason string when the message should be suppressed, or None when
+    it should be delivered. Snooze wins over mute because snooze is
+    rule-wide (see comment on Rule.snoozed_until)."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    snoozed_until = getattr(rule, "snoozed_until", None)
+    if snoozed_until is not None and snoozed_until > now:
+        when = snoozed_until.astimezone().strftime("%H:%M")
+        return f"rule_snoozed_until_{when}"
+
+    camera_id_raw = observation_data.get("camera_id")
+    if not camera_id_raw:
+        return None
+    try:
+        camera_uuid = uuid.UUID(str(camera_id_raw))
+    except (ValueError, TypeError):
+        return None
+
+    from datetime import timedelta
+    from shared.models import Event as _Event, Observation as _Observation
+    from sqlalchemy import select as _select
+    cooldown = max(0, int(getattr(rule, "cooldown_seconds", 60) or 60))
+    window_start = now - timedelta(seconds=cooldown)
+    try:
+        async with async_session() as db:
+            stmt = (
+                _select(_Event)
+                .join(_Observation, _Event.observation_id == _Observation.id)
+                .where(_Event.rule_id == rule.id)
+                .where(_Observation.camera_id == camera_uuid)
+                .where(_Event.fired_at >= window_start)
+                .where(_Event.acked_at.is_(None))
+                .where(_Event.muted_until.is_not(None))
+                .where(_Event.muted_until > now)
+            )
+            result = await db.execute(stmt)
+            muted_event = result.scalars().first()
+            if muted_event is not None:
+                when = muted_event.muted_until.astimezone().strftime("%H:%M")
+                return f"event_muted_until_{when}"
+    except Exception:
+        logger.exception("telegram suppression lookup failed for rule=%s", rule.id)
+    return None
+
+
 async def _execute_telegram(action, observation_data, rule, event_id, ctx):
-    """Resolve a paired Telegram channel and send the rendered message."""
+    """Resolve a paired Telegram channel and send the rendered message.
+
+    Phase 2. include_thumbnail wires :meth:`TelegramAPI.send_photo`
+    with the on-disk observation snapshot. Buttons render an inline
+    keyboard with HMAC-signed callback_data. Rule snooze and per-event
+    mute suppress the send before the network call.
+    """
     from shared.crypto import InvalidToken, decrypt_secret
     from shared.models import TelegramChannel
-    from services.notify.telegram import TelegramAPI, TelegramError
+    from services.notify.telegram import TelegramAPI, TelegramError, PHOTO_CAPTION_MAX, PHOTO_FALLBACK_SENTINEL
 
     channel_id_raw = action.get("channel_id")
     if not channel_id_raw:
@@ -742,17 +889,20 @@ async def _execute_telegram(action, observation_data, rule, event_id, ctx):
         await _update_event_status(event_id, "telegram", "failed", "Invalid channel_id")
         return
 
+    # Suppression. Check before loading the channel so we don't waste
+    # a DB round trip when the rule is snoozed.
+    suppress_reason = await _telegram_suppression_reason(rule, event_id, observation_data)
+    if suppress_reason:
+        logger.info(
+            "telegram send suppressed for rule='%s' reason=%s", rule.name, suppress_reason,
+        )
+        await _update_event_status(event_id, "telegram", "skipped", suppress_reason)
+        return
+
     template = action.get("template") or "Rule {rule_name} fired on {camera_name}"
     silent = bool(action.get("silent"))
     include_thumbnail = bool(action.get("include_thumbnail"))
-    if include_thumbnail:
-        # Phase 1 is text only. We accept the flag for forward
-        # compatibility but log so users see why the photo never lands.
-        logger.warning(
-            "telegram action for rule '%s' has include_thumbnail=true. "
-            "Photo attachments arrive in Phase 2; sending text only.",
-            rule.name,
-        )
+    buttons_spec = action.get("buttons") or []
 
     async with async_session() as db:
         ch = await db.get(TelegramChannel, channel_uuid)
@@ -782,19 +932,78 @@ async def _execute_telegram(action, observation_data, rule, event_id, ctx):
         await _update_event_status(event_id, "telegram", "failed", "Rendered template is empty")
         return
 
+    reply_markup = _build_inline_keyboard(buttons_spec, event_id, rule.id, ctx)
+
+    # Pick send_photo vs send_message based on the thumbnail flag and
+    # on-disk reality. Missing path -> fall back to text + note.
+    thumbnail_path = observation_data.get("thumbnail_path") or ""
+    have_thumb = bool(thumbnail_path) and os.path.exists(thumbnail_path)
+    photo_mode = include_thumbnail and have_thumb
+
+    if include_thumbnail and not have_thumb:
+        # Don't fail the alert; deliver the text and annotate the
+        # event so the operator can see why the photo did not arrive.
+        logger.warning(
+            "telegram include_thumbnail set but path missing for rule='%s' path=%r",
+            rule.name, thumbnail_path,
+        )
+
     try:
-        result = await TelegramAPI.send_message(
-            token,
-            chat_id,
-            text,
-            parse_mode="HTML",
-            disable_notification=silent or default_silent,
-        )
-        logger.info(
-            "Telegram sent for rule '%s' channel='%s' message_id=%s",
-            rule.name, channel_label, result.get("message_id"),
-        )
-        await _update_event_status(event_id, "telegram", "success")
+        if photo_mode:
+            # Caption gets the leading part of the body, full body
+            # goes as a follow-up message when it exceeds the cap.
+            short_caption = text if len(text) <= PHOTO_CAPTION_MAX else text[: PHOTO_CAPTION_MAX - 1] + "…"
+            photo_result = await TelegramAPI.send_photo(
+                token,
+                chat_id,
+                thumbnail_path,
+                caption=short_caption,
+                parse_mode="HTML",
+                disable_notification=silent or default_silent,
+                reply_markup=reply_markup,
+            )
+            note = None
+            if photo_result.get("fallback") == PHOTO_FALLBACK_SENTINEL:
+                note = photo_result.get("fallback_reason") or "photo_fallback"
+                logger.warning(
+                    "telegram photo fallback rule='%s' reason=%s",
+                    rule.name, note,
+                )
+            if len(text) > PHOTO_CAPTION_MAX and not photo_result.get("fallback"):
+                # Photo carried the truncated caption. Follow up with
+                # the full body so the user never loses content.
+                try:
+                    await TelegramAPI.send_message(
+                        token, chat_id, text,
+                        parse_mode="HTML",
+                        disable_notification=silent or default_silent,
+                    )
+                except TelegramError:
+                    logger.exception("telegram follow-up send_message failed for rule='%s'", rule.name)
+            logger.info(
+                "Telegram photo sent for rule='%s' channel='%s' message_id=%s",
+                rule.name, channel_label, photo_result.get("message_id"),
+            )
+            await _update_event_status(
+                event_id, "telegram",
+                "success" if not note else "success",
+                note,
+            )
+        else:
+            result = await TelegramAPI.send_message(
+                token,
+                chat_id,
+                text,
+                parse_mode="HTML",
+                disable_notification=silent or default_silent,
+                reply_markup=reply_markup,
+            )
+            logger.info(
+                "Telegram sent for rule '%s' channel='%s' message_id=%s",
+                rule.name, channel_label, result.get("message_id"),
+            )
+            note = "thumbnail_missing" if (include_thumbnail and not have_thumb) else None
+            await _update_event_status(event_id, "telegram", "success", note)
     except TelegramError as exc:
         await _update_event_status(event_id, "telegram", "failed", exc.description[:500])
         if exc.is_forbidden:

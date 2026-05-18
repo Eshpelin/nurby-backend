@@ -68,3 +68,37 @@ async def acknowledge_event(event_id: uuid.UUID, _current_user: User = Depends(r
     await db.commit()
     await db.refresh(event)
     return event
+
+
+@router.post("/{event_id}/ack", response_model=EventResponse)
+async def ack_event(
+    event_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Phase 2 ack endpoint. Symmetric counterpart to the Telegram
+    inline-button ack. Any authenticated user can ack their own
+    household's events; the ack records the acting user so the
+    timeline can show "Acknowledged by Aisha (web)" regardless of
+    whether the ack arrived via the Telegram button or the web UI.
+
+    Idempotent. a second ack on an already-acknowledged event is a
+    no-op that returns the existing record (the first acker is
+    preserved). Mirrors the prior ``acknowledged_at`` column so old
+    dashboards keep working.
+    """
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if event.acked_at is None:
+        now = datetime.now(timezone.utc)
+        event.acked_at = now
+        event.acked_by_user_id = current_user.id
+        event.acked_via = "web"
+        # Mirror to the legacy column so callers reading either field
+        # see the ack. Phase 1 dashboards only read acknowledged_at.
+        if event.acknowledged_at is None:
+            event.acknowledged_at = now
+        await db.commit()
+        await db.refresh(event)
+    return event

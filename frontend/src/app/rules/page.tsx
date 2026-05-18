@@ -37,6 +37,11 @@ interface EventEntry {
   action_status: string;
   action_error: string | null;
   action_type: string | null;
+  // Phase 2 ack triad. acked_via is one of telegram | web | api or null.
+  acked_at?: string | null;
+  acked_by_user_id?: string | null;
+  acked_via?: string | null;
+  muted_until?: string | null;
 }
 
 interface Camera {
@@ -169,7 +174,53 @@ const TELEGRAM_TEMPLATE_VARS = [
   { key: "detections_summary", desc: "Compact list of objects and faces detected" },
   { key: "observation_id", desc: "Database id of the observation" },
   { key: "event_id", desc: "Database id of the fired event" },
+  { key: "event_url", desc: "Web UI deep link to the event (needs public base URL)" },
 ];
+
+// Phase 2 inline button spec. Kept in lockstep with the action
+// validator in shared/schemas.py and the executor's button builder
+// in services/events/actions.py.
+type TelegramButtonAction = "ack" | "mute_event" | "snooze_rule" | "open";
+interface TelegramButton {
+  label: string;
+  action: TelegramButtonAction;
+  duration_seconds?: number;
+  url?: string;
+}
+
+const TELEGRAM_BUTTON_ACTION_OPTIONS: { value: TelegramButtonAction; label: string }[] = [
+  { value: "ack", label: "Acknowledge" },
+  { value: "mute_event", label: "Mute event" },
+  { value: "snooze_rule", label: "Snooze rule" },
+  { value: "open", label: "Open URL" },
+];
+
+const TELEGRAM_DEFAULT_TEMPLATE =
+  "🔔 {rule_name}\n📷 {camera_name} at {timestamp_local}\n\n{vlm_description}";
+
+const TELEGRAM_DEFAULT_BUTTONS: TelegramButton[] = [
+  { label: "✓ Acknowledge", action: "ack" },
+  { label: "🔕 Mute 10 min", action: "mute_event", duration_seconds: 600 },
+  { label: "💤 Snooze rule 1h", action: "snooze_rule", duration_seconds: 3600 },
+  { label: "📺 View clip", action: "open", url: "{event_url}" },
+];
+
+const TELEGRAM_BUTTON_DURATION_DEFAULTS: Record<TelegramButtonAction, number | undefined> = {
+  ack: undefined,
+  mute_event: 600,
+  snooze_rule: 3600,
+  open: undefined,
+};
+
+function isValidHttpUrlOrTemplate(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  // Allow {event_url} (and any single-brace template var) since the
+  // backend resolves it at send time. The literal substring check
+  // avoids parsing the templated form as a URL.
+  if (trimmed.includes("{") && trimmed.includes("}")) return true;
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+}
 
 interface TelegramChannelOption {
   id: string;
@@ -744,6 +795,12 @@ export default function RulesPage() {
   );
   const [formActionTelegramSilent, setFormActionTelegramSilent] = useState(false);
   const [formActionTelegramThumbnail, setFormActionTelegramThumbnail] = useState(false);
+  const [formActionTelegramButtons, setFormActionTelegramButtons] = useState<TelegramButton[]>(
+    TELEGRAM_DEFAULT_BUTTONS,
+  );
+  // Tracks whether the user has touched the telegram action so we
+  // know whether to prefill defaults on the next telegram pick.
+  const [telegramDefaultsApplied, setTelegramDefaultsApplied] = useState(false);
 
   // VLM call action fields
   const [formVlmProvider, setFormVlmProvider] = useState("openai");
@@ -870,6 +927,22 @@ export default function RulesPage() {
     fetchTelegramChannels();
   }, [fetchRules, fetchCameras, fetchPersons, fetchTelegramChannels]);
 
+  // Prefill the Phase 2 defaults the first time the user picks
+  // telegram as the action type in a new-rule form. Editing an
+  // existing rule preserves whatever the rule already had.
+  useEffect(() => {
+    if (
+      formActionType === "telegram" &&
+      !telegramDefaultsApplied &&
+      !editRule &&
+      formActionTelegramButtons.length === 0
+    ) {
+      setFormActionTelegramButtons(TELEGRAM_DEFAULT_BUTTONS);
+      setFormActionTelegramTemplate(TELEGRAM_DEFAULT_TEMPLATE);
+      setTelegramDefaultsApplied(true);
+    }
+  }, [formActionType, telegramDefaultsApplied, editRule, formActionTelegramButtons.length]);
+
   // Fetch events when a rule is selected, auto-refresh every 30s
   useEffect(() => {
     if (!selectedRule) {
@@ -924,6 +997,8 @@ export default function RulesPage() {
     );
     setFormActionTelegramSilent(false);
     setFormActionTelegramThumbnail(false);
+    setFormActionTelegramButtons(TELEGRAM_DEFAULT_BUTTONS);
+    setTelegramDefaultsApplied(false);
     setFormCooldown("300");
     setFormError("");
   };
@@ -1024,6 +1099,11 @@ export default function RulesPage() {
     );
     setFormActionTelegramSilent(Boolean(acts?.silent));
     setFormActionTelegramThumbnail(Boolean(acts?.include_thumbnail));
+    const existingButtons = Array.isArray(acts?.buttons) ? (acts?.buttons as TelegramButton[]) : [];
+    setFormActionTelegramButtons(existingButtons);
+    // Don't auto-restore defaults when editing an existing rule; the
+    // user already chose their button set.
+    setTelegramDefaultsApplied(true);
 
     // Restore payload template
     const pt = acts?.payload_template;
@@ -1195,8 +1275,21 @@ export default function RulesPage() {
       action.channel_id = formActionTelegramChannelId;
       action.template = formActionTelegramTemplate;
       action.silent = formActionTelegramSilent;
-      // Phase 1 sends text only. We persist the flag for Phase 2.
+      // Phase 2. include_thumbnail now wires send_photo; the executor
+      // falls back to send_message when the on-disk snapshot is missing.
       action.include_thumbnail = formActionTelegramThumbnail;
+      if (formActionTelegramButtons.length > 0) {
+        action.buttons = formActionTelegramButtons.map((b) => {
+          const out: Record<string, unknown> = { label: b.label, action: b.action };
+          if (b.action === "open") out.url = b.url || "{event_url}";
+          if (b.action === "mute_event" || b.action === "snooze_rule") {
+            if (b.duration_seconds && b.duration_seconds > 0) {
+              out.duration_seconds = b.duration_seconds;
+            }
+          }
+          return out;
+        });
+      }
     }
     if (formActionType === "vlm_call") {
       action.provider = formVlmProvider;
@@ -1248,6 +1341,31 @@ export default function RulesPage() {
       if (!formActionTelegramTemplate.trim()) {
         setFormError("Telegram message template cannot be empty");
         return;
+      }
+      if (formActionTelegramButtons.length > 4) {
+        setFormError("Telegram supports at most 4 inline buttons");
+        return;
+      }
+      for (let i = 0; i < formActionTelegramButtons.length; i++) {
+        const b = formActionTelegramButtons[i];
+        if (!b.label.trim()) {
+          setFormError(`Button ${i + 1}: label is required`);
+          return;
+        }
+        if (b.action === "open") {
+          if (!b.url || !isValidHttpUrlOrTemplate(b.url)) {
+            setFormError(`Button ${i + 1}: URL must start with http(s) or use a template variable`);
+            return;
+          }
+        }
+        if (
+          (b.action === "mute_event" || b.action === "snooze_rule") &&
+          b.duration_seconds !== undefined &&
+          (b.duration_seconds < 60 || b.duration_seconds > 24 * 3600)
+        ) {
+          setFormError(`Button ${i + 1}: duration must be between 60s and 24h`);
+          return;
+        }
       }
     }
     if (formActionUseCustomPayload && formActionPayloadTemplate.trim()) {
@@ -1537,6 +1655,24 @@ export default function RulesPage() {
                             {ev.action_type && (
                               <span className="px-1.5 py-0.5 text-[10px] rounded bg-muted text-muted-foreground font-mono">
                                 {ev.action_type}
+                              </span>
+                            )}
+                            {(ev.acked_at || ev.acknowledged_at) && (
+                              <span
+                                className="px-1.5 py-0.5 text-[10px] rounded bg-green-500/15 text-green-400 border border-green-500/30"
+                                title={
+                                  ev.acked_via
+                                    ? `Acknowledged via ${ev.acked_via}`
+                                    : "Acknowledged"
+                                }
+                              >
+                                {ev.acked_via === "telegram"
+                                  ? "✓ Acked (Telegram)"
+                                  : ev.acked_via === "web"
+                                  ? "✓ Acked (web)"
+                                  : ev.acked_via === "api"
+                                  ? "✓ Acked (API)"
+                                  : "✓ Acked"}
                               </span>
                             )}
                           </div>
@@ -2494,7 +2630,6 @@ export default function RulesPage() {
                   </div>
                 )}
 
-                {/* Telegram fields */}
                 {formActionType === "telegram" && (
                   <div className="space-y-3">
                     {telegramChannelsLoading ? (
@@ -2570,18 +2705,166 @@ export default function RulesPage() {
                             <span className="text-xs">Silent (no sound, overrides channel default)</span>
                           </label>
                           <label
-                            className="flex items-center gap-2 cursor-not-allowed opacity-60"
-                            title="Coming soon. Phase 2."
+                            className="flex items-center gap-2 cursor-pointer"
+                            title="Sends the observation snapshot as a Telegram photo. Files >10MB fall back to a link."
                           >
                             <input
                               type="checkbox"
-                              disabled
                               checked={formActionTelegramThumbnail}
                               onChange={(e) => setFormActionTelegramThumbnail(e.target.checked)}
                               className="accent-green-500"
                             />
-                            <span className="text-xs">Include snapshot (Phase 2)</span>
+                            <span className="text-xs">
+                              Include snapshot
+                              <span className="text-muted-foreground ml-1">
+                                (photo attachment, &gt;10MB falls back to a link)
+                              </span>
+                            </span>
                           </label>
+                        </div>
+
+                        {/* Phase 2 inline buttons editor */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs text-muted-foreground">
+                              Inline buttons ({formActionTelegramButtons.length}/4)
+                            </label>
+                            <div className="flex gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setFormActionTelegramButtons(TELEGRAM_DEFAULT_BUTTONS)}
+                                className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-muted text-muted-foreground"
+                              >
+                                Reset to defaults
+                              </button>
+                              <button
+                                type="button"
+                                disabled={formActionTelegramButtons.length >= 4}
+                                onClick={() => {
+                                  setFormActionTelegramButtons((prev) => [
+                                    ...prev,
+                                    { label: "Action", action: "ack" },
+                                  ]);
+                                }}
+                                className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-muted text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                + Add button
+                              </button>
+                            </div>
+                          </div>
+
+                          {formActionTelegramButtons.length === 0 ? (
+                            <div className="text-[11px] text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
+                              No buttons. Recipients see a plain message.
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {formActionTelegramButtons.map((btn, i) => (
+                                <div
+                                  key={i}
+                                  className="flex flex-wrap gap-2 items-center bg-muted/30 border border-border rounded px-2 py-1.5"
+                                >
+                                  <input
+                                    type="text"
+                                    value={btn.label}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setFormActionTelegramButtons((prev) =>
+                                        prev.map((b, idx) => (idx === i ? { ...b, label: v } : b)),
+                                      );
+                                    }}
+                                    placeholder="Label"
+                                    className="flex-1 min-w-[120px] px-2 py-1 rounded bg-background border border-border text-xs"
+                                  />
+                                  <StyledSelect
+                                    value={btn.action}
+                                    onChange={(val) => {
+                                      const action = val as TelegramButtonAction;
+                                      setFormActionTelegramButtons((prev) =>
+                                        prev.map((b, idx) => {
+                                          if (idx !== i) return b;
+                                          const next: TelegramButton = { ...b, action };
+                                          // Snap duration / url to sane defaults on action change.
+                                          next.duration_seconds = TELEGRAM_BUTTON_DURATION_DEFAULTS[action];
+                                          if (action === "open" && !next.url) next.url = "{event_url}";
+                                          if (action !== "open") delete next.url;
+                                          return next;
+                                        }),
+                                      );
+                                    }}
+                                    options={TELEGRAM_BUTTON_ACTION_OPTIONS.map((o) => ({
+                                      value: o.value,
+                                      label: o.label,
+                                    }))}
+                                  />
+                                  {(btn.action === "mute_event" || btn.action === "snooze_rule") && (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="range"
+                                        min={60}
+                                        max={3600}
+                                        step={60}
+                                        value={btn.duration_seconds ?? 600}
+                                        onChange={(e) => {
+                                          const v = parseInt(e.target.value) || 600;
+                                          setFormActionTelegramButtons((prev) =>
+                                            prev.map((b, idx) =>
+                                              idx === i ? { ...b, duration_seconds: v } : b,
+                                            ),
+                                          );
+                                        }}
+                                        className="w-24"
+                                      />
+                                      <span className="text-[10px] text-muted-foreground font-mono w-12">
+                                        {Math.round((btn.duration_seconds ?? 600) / 60)}m
+                                      </span>
+                                    </div>
+                                  )}
+                                  {btn.action === "open" && (
+                                    <input
+                                      type="text"
+                                      value={btn.url ?? ""}
+                                      onChange={(e) => {
+                                        const v = e.target.value;
+                                        setFormActionTelegramButtons((prev) =>
+                                          prev.map((b, idx) => (idx === i ? { ...b, url: v } : b)),
+                                        );
+                                      }}
+                                      placeholder="https://... or {event_url}"
+                                      className={`flex-1 min-w-[160px] px-2 py-1 rounded bg-background border text-xs ${
+                                        btn.url && !isValidHttpUrlOrTemplate(btn.url)
+                                          ? "border-red-500"
+                                          : "border-border"
+                                      }`}
+                                    />
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFormActionTelegramButtons((prev) =>
+                                        prev.filter((_, idx) => idx !== i),
+                                      );
+                                    }}
+                                    className="text-[10px] px-2 py-1 rounded border border-border hover:bg-red-500/10 hover:border-red-500/40 text-muted-foreground"
+                                    title="Remove button"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* Surfaced warning when an `open` button references {event_url}
+                              and the backend public_base_url is empty. The frontend has no
+                              direct way to know the backend's config, so we conservatively
+                              warn whenever the placeholder is used. */}
+                          {formActionTelegramButtons.some(
+                            (b) => b.action === "open" && (b.url || "").includes("{event_url}"),
+                          ) && (
+                            <div className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
+                              Set the public base URL in settings to enable View clip buttons. Otherwise the button will be dropped at send time.
+                            </div>
+                          )}
                         </div>
 
                         <div className="text-[11px] text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
@@ -2589,9 +2872,19 @@ export default function RulesPage() {
                             const ch = telegramChannels.find(
                               (c) => c.id === formActionTelegramChannelId,
                             );
-                            if (!ch) return "Send a Telegram message to the selected channel.";
-                            const target = ch.chat_title || `@${ch.bot_username || "bot"}`;
-                            return `Send a Telegram message to ${target}.`;
+                            const target = ch
+                              ? ch.chat_title || `@${ch.bot_username || "bot"}`
+                              : "the selected channel";
+                            const parts: string[] = [`Send a Telegram message to ${target}`];
+                            if (formActionTelegramThumbnail) parts.push("with snapshot");
+                            if (formActionTelegramButtons.length > 0) {
+                              parts.push(
+                                `with ${formActionTelegramButtons.length} inline button${
+                                  formActionTelegramButtons.length === 1 ? "" : "s"
+                                }`,
+                              );
+                            }
+                            return parts.join(" ") + ".";
                           })()}
                         </div>
                       </>
