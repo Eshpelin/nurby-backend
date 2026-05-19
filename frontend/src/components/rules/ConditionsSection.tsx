@@ -4,6 +4,7 @@ import type { Camera } from "./types";
 
 export interface ConditionsSectionProps {
   cameras: Camera[];
+  systemTz?: string;
   formCondCameras: string[];
   setFormCondCameras: (v: string[]) => void;
   formScheduleMode: "always" | "custom";
@@ -21,6 +22,7 @@ export interface ConditionsSectionProps {
 export function ConditionsSection(props: ConditionsSectionProps) {
   const {
     cameras,
+    systemTz,
     formCondCameras,
     setFormCondCameras,
     formScheduleMode,
@@ -155,6 +157,14 @@ export function ConditionsSection(props: ConditionsSectionProps) {
               {formCondDays.length === 0 && (
                 <span className="text-[10px] text-muted-foreground">No days selected = every day</span>
               )}
+              {systemTz && (
+                <div
+                  className="mt-1 text-[10px] text-muted-foreground"
+                  title="Change in Settings → System."
+                >
+                  Schedule evaluated in {systemTz}.
+                </div>
+              )}
             </div>
 
             <div>
@@ -176,6 +186,11 @@ export function ConditionsSection(props: ConditionsSectionProps) {
               </div>
               {!formCondTimeAfter && !formCondTimeBefore && (
                 <span className="text-[10px] text-muted-foreground">No times set = all day</span>
+              )}
+              {formCondTimeAfter && formCondTimeBefore && formCondTimeAfter > formCondTimeBefore && (
+                <div className="mt-1 text-[10px] text-sky-300 bg-sky-500/10 border border-sky-500/30 rounded px-2 py-1">
+                  Overnight window. Rule fires from {formCondTimeAfter} to midnight, then midnight to {formCondTimeBefore}.
+                </div>
               )}
             </div>
 
