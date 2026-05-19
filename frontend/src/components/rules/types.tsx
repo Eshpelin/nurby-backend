@@ -470,6 +470,52 @@ export function composeSummary(
   return sentence;
 }
 
+// ── Rule test + replay shapes (mirror shared/schemas.py) ──
+
+export interface RulePayload {
+  name: string;
+  enabled: boolean;
+  trigger_pattern: Record<string, unknown>;
+  conditions: Record<string, unknown> | null;
+  actions: Record<string, unknown> | Record<string, unknown>[];
+  cooldown_seconds: number;
+}
+
+export interface RuleTestActionPreview {
+  index: number;
+  action_type: string;
+  rendered_action: Record<string, unknown>;
+}
+
+export interface RuleTestResponse {
+  matched: boolean;
+  reason: string;
+  matched_trigger: boolean;
+  matched_conditions: boolean;
+  schedule_blocked: boolean;
+  cooldown_active: boolean;
+  synthesized_observation: Record<string, unknown>;
+  would_fire: RuleTestActionPreview[];
+}
+
+export interface RuleReplaySample {
+  observation_id: string;
+  timestamp: string;
+  camera_id: string | null;
+  thumbnail_path: string | null;
+  snippet: string | null;
+}
+
+export interface RuleReplayResponse {
+  rule_id: string;
+  hours: number;
+  scanned: number;
+  matched: number;
+  first_matched_at: string | null;
+  last_matched_at: string | null;
+  samples: RuleReplaySample[];
+}
+
 export function buildRuleSummary(rule: Rule, cameras: Camera[]): string {
   const cond = rule.conditions || {};
   const camIds = (cond.camera_ids as string[]) || (cond.camera_id ? [cond.camera_id as string] : []);

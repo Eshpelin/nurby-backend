@@ -22,6 +22,8 @@ import { SummaryCard } from "./SummaryCard";
 import { TriggerSection } from "./TriggerSection";
 import { ConditionsSection } from "./ConditionsSection";
 import { ActionsSection } from "./ActionsSection";
+import TestPanel from "./TestPanel";
+import type { RulePayload } from "./types";
 
 export interface RuleModalProps {
   open: boolean;
@@ -370,7 +372,7 @@ export function RuleModal({
     );
   }, [formTriggerType, formTriggerLabel, formTriggerPersonId, formTriggerAudioLabel, formTriggerAudioMinScore, formTriggerGeomCamId, formTriggerGeomPoints, formTriggerLoiterSeconds, formTriggerObjectClass, formTriggerLineDirection, formActionType, formActionUrl, formActionMethod, formActionMessage, formActionSeverity, formScheduleMode, formCondDays, formCondTimeAfter, formCondTimeBefore, formCondCameras, cameras, formCooldown]);
 
-  const buildPayload = () => {
+  const buildPayload = (): RulePayload => {
     const trigger_pattern: Record<string, unknown> = { type: formTriggerType };
     if (formTriggerType === "object_detected" && formTriggerLabel) {
       trigger_pattern.label = formTriggerLabel;
@@ -806,6 +808,13 @@ export function RuleModal({
           </div>
 
           <SummaryCard text={formSummary} className="p-3" />
+
+          <TestPanel
+            payload={buildPayload}
+            existingRuleId={editRule?.id ?? null}
+            cameras={cameras}
+            className="mt-4"
+          />
 
           {formError && (
             <div className="text-xs text-red-400">{formError}</div>
