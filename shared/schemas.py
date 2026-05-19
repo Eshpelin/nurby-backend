@@ -601,6 +601,94 @@ class RuleResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Rule test + replay schemas ──
+#
+# Both endpoints are pure dry-run. ``/rules/test`` never persists an
+# event and never executes an action. ``/rules/{id}/replay`` only
+# reads Observation rows and returns a tally plus sample matches.
+
+class RuleTestRequest(BaseModel):
+    """Payload for POST /api/rules/test.
+
+    The trigger / conditions / actions fields mirror a normal rule body
+    so the frontend can send the in-progress draft straight from the
+    rule builder. ``camera_id`` and ``dry_run_observation`` are two
+    escape hatches. when ``dry_run_observation`` is set, the synth
+    step is skipped and the observation is used verbatim. when only
+    ``camera_id`` is set, the most recent Observation row for that
+    camera (within the last 1h) is used. Otherwise the engine
+    synthesizes a permissive observation tailored to the trigger.
+    """
+
+    trigger_pattern: dict
+    conditions: dict | None = None
+    cooldown_seconds: int = 0
+    actions: list[dict] = Field(default_factory=list)
+    camera_id: uuid.UUID | None = None
+    dry_run_observation: dict | None = None
+
+    @field_validator("actions")
+    @classmethod
+    def _check_actions(cls, v):
+        # Run the same chain validator that RuleCreate uses so the
+        # frontend sees the same 422 errors before the rule is saved.
+        if v:
+            _validate_action_chain(v)
+        return v
+
+    @model_validator(mode="after")
+    def _check_trigger(self):
+        _validate_trigger_pattern(self.trigger_pattern)
+        return self
+
+
+class RuleTestActionPreview(BaseModel):
+    """One entry in ``would_fire``. ``rendered_action`` is the action
+    dict with every ``{{...}}`` token resolved against the synthesized
+    observation, but the action itself is never executed."""
+
+    index: int
+    action_type: str
+    rendered_action: dict
+
+
+class RuleTestResponse(BaseModel):
+    """Response for POST /api/rules/test.
+
+    ``cooldown_active`` is always false for /test (there is no fired
+    history to consult). It is kept in the response shape so the UI
+    can render the same outcome panel for /test and the future
+    "explain last fire" endpoint.
+    """
+
+    matched: bool
+    reason: str
+    matched_trigger: bool
+    matched_conditions: bool
+    schedule_blocked: bool
+    cooldown_active: bool = False
+    synthesized_observation: dict
+    would_fire: list[RuleTestActionPreview] = Field(default_factory=list)
+
+
+class RuleReplaySample(BaseModel):
+    observation_id: uuid.UUID
+    timestamp: datetime
+    camera_id: uuid.UUID | None
+    thumbnail_path: str | None
+    snippet: str | None
+
+
+class RuleReplayResponse(BaseModel):
+    rule_id: uuid.UUID
+    hours: int
+    scanned: int
+    matched: int
+    first_matched_at: datetime | None
+    last_matched_at: datetime | None
+    samples: list[RuleReplaySample] = Field(default_factory=list)
+
+
 # ── Event schemas ──
 
 class EventResponse(BaseModel):
