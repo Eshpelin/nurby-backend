@@ -175,10 +175,6 @@ def test_time_window_overnight_out(monkeypatch):
 # ── timezone awareness ────────────────────────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Pass B. engine must read system_timezone and pass tz into datetime.now()",
-)
 def test_time_window_respects_system_timezone(monkeypatch):
     """When system_timezone is set, the day+window must be computed in
     that zone, not the host's locale or UTC.

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ── Camera schemas ──
@@ -485,6 +485,59 @@ def _validate_action_chain(actions):
                     known_schemas[output] = action["response_schema"]
 
 
+def _validate_trigger_pattern(trigger_pattern: dict) -> None:
+    """Reject geometry-bound trigger shapes that cannot evaluate.
+
+    Loitering and line_cross rules need both a polygon/segment AND a
+    camera_id. speech_phrase rules need at least one phrase. The
+    perception engine silently no-ops on bad shapes today, so we
+    catch them at the API boundary and surface an inline-friendly
+    error the frontend can render next to the field.
+    """
+    if not isinstance(trigger_pattern, dict):
+        raise ValueError("trigger_pattern must be an object")
+
+    t = trigger_pattern.get("type")
+
+    if t == "loitering":
+        # Legacy zone_name mode is still supported (pipeline pre-
+        # computes events). Only the inline-geometry mode needs
+        # validation here.
+        if "zone_name" in trigger_pattern and trigger_pattern.get("zone_name"):
+            return
+        pts = trigger_pattern.get("points")
+        if not isinstance(pts, list) or len(pts) < 3:
+            raise ValueError(
+                "Loitering rules need at least 3 zone points and a camera. "
+                "Open the geometry editor."
+            )
+        if not trigger_pattern.get("camera_id"):
+            raise ValueError(
+                "Loitering rules need a camera_id so the zone is anchored to a feed."
+            )
+
+    elif t == "line_cross":
+        if "zone_name" in trigger_pattern and trigger_pattern.get("zone_name"):
+            return
+        pts = trigger_pattern.get("points")
+        if not isinstance(pts, list) or len(pts) != 2:
+            raise ValueError(
+                "Line-cross rules need exactly 2 points and a camera. "
+                "Open the geometry editor."
+            )
+        if not trigger_pattern.get("camera_id"):
+            raise ValueError(
+                "Line-cross rules need a camera_id so the line is anchored to a feed."
+            )
+
+    elif t == "speech_phrase":
+        phrases = trigger_pattern.get("phrases")
+        if not isinstance(phrases, list) or not [p for p in phrases if str(p).strip()]:
+            raise ValueError(
+                "Speech-phrase rules need at least one non-empty phrase."
+            )
+
+
 class RuleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     enabled: bool = True
@@ -498,6 +551,41 @@ class RuleCreate(BaseModel):
     def _check_actions(cls, v):
         _validate_action_chain(v)
         return v
+
+    @model_validator(mode="after")
+    def _check_trigger(self):
+        _validate_trigger_pattern(self.trigger_pattern)
+        return self
+
+
+class RuleUpdate(BaseModel):
+    """Partial-update payload for PATCH /rules/{id}.
+
+    Mirrors RuleCreate but every field is optional so the frontend can
+    flip ``enabled`` or rename a rule without re-sending the trigger.
+    Geometry validation only fires when ``trigger_pattern`` is set.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    enabled: bool | None = None
+    trigger_pattern: dict | None = None
+    conditions: dict | None = None
+    actions: dict | list | None = None
+    cooldown_seconds: int | None = None
+
+    @field_validator("actions")
+    @classmethod
+    def _check_actions(cls, v):
+        if v is None:
+            return v
+        _validate_action_chain(v)
+        return v
+
+    @model_validator(mode="after")
+    def _check_trigger(self):
+        if self.trigger_pattern is not None:
+            _validate_trigger_pattern(self.trigger_pattern)
+        return self
 
 
 class RuleResponse(BaseModel):

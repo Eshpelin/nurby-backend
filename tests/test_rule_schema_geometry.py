@@ -19,22 +19,12 @@ def _mkrule(trigger_pattern):
     )
 
 
-# Pass B turns these into proper rejections by adding a model
-# validator to RuleCreate. Until then the schema lets them through.
-_XFAIL_GEOMETRY = pytest.mark.xfail(
-    strict=True,
-    reason="Pass B. schema validator must reject geometry-less triggers",
-)
-
-
-@_XFAIL_GEOMETRY
 def test_loitering_without_points_rejected():
     with pytest.raises(Exception) as exc:
         _mkrule({"type": "loitering", "threshold_seconds": 30, "camera_id": "cam"})
     assert "loiter" in str(exc.value).lower() or "point" in str(exc.value).lower()
 
 
-@_XFAIL_GEOMETRY
 def test_loitering_with_two_points_rejected():
     with pytest.raises(Exception):
         _mkrule({
@@ -44,7 +34,6 @@ def test_loitering_with_two_points_rejected():
         })
 
 
-@_XFAIL_GEOMETRY
 def test_loitering_without_camera_rejected():
     with pytest.raises(Exception):
         _mkrule({
@@ -53,13 +42,11 @@ def test_loitering_without_camera_rejected():
         })
 
 
-@_XFAIL_GEOMETRY
 def test_line_cross_without_points_rejected():
     with pytest.raises(Exception):
         _mkrule({"type": "line_cross", "direction": "any", "camera_id": "cam"})
 
 
-@_XFAIL_GEOMETRY
 def test_line_cross_with_three_points_rejected():
     with pytest.raises(Exception):
         _mkrule({
@@ -69,19 +56,16 @@ def test_line_cross_with_three_points_rejected():
         })
 
 
-@_XFAIL_GEOMETRY
 def test_line_cross_without_camera_rejected():
     with pytest.raises(Exception):
         _mkrule({"type": "line_cross", "points": [[0, 0], [10, 0]]})
 
 
-@_XFAIL_GEOMETRY
 def test_speech_phrase_empty_phrases_rejected():
     with pytest.raises(Exception):
         _mkrule({"type": "speech_phrase", "phrases": []})
 
 
-@_XFAIL_GEOMETRY
 def test_speech_phrase_missing_phrases_rejected():
     with pytest.raises(Exception):
         _mkrule({"type": "speech_phrase"})

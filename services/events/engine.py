@@ -27,6 +27,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - py<3.9
+    ZoneInfo = None  # type: ignore
+
 from shared.database import async_session
 from shared.models import Event, Rule
 from services.events.actions import execute_action
@@ -36,6 +41,11 @@ from services.perception.spatial_events import (
     _cross_direction,
 )
 from sqlalchemy import select
+
+# Redis pubsub channel that backend routes publish to whenever a rule
+# is created, updated, or deleted. The perception process listens and
+# zeros out _last_load so the next evaluate() refreshes immediately.
+RULES_INVALIDATE_CHANNEL = "nurby:rules:invalidate"
 
 def _centroid(b):
     return ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
@@ -51,10 +61,18 @@ class RuleEngine:
         self._cache_ttl = 30  # reload rules every 30s
         # Per-(rule_id, track_id) entry timestamp for inline-geometry loiter rules.
         self._loiter_entry: dict[tuple[uuid.UUID, int], float] = {}
+        # Pubsub invalidator. set when start_invalidation_listener is called.
+        self._invalidate_stop: asyncio.Event | None = None
+        self._invalidate_task: asyncio.Task | None = None
 
     async def evaluate(self, observation_data: dict):
         """Evaluate an observation against all active rules."""
         await self._maybe_reload_rules()
+
+        # Resolve the household timezone once per tick. Day-of-week
+        # and time-window checks pin against this zone so a 22:00 to
+        # 06:00 schedule means LA-local, not perception-host-local.
+        tz = await self._resolve_timezone()
 
         for rule in self._rules:
             if not rule.enabled:
@@ -71,7 +89,7 @@ class RuleEngine:
                 continue
 
             # Check conditions
-            if rule.conditions and not self._check_conditions(rule.conditions, observation_data):
+            if rule.conditions and not self._check_conditions(rule.conditions, observation_data, tz):
                 continue
 
             # Rule matched. Fire actions.
@@ -302,8 +320,35 @@ class RuleEngine:
         return False
 
     @staticmethod
-    def _check_conditions(conditions: dict, data: dict) -> bool:
-        """Check if additional conditions are met."""
+    async def _resolve_timezone():
+        """Read system_timezone from app settings. Falls back to UTC."""
+        try:
+            from shared.app_settings import get_setting
+            name = await get_setting("system_timezone")
+        except Exception:
+            name = None
+        if name and ZoneInfo is not None:
+            try:
+                return ZoneInfo(name)
+            except Exception:
+                logger.warning("Invalid system_timezone %r. falling back to UTC", name)
+        return timezone.utc
+
+    @staticmethod
+    def _check_conditions(conditions: dict, data: dict, tz=None) -> bool:
+        """Check if additional conditions are met.
+
+        ``tz`` is the household timezone resolved once per evaluate()
+        tick. Pass None for legacy callers; UTC is used in that case.
+
+        Time window semantics. ``time_after <= now <= time_before``.
+        Boundaries are inclusive. Overnight ranges (``time_after >
+        time_before``) wrap midnight; the check becomes
+        ``now >= time_after OR now <= time_before``.
+        """
+        if tz is None:
+            tz = timezone.utc
+
         # Camera filter (supports single camera_id or camera_ids array)
         cam_ids = conditions.get("camera_ids")
         cam = conditions.get("camera_id")
@@ -312,21 +357,22 @@ class RuleEngine:
         if cam and not cam_ids and data.get("camera_id") != cam:
             return False
 
-        # Day of week filter
+        # Day of week filter (timezone-aware).
         allowed_days = conditions.get("days")
         if allowed_days:
             day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
-            today = day_map.get(datetime.now().weekday(), "")
+            today = day_map.get(datetime.now(tz).weekday(), "")
             if today not in allowed_days:
                 return False
 
-        # Time window
+        # Time window (timezone-aware).
         time_after = conditions.get("time_after")
         time_before = conditions.get("time_before")
         if time_after or time_before:
-            now_time = datetime.now().strftime("%H:%M")
+            now_time = datetime.now(tz).strftime("%H:%M")
             if time_after and time_before and time_after > time_before:
-                # Overnight range (e.g. 19:00 to 07:00)
+                # Overnight range (e.g. 22:00 to 06:00). Pass if we
+                # are after the start OR before the end.
                 if now_time < time_after and now_time > time_before:
                     return False
             else:
@@ -335,12 +381,76 @@ class RuleEngine:
                 if time_before and now_time > time_before:
                     return False
 
-        # Confidence filter
+        # Confidence filter. ``is not None`` so a configured 0.0
+        # threshold (no minimum) is treated the same as falsy 0 today
+        # while a None means "no filter configured".
         min_conf = conditions.get("min_confidence")
-        if min_conf and (data.get("confidence") or 0) < min_conf:
+        if min_conf is not None and (data.get("confidence") or 0) < min_conf:
             return False
 
         return True
+
+    # ── Pubsub invalidation ────────────────────────────────────────
+
+    async def start_invalidation_listener(self) -> None:
+        """Subscribe to ``nurby:rules:invalidate`` on Redis and zero
+        ``_last_load`` whenever a message arrives. Idempotent. callers
+        may invoke this once during perception startup. The task self-
+        cancels via ``stop_invalidation_listener``.
+        """
+        if self._invalidate_task is not None and not self._invalidate_task.done():
+            return
+        self._invalidate_stop = asyncio.Event()
+        self._invalidate_task = asyncio.create_task(self._invalidation_loop())
+
+    async def stop_invalidation_listener(self) -> None:
+        if self._invalidate_stop is not None:
+            self._invalidate_stop.set()
+        task = self._invalidate_task
+        if task is not None:
+            try:
+                await asyncio.wait_for(task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                task.cancel()
+        self._invalidate_task = None
+        self._invalidate_stop = None
+
+    async def _invalidation_loop(self) -> None:
+        try:
+            import redis.asyncio as aioredis
+            from shared.config import settings
+        except Exception:
+            logger.warning("redis unavailable; rule reload falls back to %ss timer", self._cache_ttl)
+            return
+
+        client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        pubsub = client.pubsub()
+        try:
+            await pubsub.subscribe(RULES_INVALIDATE_CHANNEL)
+            logger.info("Listening for rule invalidations on %s", RULES_INVALIDATE_CHANNEL)
+            while self._invalidate_stop is not None and not self._invalidate_stop.is_set():
+                try:
+                    msg = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
+                        timeout=1.5,
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    logger.exception("invalidation pubsub error")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not msg:
+                    continue
+                logger.info("rules invalidated by %s", msg.get("data"))
+                self._last_load = 0.0
+        finally:
+            try:
+                await pubsub.unsubscribe(RULES_INVALIDATE_CHANNEL)
+                await pubsub.close()
+                await client.aclose()
+            except Exception:
+                pass
 
     @staticmethod
     def _wrap_actions(actions) -> list[dict]:
