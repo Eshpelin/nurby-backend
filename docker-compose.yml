@@ -121,6 +121,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_INTERNAL_API_URL: http://api:8000
+        NEXT_PUBLIC_API_URL: http://localhost:4748
+        NEXT_PUBLIC_WS_URL: ws://localhost:4748
+        NEXT_PUBLIC_WEBRTC_URL: http://localhost:8889
     restart: unless-stopped
     ports:
       - "4747:3000"
@@ -128,6 +133,9 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:4748
       NEXT_PUBLIC_WS_URL: ws://localhost:4748
       NEXT_PUBLIC_WEBRTC_URL: http://localhost:8889
+      # Server-side rewrites run inside this container; need the
+      # docker-network hostname, not the host-mapped port.
+      NEXT_INTERNAL_API_URL: http://api:8000
     depends_on:
       - api
 
