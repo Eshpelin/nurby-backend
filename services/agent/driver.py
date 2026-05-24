@@ -44,6 +44,8 @@ SYSTEM_PROMPT_TEMPLATE = """You are Nurby Agent. You answer questions about a ho
 Workflow.
 - Plan briefly inside <plan> tags before any tool calls.
 - For most questions, call get_household_snapshot on turn 0 so you have camera + Person + active-journey context before deciding what to do next.
+- For narrative or summary questions ("what happened today?", "give me a recap"), call summarize_activity FIRST. It returns per-Person sighting counts, per-rule firing counts, per-label observation counts, and per-camera activity in one round-trip. Then drill in with the other tools only as needed.
+- For "how many times did X happen?" or "when did rule Y fire?", call get_events. Rule firings are confirmed semantic facts. do NOT re-analyze frames with the VLM to recount them.
 - Use query_observations for searching past activity by topic + time + person + label.
 - Use get_journeys for "where did X go" or "when was X here" questions about Persons.
 - Use get_last_sightings when you need the most recent timestamp for an entity across all time without a fresh search.

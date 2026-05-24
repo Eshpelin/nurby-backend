@@ -30,6 +30,7 @@ from services.agent.tools import (
     get_events,
     get_household_snapshot,
     get_last_sightings,
+    summarize_activity,
     get_tool,
     query_observations,
 )
@@ -443,6 +444,35 @@ def test_get_household_snapshot_in_registry():
     assert entry["cost_class"] == "cheap"
 
 
+def test_summarize_activity_in_registry():
+    entry = get_tool("summarize_activity")
+    assert entry is not None
+    assert entry["cost_class"] == "cheap"
+
+
+@pytest.mark.asyncio
+async def test_summarize_activity_empty_household(monkeypatch):
+    async def fake_access(user, db):
+        return set()
+
+    monkeypatch.setattr(tools_mod, "accessible_camera_ids", fake_access)
+
+    def responder(stmt: str):
+        return []
+
+    db = FakeDB(responder)
+    out = await summarize_activity({"user": _user("admin"), "run_id": None, "db": db})
+    assert out["totals"] == {
+        "observations": 0,
+        "persons_seen": 0,
+        "rules_fired": 0,
+        "unique_labels": 0,
+    }
+    assert out["persons"] == []
+    assert out["rules_fired"] == []
+    assert out["labels"] == []
+
+
 def test_get_events_in_registry():
     entry = get_tool("get_events")
     assert entry is not None
@@ -506,6 +536,7 @@ def test_registry_lookup():
         "get_household_snapshot",
         "get_last_sightings",
         "get_events",
+        "summarize_activity",
         "analyze_clip",
         "analyze_frame",
     }
