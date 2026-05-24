@@ -1004,21 +1004,21 @@ Resolved by product. Recorded here as the source of truth that supersedes earlie
 
 1. **RESOLVED. Question caching policy.** Cache lives at the FRAME level, eternal, keyed by `(observation_id OR recording_id, question_hash, provider_id, model)`. Not per-household, not per-user, not per-question-string. Section 5.4 holds the authoritative spec. Rationale. work is per-frame; the answer about a frame does not expire while the frame still exists. Foreign keys cascade so cache dies with its media. Within a household, all users benefit from any prior user's analyzer work.
 
-2. **OPEN.** Should VLM analyzer thumbnails (the redacted frames we sent to the provider) persist to disk for audit, or be re-extracted on demand from the original recording? Recommendation. persist alongside the cache row for the life of the underlying media (matches the frame-cache policy in resolution 1), then drop when the media drops. Decision owner. backend lead.
+2. **RESOLVED. Redacted analyzer thumbnails persist for the life of the underlying media.** Stored alongside `vlm_frame_analysis` rows under `thumbnails/agent/<run_id>/<frame_idx>.jpg`. Cascade delete with media. Audit page can show the exact frame the model saw, including the redaction overlays, which is critical for trust + debug.
 
-3. **OPEN.** Do we charge agent tokens to the user's per-user budget, or absorb as platform cost? For self-hosted Nurby this is moot; for any future hosted offering it is critical. Recommendation. always charge to the user's budget so the per-day cap meaningfully bounds spend. Hosted-only billing surface is out of scope. Decision owner. product + finance.
+3. **RESOLVED. Token charging follows the per-user daily budget from day one.** `AppSetting.agent_daily_token_budget_per_user` default 500_000 tokens, `agent_daily_cost_cents_per_user` default 500 cents. Warn at 80%, soft-block at 100% with friendly message + admin override. Self-hosted users can raise the cap freely in settings. Hosted billing is out of scope for v1.
 
 4. **RESOLVED. Retention vs analyzer.** Retention is the source of truth. Cache rows are bound to their media via `ON DELETE CASCADE`. If the user asks about a window whose recording was already evicted by retention, the analyzer tool returns `{error: "clip_evicted"}` and the agent reports honestly that the footage was no longer available. Section 5.4 carries this in the schema; section 6.4 keeps it in the hard-blocks list.
 
-5. **OPEN.** Should the agent be allowed to read transcripts that contain text from a Person whose `privacy_blur=true`? Right now visual blur is the only privacy lever. Recommendation. yes for Phase 1 (visual privacy and audio privacy are independent today), but add a `Person.audio_redact` boolean in Phase 2 and respect it. Decision owner. product + privacy.
+5. **RESOLVED. Visual privacy and audio privacy are independent in v1.** Visual `privacy_blur=true` redacts frames before VLM; transcripts are NOT redacted in v1. Ship `Person.audio_redact` boolean migration as part of v1 schema (defaults false) so v2 can flip it on without another migration; tool layer reads it now and is a no-op until v2 surfaces it. Audit page tags transcript citations with `audio_redact_available: false` so the gap is visible.
 
 6. **RESOLVED. Orchestration model.** User picks per question via a model selector chip in the chat input. The platform never sets a silent default. Selector is fed by `/api/providers` filtered to those advertising tool-use. Last pick is remembered in localStorage per user. Section 12.1 holds the authoritative spec.
 
-7. **OPEN.** Should we support a "household admin only" mode where viewers cannot use the agent? Camera ACLs already gate viewers per camera. Recommendation. agent respects `UserCameraAccess` automatically (filters all tool results to the user's accessible cameras); no separate global gate. Decision owner. backend lead.
+7. **RESOLVED. No separate global gate.** Every tool filters results through `UserCameraAccess` automatically; viewers see and ask about the cameras they already have visual access to. Admins have the full surface. The agent does NOT introduce its own permission concept.
 
-8. **OPEN.** Streaming token-by-token from the synthesis call vs sending the final answer atomically. Recommendation. token streaming for synthesis only, atomic for tool results. Decision owner. frontend lead.
+8. **RESOLVED. Stream synthesis tokens, atomic tool results.** Matches the Cursor pattern users expect. Tool calls + tool results land as discrete WS frames so they render as collapsible cards in the trace; only the final synthesis paragraph streams token-by-token so the user sees progress on the answer text.
 
-9. **OPEN.** Do we expose a Telegram bot command (`/ask <question>`) in Phase 1, or wait? Recommendation. wait for Phase 3. Telegram surface for asynchronous Q&A is high value but doubles the surface area to harden. Decision owner. product.
+9. **DEFERRED to Phase 3.** Telegram `/ask` is high value but the v1 surface is the web chat at `/ask`. Phase 3 wires the same agent driver to a Telegram entry point. No design changes needed in v1 to enable later.
 
 10. **RESOLVED. Audit page visibility.** All household admins see every AgentRun's audit page, not only the asker. The query asker sees their own runs by default in their personal Q&A history. Admins get a household-wide view at `/agent/admin/runs` for oversight. Builders should gate `/agent/runs/{id}` on `current_user.role == "admin" OR current_user.id == run.user_id`.
 
