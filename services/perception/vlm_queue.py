@@ -231,6 +231,25 @@ class VLMQueue:
 
         # ── Redis-backed path ────────────────────────────────────────
         if self._backlog is not None:
+            # Scene-hash dedupe. Skip near-duplicate frames before they
+            # ever hit the queue. Saves a full VLM call on parked-car,
+            # sleeping-baby, empty-room style scenes where each
+            # keyframe captions identically anyway.
+            try:
+                from services.perception.vlm_dedupe import should_enqueue as _dedupe
+
+                allow, _this_hash, prior = await _dedupe(
+                    self._backlog._r, camera_id, job.frame,
+                )
+                if not allow:
+                    self._stats[camera_id].record_drop()
+                    logger.info(
+                        "VLM dedupe skip camera=%s (scene unchanged; prior hash %s)",
+                        camera_id, prior,
+                    )
+                    return
+            except Exception:
+                logger.debug("dedupe check failed, allowing enqueue", exc_info=True)
             size_before = await self._backlog.size(camera_id)
             try:
                 await self._backlog.enqueue(
