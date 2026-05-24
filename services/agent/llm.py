@@ -308,18 +308,42 @@ async def _call_openai_like(
     if provider.api_key:
         headers["Authorization"] = f"Bearer {provider.api_key}"
 
+    msgs = _messages_to_openai(system_prompt, messages)
+    if is_ollama:
+        # Ollama /api/chat quirks that differ from OpenAI Chat Completions.
+        #  - Assistant turns with tool_calls must have content="" not None.
+        #  - Tool reply turns use {"role":"tool","content":...} and Ollama
+        #    drops tool_call_id. The model picks up tool linkage by order.
+        #  - tool_calls[].function.arguments must be a JSON object, not a
+        #    JSON-encoded string the way OpenAI accepts. Ollama errors
+        #    "Value looks like object, but can't find closing '}' symbol"
+        #    if you hand it a string.
+        for m in msgs:
+            if m.get("role") == "assistant" and m.get("content") is None:
+                m["content"] = ""
+            if m.get("role") == "tool":
+                m.pop("tool_call_id", None)
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                for tc in m["tool_calls"]:
+                    fn = tc.get("function") or {}
+                    args = fn.get("arguments")
+                    if isinstance(args, str):
+                        try:
+                            fn["arguments"] = json.loads(args) if args else {}
+                        except json.JSONDecodeError:
+                            fn["arguments"] = {}
+                    tc.pop("id", None)
+                    tc.pop("type", None)
     body: dict[str, Any] = {
         "model": model,
-        "messages": _messages_to_openai(system_prompt, messages),
+        "messages": msgs,
         "max_tokens": max_tokens,
     }
     if tools:
         body["tools"] = tools
-        body["tool_choice"] = "auto"
+        if not is_ollama:
+            body["tool_choice"] = "auto"
     if is_ollama:
-        # Ollama mirrors OpenAI tool schema but the field is "options" for
-        # max tokens; we still pass max_tokens for compat shims and add
-        # stream=False explicitly.
         body["stream"] = bool(stream)
     elif stream:
         body["stream"] = True
