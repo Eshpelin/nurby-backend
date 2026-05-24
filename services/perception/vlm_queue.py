@@ -165,9 +165,24 @@ class CameraVLMStats:
 
 
 class VLMQueue:
-    """Bounded async queue for VLM calls with per-camera workers."""
+    """Bounded async queue for VLM calls with per-camera workers.
 
-    MAX_PENDING_PER_CAMERA = 2  # keep latest N frames, drop older
+    Two backends are supported.
+
+    1. ``VLMBacklog`` (Redis-backed). Wired via ``set_backlog`` after
+       the pipeline has its Redis client. Persists across restarts,
+       capacity defaults to 50 entries per camera. This is the
+       production path.
+    2. In-memory ``asyncio.Queue`` fallback. Used during tests + as a
+       safety net when Redis is unavailable. Capacity raised from the
+       original 2 to ``MAX_PENDING_PER_CAMERA`` so we don't silently
+       drop bursts even on the fallback path.
+    """
+
+    # Old default was 2 — that lost most of any motion burst longer
+    # than 6 seconds. Raised to 50 so a typical 30s-walk-by gets fully
+    # captured even on the in-memory fallback.
+    MAX_PENDING_PER_CAMERA = 50
 
     def __init__(self, vlm_client: VLMClient | None = None):
         self._vlm = vlm_client or VLMClient()
@@ -175,11 +190,21 @@ class VLMQueue:
         self._workers: dict[str, asyncio.Task] = {}
         self._stats: dict[str, CameraVLMStats] = {}
         self._broadcast_fn = None  # set via set_broadcast()
+        self._backlog = None  # set via set_backlog() once Redis is up
         self._running = False
 
     def set_broadcast(self, fn):
         """Set the WebSocket broadcast function (from services.api.ws)."""
         self._broadcast_fn = fn
+
+    def set_backlog(self, backlog) -> None:
+        """Switch this queue onto the Redis-backed persistent backlog.
+
+        Until this is called, enqueue/worker run on the in-memory
+        ``asyncio.Queue`` fallback. Production should call this from
+        the perception pipeline ``run()`` once it has a Redis client.
+        """
+        self._backlog = backlog
 
     def get_stats(self, camera_id: str) -> CameraVLMStats:
         if camera_id not in self._stats:
@@ -190,14 +215,75 @@ class VLMQueue:
         return {cid: s.to_dict() for cid, s in self._stats.items()}
 
     async def enqueue(self, job: VLMJob):
-        """Submit a VLM job. Drops oldest if queue full."""
+        """Submit a VLM job.
+
+        With a Redis backlog wired, jobs persist across perception
+        restarts. Drop-oldest backpressure is handled by the backlog's
+        capped list. Without one, falls back to the in-memory
+        ``asyncio.Queue`` that the original implementation used.
+        """
         camera_id = job.camera_id
 
-        if camera_id not in self._queues:
-            self._queues[camera_id] = asyncio.Queue(maxsize=self.MAX_PENDING_PER_CAMERA)
+        if camera_id not in self._stats:
             stats = CameraVLMStats()
             self._stats[camera_id] = stats
-            _global_stats[camera_id] = stats  # expose to API via get_vlm_stats()
+            _global_stats[camera_id] = stats
+
+        # ── Redis-backed path ────────────────────────────────────────
+        if self._backlog is not None:
+            size_before = await self._backlog.size(camera_id)
+            try:
+                await self._backlog.enqueue(
+                    camera_id=camera_id,
+                    observation_id=job.observation_id,
+                    frame=job.frame,
+                    detections=job.detections,
+                    provider_id=job.provider.id,
+                    system_prompt=job.system_prompt,
+                    max_tokens=job.max_tokens,
+                    max_input_tokens=job.max_input_tokens,
+                    heard_text=job.heard_text,
+                    extra_context=job.extra_context,
+                    timestamp=job.timestamp,
+                    refiner_provider_id=(
+                        job.refiner_provider.id if job.refiner_provider else None
+                    ),
+                    refiner_trigger_objects=job.refiner_trigger_objects,
+                    refiner_keywords=job.refiner_keywords,
+                    refiner_max_tokens=job.refiner_max_tokens,
+                    refiner_max_input_tokens=job.refiner_max_input_tokens,
+                )
+            except Exception:
+                logger.exception(
+                    "backlog enqueue failed, falling back to in-memory queue camera=%s",
+                    camera_id,
+                )
+            else:
+                # Detect dropped-oldest. If LLEN was already at cap,
+                # the LTRIM call we just did evicted entries.
+                cap = getattr(self._backlog, "capacity", self.MAX_PENDING_PER_CAMERA)
+                if size_before >= cap:
+                    self._stats[camera_id].record_drop()
+                    logger.info(
+                        "VLM backpressure (backlog) for camera %s. Backlog at cap %d.",
+                        camera_id, cap,
+                    )
+                # Bump status to "queued" so the tile shows movement
+                # before the worker picks the job up.
+                stats = self._stats[camera_id]
+                if stats.status == "idle":
+                    stats.status = "queued"
+                    await self._broadcast_status(camera_id)
+                if camera_id not in self._workers or self._workers[camera_id].done():
+                    self._workers[camera_id] = asyncio.create_task(
+                        self._worker(camera_id),
+                        name=f"vlm-worker-{camera_id[:8]}",
+                    )
+                return
+
+        # ── In-memory fallback ───────────────────────────────────────
+        if camera_id not in self._queues:
+            self._queues[camera_id] = asyncio.Queue(maxsize=self.MAX_PENDING_PER_CAMERA)
 
         q = self._queues[camera_id]
 
@@ -232,19 +318,68 @@ class VLMQueue:
             )
 
     async def _worker(self, camera_id: str):
-        """Process VLM jobs for a single camera sequentially."""
-        q = self._queues[camera_id]
+        """Process VLM jobs for a single camera sequentially.
+
+        Pulls from the Redis-backed VLMBacklog when one is wired; else
+        from the in-memory ``asyncio.Queue`` fallback.
+        """
         stats = self._stats[camera_id]
+        q = self._queues.get(camera_id)
 
         while True:
-            try:
-                job = await asyncio.wait_for(q.get(), timeout=60)
-            except asyncio.TimeoutError:
-                # No work for 60s, shut down worker
-                stats.status = "idle"
-                await self._broadcast_status(camera_id)
-                logger.debug("VLM worker for camera %s idle, shutting down", camera_id)
-                return
+            job: VLMJob | None = None
+            # ── Backlog (Redis) path ─────────────────────────────────
+            if self._backlog is not None:
+                try:
+                    env = await self._backlog.pop(camera_id, timeout_seconds=15)
+                except Exception:
+                    logger.exception("backlog pop failed camera=%s", camera_id)
+                    await asyncio.sleep(1)
+                    continue
+                if env is None:
+                    # Idle timeout. Shut the worker down so we don't
+                    # keep BRPOP-blocking a Redis connection forever.
+                    stats.status = "idle"
+                    await self._broadcast_status(camera_id)
+                    logger.debug(
+                        "VLM worker for camera %s idle (backlog empty), shutting down",
+                        camera_id,
+                    )
+                    return
+                if env.stale or env.frame is None:
+                    # Survived a restart longer than the frame TTL.
+                    # Count as a drop + move on.
+                    stats.record_drop()
+                    logger.info(
+                        "backlog skip. stale job camera=%s observation=%s",
+                        camera_id, env.observation_id,
+                    )
+                    continue
+                # Rehydrate provider + refiner_provider by id. The
+                # backlog only carries ids to avoid serializing ORM
+                # objects.
+                try:
+                    job = await self._rehydrate_envelope(env)
+                except Exception:
+                    logger.exception(
+                        "backlog rehydrate failed camera=%s observation=%s",
+                        camera_id, env.observation_id,
+                    )
+                    stats.record_drop()
+                    continue
+            # ── In-memory fallback ───────────────────────────────────
+            else:
+                if q is None:
+                    q = self._queues.setdefault(
+                        camera_id, asyncio.Queue(maxsize=self.MAX_PENDING_PER_CAMERA)
+                    )
+                try:
+                    job = await asyncio.wait_for(q.get(), timeout=60)
+                except asyncio.TimeoutError:
+                    stats.status = "idle"
+                    await self._broadcast_status(camera_id)
+                    logger.debug("VLM worker for camera %s idle, shutting down", camera_id)
+                    return
 
             stats.status = "processing"
             stats.last_call_at = time.monotonic()
@@ -305,7 +440,8 @@ class VLMQueue:
             if stats.avg_latency > 10:
                 stats.status = "slow"
             else:
-                stats.status = "processing" if not q.empty() else "idle"
+                has_more = await self._has_pending(camera_id)
+                stats.status = "processing" if has_more else "idle"
 
             await self._broadcast_status(camera_id)
 
@@ -524,6 +660,46 @@ class VLMQueue:
             })
         except Exception:
             pass  # don't let broadcast errors crash the worker
+
+    async def _has_pending(self, camera_id: str) -> bool:
+        """True when there is more work for this camera (backlog or in-mem)."""
+        if self._backlog is not None:
+            try:
+                return await self._backlog.size(camera_id) > 0
+            except Exception:
+                return False
+        q = self._queues.get(camera_id)
+        return bool(q and not q.empty())
+
+    async def _rehydrate_envelope(self, env) -> VLMJob:
+        """Build a transient VLMJob from a BacklogEnvelope by re-loading
+        Provider rows from the DB. Backlog never holds ORM objects."""
+        async with async_session() as db:
+            provider = await db.get(Provider, env.provider_id)
+            if provider is None:
+                raise RuntimeError(f"provider {env.provider_id} missing during rehydrate")
+            refiner = None
+            if env.refiner_provider_id is not None:
+                refiner = await db.get(Provider, env.refiner_provider_id)
+        return VLMJob(
+            camera_id=env.camera_id,
+            observation_id=env.observation_id,
+            frame=env.frame,
+            detections=env.detections,
+            provider=provider,
+            system_prompt=env.system_prompt,
+            max_tokens=env.max_tokens,
+            timestamp=env.timestamp,
+            max_input_tokens=env.max_input_tokens,
+            heard_text=env.heard_text,
+            extra_context=env.extra_context,
+            refiner_provider=refiner,
+            refiner_trigger_objects=env.refiner_trigger_objects,
+            refiner_keywords=env.refiner_keywords,
+            refiner_max_tokens=env.refiner_max_tokens,
+            refiner_max_input_tokens=env.refiner_max_input_tokens,
+            enqueued_at=env.enqueued_at,
+        )
 
     async def shutdown(self):
         """Cancel all workers."""

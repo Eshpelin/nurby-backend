@@ -73,6 +73,14 @@ DEFAULTS: dict[str, Any] = {
     # The driver emits a banner to the user once usage crosses this
     # line; runs are still allowed up to 100%.
     "agent_warn_threshold_pct": 80,
+    # ── VLM backlog (Redis-backed per-camera buffer) ─────────────────
+    # Per-camera capacity of the VLM job backlog. 50 covers a typical
+    # 30-sec walk-by even on a slow Ollama host that takes 15s/frame.
+    "vlm_backlog_capacity_per_camera": 50,
+    # JPEG-encoded frames sit on a separate Redis key with this TTL.
+    # If the worker can't catch up within the window, the frame self-
+    # expires and the worker skips the stale entry with a drop record.
+    "vlm_frame_ttl_seconds": 1800,
 }
 
 

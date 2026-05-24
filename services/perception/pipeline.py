@@ -69,6 +69,23 @@ class PerceptionPipeline:
 
         r = await self._get_redis()
 
+        # Wire the persistent Redis-backed VLM backlog so queued jobs
+        # survive perception restarts and we can catch up on bursts
+        # instead of dropping silently.
+        try:
+            from services.perception.vlm_backlog import VLMBacklog
+            from shared.app_settings import get_setting as _get_setting
+
+            cap = int(await _get_setting("vlm_backlog_capacity_per_camera", 50))
+            ttl = int(await _get_setting("vlm_frame_ttl_seconds", 1800))
+            self._vlm_queue.set_backlog(VLMBacklog(r, capacity=cap, frame_ttl_seconds=ttl))
+            logger.info(
+                "VLM backlog wired (capacity=%d, frame_ttl=%ds)",
+                cap, ttl,
+            )
+        except Exception:
+            logger.exception("failed to wire VLM backlog; using in-memory fallback")
+
         # Start rule-invalidation pubsub listener so rule edits in the
         # API process flush this engine's cache within ~1s instead of
         # waiting on the 30s passive reload.
