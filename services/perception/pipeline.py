@@ -195,6 +195,47 @@ class PerceptionPipeline:
         last = self._vlm_last_call.get(camera_id, 0)
         return (_time.monotonic() - last) >= interval
 
+    def _vlm_priority_for_frame(
+        self,
+        *,
+        camera_id: str,
+        cam: Camera | None,
+        detections: list[dict],
+        faces: list[dict] | None,
+    ) -> str:
+        """Decide whether this frame should jump the high-priority lane.
+
+        Three triggers (any one is enough).
+          1. An unrecognized face cluster_id is present (no person_id).
+          2. A detection label matches the camera's rule-trigger object
+             list (recording_trigger_objects + vlm_trigger_objects
+             unioned).
+          3. This is the first VLM enqueue after >30s of idle for this
+             camera (likely the start of a new motion burst).
+        """
+        # Rule 1. unknown face.
+        for f in faces or []:
+            if not f.get("person_id") and f.get("cluster_id"):
+                return "high"
+        # Rule 2. label intersects rule-trigger sets.
+        if cam is not None:
+            trigger_labels: set[str] = set()
+            for attr in ("recording_trigger_objects", "vlm_trigger_objects"):
+                vals = getattr(cam, attr, None)
+                if isinstance(vals, list):
+                    trigger_labels.update(str(x).lower() for x in vals if x)
+            if trigger_labels:
+                seen = {str(d.get("label", "")).lower() for d in detections}
+                if seen & trigger_labels:
+                    return "high"
+        # Rule 3. first-of-burst.
+        import time as _time
+
+        last = self._vlm_last_call.get(camera_id, 0)
+        if last == 0 or (_time.monotonic() - last) > 30:
+            return "high"
+        return "normal"
+
     def _build_vlm_context(
         self,
         cam: Camera | None,
@@ -625,6 +666,12 @@ class PerceptionPipeline:
                     refiner_keywords=refiner_keywords,
                     refiner_max_tokens=getattr(cam, "vlm_refiner_max_tokens", None) if cam else None,
                     refiner_max_input_tokens=getattr(cam, "vlm_refiner_max_input_tokens", None) if cam else None,
+                    priority=self._vlm_priority_for_frame(
+                        camera_id=camera_id,
+                        cam=cam,
+                        detections=detections,
+                        faces=faces,
+                    ),
                 ))
 
         # Step 6. Generate description embedding for detections (VLM embedding added later by queue)

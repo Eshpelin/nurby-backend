@@ -103,8 +103,12 @@ class VLMBacklog:
 
     # ── public API ────────────────────────────────────────────────────
 
-    def list_key(self, camera_id: str) -> str:
-        return f"{PENDING_KEY}:{camera_id}"
+    def list_key(self, camera_id: str, priority: str = "normal") -> str:
+        # Two physical lists per camera. The worker drains :high
+        # before :normal so urgent frames (unknown face, rule-trigger
+        # match, first-of-burst) skip ahead of routine motion.
+        suffix = ":high" if priority == "high" else ""
+        return f"{PENDING_KEY}:{camera_id}{suffix}"
 
     def frame_key(self, job_id: str) -> str:
         return f"{FRAME_KEY}:{job_id}"
@@ -163,13 +167,14 @@ class VLMBacklog:
             "priority": priority,
         }
         payload = json.dumps(meta, default=str).encode("utf-8")
+        target_key = self.list_key(camera_id, priority)
         # LPUSH new, RPOP oldest first. Newest sits at head; oldest
         # gets drained first.
         pipe = self._r.pipeline()
-        pipe.lpush(self.list_key(camera_id), payload)
+        pipe.lpush(target_key, payload)
         # Bound the list. LTRIM keeps indices 0..(capacity-1) which
         # are the newest `capacity` entries — older ones get dropped.
-        pipe.ltrim(self.list_key(camera_id), 0, self._capacity - 1)
+        pipe.ltrim(target_key, 0, self._capacity - 1)
         await pipe.execute()
         return job_id
 
@@ -178,13 +183,19 @@ class VLMBacklog:
 
         Returns None on timeout. Returns an envelope with ``stale=True``
         when the metadata survived but the frame blob already expired.
+
+        Drains the per-camera high-priority list first; the timeout
+        applies only when both queues are empty.
         """
-        # BRPOP blocks on the list tail (oldest entry given LPUSH on
-        # the head). Integer second precision; clamp to 1s minimum
-        # because BRPOP 0 = block forever and we want responsive
-        # shutdown.
         timeout = max(1, int(round(timeout_seconds)))
-        res = await self._r.brpop([self.list_key(camera_id)], timeout=timeout)
+        # BRPOP across multiple keys: Redis returns from the first
+        # non-empty key in the supplied order. With :high listed
+        # first, high-priority entries always win the race when both
+        # are non-empty.
+        res = await self._r.brpop(
+            [self.list_key(camera_id, "high"), self.list_key(camera_id, "normal")],
+            timeout=timeout,
+        )
         if not res:
             return None
         _, payload = res
@@ -249,7 +260,15 @@ class VLMBacklog:
         return BacklogEnvelope(frame=frame, stale=False, **env_kwargs)
 
     async def size(self, camera_id: str) -> int:
-        return int(await self._r.llen(self.list_key(camera_id)) or 0)
+        normal = int(await self._r.llen(self.list_key(camera_id, "normal")) or 0)
+        high = int(await self._r.llen(self.list_key(camera_id, "high")) or 0)
+        return normal + high
+
+    async def size_by_priority(self, camera_id: str) -> dict:
+        """Per-priority counts so the telemetry can show 'high=N normal=M'."""
+        normal = int(await self._r.llen(self.list_key(camera_id, "normal")) or 0)
+        high = int(await self._r.llen(self.list_key(camera_id, "high")) or 0)
+        return {"high": high, "normal": normal, "total": high + normal}
 
     @property
     def capacity(self) -> int:

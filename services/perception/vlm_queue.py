@@ -111,6 +111,11 @@ class VLMJob:
     refiner_max_tokens: int | None = None
     refiner_max_input_tokens: int | None = None
     enqueued_at: float = field(default_factory=time.monotonic)
+    # "high" jumps the per-camera high-priority queue. Set by the
+    # pipeline when the frame contains an unrecognized face, a rule-
+    # trigger label match, or is the first frame after a long idle
+    # gap. Defaults to "normal".
+    priority: str = "normal"
 
 
 @dataclass
@@ -271,6 +276,7 @@ class VLMQueue:
                     refiner_keywords=job.refiner_keywords,
                     refiner_max_tokens=job.refiner_max_tokens,
                     refiner_max_input_tokens=job.refiner_max_input_tokens,
+                    priority=job.priority,
                 )
             except Exception:
                 logger.exception(
@@ -718,6 +724,7 @@ class VLMQueue:
             refiner_max_tokens=env.refiner_max_tokens,
             refiner_max_input_tokens=env.refiner_max_input_tokens,
             enqueued_at=env.enqueued_at,
+            priority=env.priority,
         )
 
     async def shutdown(self):

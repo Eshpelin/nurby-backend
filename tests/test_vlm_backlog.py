@@ -52,16 +52,14 @@ class _FakeRedis:
         return len(self._lists.get(key, []))
 
     async def brpop(self, keys, timeout=0):
-        # Single-key, non-blocking flavor — enough for our tests.
-        if isinstance(keys, (list, tuple)):
-            key = keys[0]
-        else:
-            key = keys
-        lst = self._lists.get(key)
-        if lst:
-            v = lst.pop()
-            return (key, v)
-        # Honor the timeout by sleeping 0 — tests should preload data.
+        # Multi-key flavor: return from the first non-empty key.
+        if not isinstance(keys, (list, tuple)):
+            keys = [keys]
+        for key in keys:
+            lst = self._lists.get(key)
+            if lst:
+                v = lst.pop()
+                return (key, v)
         await asyncio.sleep(0)
         return None
 
@@ -211,3 +209,45 @@ def test_pop_returns_none_when_empty(loop):
     bl = VLMBacklog(r, capacity=10)
     out = loop.run_until_complete(bl.pop("nobody", timeout_seconds=1))
     assert out is None
+
+
+def test_priority_lane_drains_high_first(loop):
+    r = _FakeRedis()
+    bl = VLMBacklog(r, capacity=10)
+    cam_id = "cam-prio"
+
+    async def go():
+        # 1 normal enqueued first.
+        await bl.enqueue(
+            camera_id=cam_id,
+            observation_id=uuid.uuid4(),
+            frame=_frame(),
+            detections=[{"lane": "normal"}],
+            provider_id=uuid.uuid4(),
+        )
+        # 1 high enqueued second.
+        await bl.enqueue(
+            camera_id=cam_id,
+            observation_id=uuid.uuid4(),
+            frame=_frame(),
+            detections=[{"lane": "high"}],
+            provider_id=uuid.uuid4(),
+            priority="high",
+        )
+        # Both lanes have 1 entry.
+        sizes = await bl.size_by_priority(cam_id)
+        assert sizes == {"high": 1, "normal": 1, "total": 2}
+
+        # First pop drains high regardless of enqueue order.
+        first = await bl.pop(cam_id, timeout_seconds=1)
+        assert first is not None
+        assert first.detections == [{"lane": "high"}]
+        assert first.priority == "high"
+
+        # Then normal.
+        second = await bl.pop(cam_id, timeout_seconds=1)
+        assert second is not None
+        assert second.detections == [{"lane": "normal"}]
+        assert second.priority == "normal"
+
+    loop.run_until_complete(go())
