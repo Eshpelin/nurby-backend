@@ -530,6 +530,133 @@ async def get_camera_layout(ctx: dict) -> dict:
     return {"cameras": cameras}
 
 
+# ── Tool 3a. get_household_snapshot ───────────────────────────────────
+
+
+_GET_HOUSEHOLD_SNAPSHOT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {},
+}
+
+
+async def get_household_snapshot(ctx: dict) -> dict:
+    """Cheap one-call orientation primer. Returns:
+       - cameras with last-observation timestamp,
+       - named Persons with their last sighting,
+       - currently open Journeys (still in progress).
+
+    Designed to be the LLM's FIRST call on most questions so it has
+    enough state to ask a sensible follow-up tool call instead of
+    blind window-widening.
+    """
+    user = ctx["user"]
+    db = ctx["db"]
+
+    allowed = await accessible_camera_ids(user, db)
+    if not allowed:
+        return {
+            "cameras": [],
+            "persons": [],
+            "active_journeys": [],
+            "now_iso": datetime.now(timezone.utc).isoformat(),
+        }
+
+    now = datetime.now(timezone.utc)
+
+    # Cameras + their most-recent observation.
+    cam_rows = (
+        await db.execute(
+            select(Camera)
+            .where(Camera.id.in_(allowed))
+            .order_by(Camera.display_order, Camera.created_at)
+        )
+    ).scalars().all()
+    cameras: list[dict] = []
+    for c in cam_rows:
+        last_obs = (
+            await db.execute(
+                select(Observation.timestamp, Observation.id)
+                .where(Observation.camera_id == c.id)
+                .order_by(Observation.timestamp.desc())
+                .limit(1)
+            )
+        ).first()
+        last_ts = last_obs[0] if last_obs else None
+        cameras.append(
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "role": _infer_role(c.name, c.location_label),
+                "status": c.status,
+                "last_observation_at": last_ts.isoformat() if last_ts else None,
+                "last_observation_id": str(last_obs[1]) if last_obs else None,
+                "minutes_since_last": int((now - last_ts).total_seconds() // 60)
+                if last_ts
+                else None,
+            }
+        )
+
+    # Named Persons + their most-recent Journey.
+    person_rows = (await db.execute(select(Person).order_by(Person.display_name))).scalars().all()
+    persons: list[dict] = []
+    for p in person_rows:
+        j = (
+            await db.execute(
+                select(Journey)
+                .where(Journey.person_id == p.id)
+                .order_by(Journey.last_seen_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        persons.append(
+            {
+                "person_id": str(p.id),
+                "display_name": p.display_name,
+                "relationship": p.relationship,
+                "last_seen_at": j.last_seen_at.isoformat() if j and j.last_seen_at else None,
+                "last_journey_id": str(j.id) if j else None,
+                "hours_since_seen": int((now - j.last_seen_at).total_seconds() // 3600)
+                if j and j.last_seen_at
+                else None,
+            }
+        )
+
+    # Currently open Journeys (ended_at IS NULL OR last_seen_at within 5m).
+    open_window = now - timedelta(minutes=5)
+    active = (
+        await db.execute(
+            select(Journey)
+            .where(Journey.last_seen_at >= open_window)
+            .order_by(Journey.last_seen_at.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+    active_journeys: list[dict] = []
+    for j in active:
+        # Only surface if it touches an accessible camera.
+        segs = j.cameras or []
+        visible = [s for s in segs if uuid.UUID(s.get("id")) in allowed] if segs else []
+        if not visible and segs:
+            continue
+        active_journeys.append(
+            {
+                "journey_id": str(j.id),
+                "person_id": str(j.person_id) if j.person_id else None,
+                "started_at": j.started_at.isoformat() if j.started_at else None,
+                "last_seen_at": j.last_seen_at.isoformat() if j.last_seen_at else None,
+                "cameras": [{"id": s.get("id"), "name": s.get("name")} for s in (visible or segs)],
+            }
+        )
+
+    return {
+        "now_iso": now.isoformat(),
+        "cameras": cameras,
+        "persons": persons,
+        "active_journeys": active_journeys,
+    }
+
+
 # ── Tool 3b. get_last_sightings ───────────────────────────────────────
 
 
@@ -973,6 +1100,20 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         ),
         "input_schema": _GET_CAMERA_LAYOUT_SCHEMA,
         "fn": get_camera_layout,
+        "side_effect": "read",
+        "cost_class": "cheap",
+    },
+    {
+        "name": "get_household_snapshot",
+        "description": (
+            "Bootstrap orientation. Returns every accessible camera with "
+            "its last-observation timestamp, every named Person with "
+            "their last-seen-at, and any Journey still active right now. "
+            "Cheap; safe to call on the first turn of most questions so "
+            "you have grounding before deciding which tool to call next."
+        ),
+        "input_schema": _GET_HOUSEHOLD_SNAPSHOT_SCHEMA,
+        "fn": get_household_snapshot,
         "side_effect": "read",
         "cost_class": "cheap",
     },

@@ -27,6 +27,7 @@ from services.agent.tools import (
     analyze_frame,
     get_camera_layout,
     get_journeys,
+    get_household_snapshot,
     get_last_sightings,
     get_tool,
     query_observations,
@@ -422,6 +423,25 @@ async def test_get_last_sightings_clamps_since_days(monkeypatch):
     assert out["since_days"] == 1
 
 
+@pytest.mark.asyncio
+async def test_get_household_snapshot_no_access_returns_empty(monkeypatch):
+    async def fake_access(user, db):
+        return set()
+
+    monkeypatch.setattr(tools_mod, "accessible_camera_ids", fake_access)
+    out = await get_household_snapshot({"user": _user("admin"), "run_id": None, "db": FakeDB(lambda s: [])})
+    assert out["cameras"] == []
+    assert out["persons"] == []
+    assert out["active_journeys"] == []
+    assert "now_iso" in out
+
+
+def test_get_household_snapshot_in_registry():
+    entry = get_tool("get_household_snapshot")
+    assert entry is not None
+    assert entry["cost_class"] == "cheap"
+
+
 def test_get_last_sightings_in_registry():
     entry = get_tool("get_last_sightings")
     assert entry is not None
@@ -437,6 +457,7 @@ def test_registry_lookup():
         "query_observations",
         "get_journeys",
         "get_camera_layout",
+        "get_household_snapshot",
         "get_last_sightings",
         "analyze_clip",
         "analyze_frame",
