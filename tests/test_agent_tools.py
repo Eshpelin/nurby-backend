@@ -467,6 +467,8 @@ async def test_summarize_activity_empty_household(monkeypatch):
         "persons_seen": 0,
         "rules_fired": 0,
         "unique_labels": 0,
+        "vlm_pending": 0,
+        "vlm_late": 0,
     }
     assert out["persons"] == []
     assert out["rules_fired"] == []

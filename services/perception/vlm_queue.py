@@ -452,11 +452,29 @@ class VLMQueue:
                     thumb_path = _write_vlm_thumbnail(
                         job.camera_id, job.observation_id, job.frame, job.detections,
                     )
+                    # Detect "late" patch. Worker took >60s between
+                    # enqueue and the start of this VLM call. Captures
+                    # only the time spent waiting in the backlog, not
+                    # the VLM call itself.
+                    eq = job.enqueued_at or 0
+                    if eq > 1_000_000_000:  # epoch (from Redis backlog)
+                        wait_seconds = max(0.0, time.time() - eq)
+                        eq_iso = datetime.fromtimestamp(eq, tz=timezone.utc)
+                    else:  # monotonic (from in-mem fallback)
+                        wait_seconds = max(0.0, time.monotonic() - eq) if eq else 0.0
+                        eq_iso = None
+                    is_late = wait_seconds > 60
+                    if is_late:
+                        logger.info(
+                            "VLM late patch camera=%s waited=%.0fs",
+                            camera_id, wait_seconds,
+                        )
                     # Patch observation with VLM description, thumbnail,
                     # and regenerate embedding.
                     await self._patch_observation(
                         job.observation_id, description, job.provider.name,
                         job.detections, thumbnail_path=thumb_path,
+                        vlm_late=is_late, vlm_enqueued_at=eq_iso,
                     )
                     logger.info(
                         "VLM for camera %s completed in %.1fs. %s",
@@ -663,6 +681,7 @@ class VLMQueue:
     async def _patch_observation(
         self, observation_id: uuid.UUID, description: str, provider_name: str,
         detections: list[dict], thumbnail_path: str | None = None,
+        vlm_late: bool = False, vlm_enqueued_at: datetime | None = None,
     ):
         """Update observation record with VLM description and regenerate embedding."""
         try:
@@ -674,6 +693,10 @@ class VLMQueue:
                     obs.confidence = 0.8
                     if thumbnail_path:
                         obs.thumbnail_path = thumbnail_path
+                    if vlm_late:
+                        obs.vlm_late = True
+                        if vlm_enqueued_at is not None:
+                            obs.vlm_enqueued_at = vlm_enqueued_at
                     await db.commit()
         except Exception:
             logger.exception("Failed to patch observation %s with VLM description", observation_id)

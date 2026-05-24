@@ -576,9 +576,9 @@ async def get_household_snapshot(ctx: dict) -> dict:
     for c in cam_rows:
         last_obs = (
             await db.execute(
-                select(Observation.timestamp, Observation.id)
+                select(Observation.started_at, Observation.id)
                 .where(Observation.camera_id == c.id)
-                .order_by(Observation.timestamp.desc())
+                .order_by(Observation.started_at.desc())
                 .limit(1)
             )
         ).first()
@@ -788,7 +788,7 @@ async def get_last_sightings(
                 }
             )
 
-    # ── Label-side lookup. uses Observation.detections JSON ──────────
+    # ── Label-side lookup. uses Observation.object_detections JSON ──────────
     target_labels = list(labels) if labels else list(_BASELINE_LABELS)
     label_block: list[dict] = []
     for lab in target_labels:
@@ -801,9 +801,9 @@ async def get_last_sightings(
             await db.execute(
                 select(Observation)
                 .where(Observation.camera_id.in_(allowed))
-                .where(Observation.timestamp >= cutoff)
-                .where(cast(Observation.detections, SAString).ilike(needle))
-                .order_by(Observation.timestamp.desc())
+                .where(Observation.started_at >= cutoff)
+                .where(cast(Observation.object_detections, SAString).ilike(needle))
+                .order_by(Observation.started_at.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -1137,15 +1137,27 @@ async def summarize_activity(ctx: dict, hours: int = 24) -> dict:
             select(
                 Observation.id,
                 Observation.camera_id,
-                Observation.timestamp,
-                Observation.detections,
+                Observation.started_at,
+                Observation.object_detections,
+                Observation.vlm_description,
+                Observation.vlm_late,
             )
-            .where(Observation.timestamp >= cutoff)
+            .where(Observation.started_at >= cutoff)
             .where(Observation.camera_id.in_(allowed) if allowed else False)
         )
     ).all() if allowed else []
 
-    for obs_id, cam_id, ts, det in obs_rows:
+    # VLM backlog tally. observations missing a vlm_description are
+    # still pending on the worker. Observations that were patched late
+    # are counted so the answer can honestly say how behind we are.
+    vlm_pending = 0
+    vlm_late_count = 0
+
+    for obs_id, cam_id, ts, det, vlm_desc, _vlm_late in obs_rows:
+        if not vlm_desc:
+            vlm_pending += 1
+        if _vlm_late:
+            vlm_late_count += 1
         cb = cameras_block.setdefault(
             str(cam_id),
             {
@@ -1197,6 +1209,8 @@ async def summarize_activity(ctx: dict, hours: int = 24) -> dict:
             "persons_seen": len(persons_block),
             "rules_fired": sum(r["firing_count"] for r in rules_block),
             "unique_labels": len(labels_block),
+            "vlm_pending": vlm_pending,
+            "vlm_late": vlm_late_count,
         },
     }
 

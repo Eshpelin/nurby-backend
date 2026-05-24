@@ -316,6 +316,13 @@ class Observation(Base):
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # VLM backlog drift. When the VLM worker patches in the description
+    # more than 60 seconds after the keyframe landed, vlm_late is set
+    # and vlm_enqueued_at carries the original enqueue timestamp. The
+    # UI shows a small clock icon on late captions; the agent's
+    # summarize_activity rolls a 'pending' bucket from these.
+    vlm_late: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    vlm_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DigestEntry(Base):
