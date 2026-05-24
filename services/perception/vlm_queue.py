@@ -126,9 +126,14 @@ class CameraVLMStats:
     total_calls: int = 0
     total_errors: int = 0
     total_dropped: int = 0         # frames dropped due to backpressure
+    total_deduped: int = 0         # frames dropped by pHash dedupe
     last_call_at: float = 0.0      # monotonic timestamp
     last_result_at: float = 0.0    # monotonic timestamp
     status: str = "idle"           # idle, processing, slow, stalled
+    # Backlog telemetry, populated by the worker each loop iteration.
+    backlog_high: int = 0
+    backlog_normal: int = 0
+    eta_seconds: float = 0.0       # backlog_total * avg_latency
 
     def record_latency(self, duration: float):
         self.last_latency = duration
@@ -146,6 +151,15 @@ class CameraVLMStats:
 
     def record_drop(self):
         self.total_dropped += 1
+
+    def record_dedupe(self):
+        self.total_deduped += 1
+
+    def set_backlog(self, high: int, normal: int) -> None:
+        self.backlog_high = int(high)
+        self.backlog_normal = int(normal)
+        total = self.backlog_high + self.backlog_normal
+        self.eta_seconds = round(total * max(self.avg_latency, 0.0), 2)
 
     def update_status(self):
         now = time.monotonic()
@@ -165,6 +179,13 @@ class CameraVLMStats:
             "total_calls": self.total_calls,
             "total_errors": self.total_errors,
             "total_dropped": self.total_dropped,
+            "total_deduped": self.total_deduped,
+            "backlog": {
+                "high": self.backlog_high,
+                "normal": self.backlog_normal,
+                "total": self.backlog_high + self.backlog_normal,
+                "eta_seconds": self.eta_seconds,
+            },
             "status": self.status,
         }
 
@@ -247,7 +268,7 @@ class VLMQueue:
                     self._backlog._r, camera_id, job.frame,
                 )
                 if not allow:
-                    self._stats[camera_id].record_drop()
+                    self._stats[camera_id].record_dedupe()
                     logger.info(
                         "VLM dedupe skip camera=%s (scene unchanged; prior hash %s)",
                         camera_id, prior,
@@ -460,6 +481,14 @@ class VLMQueue:
                 logger.exception(
                     "VLM call failed for camera %s after %.1fs", camera_id, duration,
                 )
+
+            # Refresh per-lane backlog counts for the tile.
+            if self._backlog is not None:
+                try:
+                    sizes = await self._backlog.size_by_priority(camera_id)
+                    stats.set_backlog(sizes["high"], sizes["normal"])
+                except Exception:
+                    logger.debug("backlog size lookup failed", exc_info=True)
 
             # Update status based on latency
             if stats.avg_latency > 10:
