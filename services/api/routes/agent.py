@@ -238,7 +238,7 @@ async def get_run_detail(
 # ── GET /api/agent/runs ─────────────────────────────────────────────
 
 
-@router.get("", response_model=list[AgentRunResponse])
+@router.get("/runs", response_model=list[AgentRunResponse])
 async def list_runs(
     limit: int = Query(default=50, ge=1, le=200),
     before: datetime | None = None,

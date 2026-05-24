@@ -22,6 +22,7 @@ COPY services/events/ services/events/
 COPY services/search/ services/search/
 COPY services/digest/ services/digest/
 COPY services/discovery/ services/discovery/
+COPY services/agent/ services/agent/
 COPY services/recap.py services/recap.py
 COPY services/__init__.py services/__init__.py
 COPY alembic/ alembic/
