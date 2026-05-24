@@ -530,6 +530,193 @@ async def get_camera_layout(ctx: dict) -> dict:
     return {"cameras": cameras}
 
 
+# ── Tool 3b. get_last_sightings ───────────────────────────────────────
+
+
+# Common labels we surface a baseline for even when not asked. Picks
+# the labels users most often ask "where is X?" questions about and
+# the existing perception pipeline tags reliably.
+_BASELINE_LABELS = ("person", "cat", "dog", "package", "car", "bird")
+
+
+_GET_LAST_SIGHTINGS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "person_name": {
+            "type": "string",
+            "description": (
+                "Optional. Restrict to a single Person by display_name "
+                "(case-insensitive substring). Returns disambiguation "
+                "when more than one match."
+            ),
+            "minLength": 1,
+            "maxLength": 255,
+        },
+        "labels": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 64},
+            "maxItems": 12,
+            "description": (
+                "Optional. Restrict to these YOLO labels (e.g. ['cat']). "
+                "Default queries a curated baseline (person, cat, dog, "
+                "package, car, bird)."
+            ),
+        },
+        "since_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 30,
+            "description": "Search window in days. Defaults to 30.",
+        },
+    },
+}
+
+
+async def get_last_sightings(
+    ctx: dict,
+    person_name: str | None = None,
+    labels: list[str] | None = None,
+    since_days: int = 30,
+) -> dict:
+    """Return last-seen-at timestamps per named Person and per common
+    YOLO label across the full retention window (default 30 days).
+
+    Use this when a question is about where/when an entity was last
+    visible and the default 24h `query_observations` window came back
+    empty — this is the cheap baseline that avoids blind window
+    widening.
+    """
+    user = ctx["user"]
+    db = ctx["db"]
+
+    since_days = max(1, min(365, int(since_days if since_days is not None else 30)))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
+    allowed = await accessible_camera_ids(user, db)
+    if not allowed:
+        return {"persons": [], "labels": [], "since_days": since_days}
+
+    persons_block: list[dict] = []
+    disambiguation: list[dict] | None = None
+
+    # ── Person-side lookup ──────────────────────────────────────────
+    person_rows: list[Person] = []
+    if person_name:
+        needle = f"%{person_name.strip().lower()}%"
+        rs = await db.execute(
+            select(Person).where(func.lower(Person.display_name).like(needle))
+        )
+        person_rows = list(rs.scalars().all())
+        if len(person_rows) > 1:
+            disambiguation = [
+                {"person_id": str(p.id), "display_name": p.display_name}
+                for p in person_rows
+            ]
+    else:
+        rs = await db.execute(select(Person).order_by(Person.display_name))
+        person_rows = list(rs.scalars().all())
+
+    if not disambiguation:
+        for p in person_rows:
+            # Most recent Journey that touches at least one accessible
+            # camera. Journey is the right grain because the pipeline
+            # writes a Journey row whenever a Person shows across one
+            # or more cameras.
+            j = (
+                await db.execute(
+                    select(Journey)
+                    .where(Journey.person_id == p.id)
+                    .where(Journey.last_seen_at >= cutoff)
+                    .order_by(Journey.last_seen_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if j is None:
+                persons_block.append(
+                    {
+                        "person_id": str(p.id),
+                        "display_name": p.display_name,
+                        "last_seen_at": None,
+                        "last_camera_id": None,
+                        "last_journey_id": None,
+                        "days_since_seen": None,
+                    }
+                )
+                continue
+            cams = j.cameras or []
+            # Filter Journey cameras down to those the user can see.
+            visible = [c for c in cams if uuid.UUID(c.get("id")) in allowed] if cams else []
+            persons_block.append(
+                {
+                    "person_id": str(p.id),
+                    "display_name": p.display_name,
+                    "last_seen_at": j.last_seen_at.isoformat() if j.last_seen_at else None,
+                    "last_camera_id": str(visible[0]["id"]) if visible else None,
+                    "last_camera_name": visible[0].get("name") if visible else None,
+                    "last_journey_id": str(j.id),
+                    "days_since_seen": (datetime.now(timezone.utc) - j.last_seen_at).days
+                    if j.last_seen_at
+                    else None,
+                }
+            )
+
+    # ── Label-side lookup. uses Observation.detections JSON ──────────
+    target_labels = list(labels) if labels else list(_BASELINE_LABELS)
+    label_block: list[dict] = []
+    for lab in target_labels:
+        # Pull the latest Observation whose detections contains this
+        # label. We cannot rely on a single index here so we cast the
+        # JSON column to text and use ILIKE as a cheap filter. For a
+        # household of typical size + 30d window this is fast enough.
+        needle = f'%"label": "{lab}"%'
+        row = (
+            await db.execute(
+                select(Observation)
+                .where(Observation.camera_id.in_(allowed))
+                .where(Observation.timestamp >= cutoff)
+                .where(cast(Observation.detections, SAString).ilike(needle))
+                .order_by(Observation.timestamp.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            label_block.append(
+                {
+                    "label": lab,
+                    "last_seen_at": None,
+                    "last_camera_id": None,
+                    "last_observation_id": None,
+                    "days_since_seen": None,
+                }
+            )
+            continue
+        cam = (
+            await db.execute(select(Camera).where(Camera.id == row.camera_id))
+        ).scalar_one_or_none()
+        label_block.append(
+            {
+                "label": lab,
+                "last_seen_at": row.timestamp.isoformat(),
+                "last_camera_id": str(row.camera_id),
+                "last_camera_name": cam.name if cam else None,
+                "last_observation_id": str(row.id),
+                "thumbnail_url": _thumbnail_url(row.thumbnail_path),
+                "days_since_seen": (datetime.now(timezone.utc) - row.timestamp).days,
+            }
+        )
+
+    out: dict = {
+        "since_days": since_days,
+        "persons": persons_block,
+        "labels": label_block,
+    }
+    if disambiguation:
+        out["disambiguation"] = disambiguation
+        out["persons"] = []
+    return out
+
+
 # ── Tool 4. analyze_clip ──────────────────────────────────────────────
 
 
@@ -786,6 +973,23 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         ),
         "input_schema": _GET_CAMERA_LAYOUT_SCHEMA,
         "fn": get_camera_layout,
+        "side_effect": "read",
+        "cost_class": "cheap",
+    },
+    {
+        "name": "get_last_sightings",
+        "description": (
+            "Return last-seen-at timestamps per named Person AND per "
+            "common label (person, cat, dog, package, car, bird) across "
+            "the last 30 days. Cheap. Use this when the default 24h "
+            "query_observations window came back empty so you can "
+            "honestly say 'I haven't seen the cat today, but I last saw "
+            "it 19h ago at the back door' instead of just 'no data'. "
+            "Optional person_name narrows to one Person; optional "
+            "labels overrides the curated baseline set."
+        ),
+        "input_schema": _GET_LAST_SIGHTINGS_SCHEMA,
+        "fn": get_last_sightings,
         "side_effect": "read",
         "cost_class": "cheap",
     },

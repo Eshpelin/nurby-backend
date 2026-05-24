@@ -27,6 +27,7 @@ from services.agent.tools import (
     analyze_frame,
     get_camera_layout,
     get_journeys,
+    get_last_sightings,
     get_tool,
     query_observations,
 )
@@ -399,6 +400,35 @@ def test_unknown_dialect_raises():
         all_tools_for_provider("totally-unknown")
 
 
+@pytest.mark.asyncio
+async def test_get_last_sightings_no_access_returns_empty(monkeypatch):
+    async def fake_access(user, db):
+        return set()
+
+    monkeypatch.setattr(tools_mod, "accessible_camera_ids", fake_access)
+    out = await get_last_sightings({"user": _user("admin"), "run_id": None, "db": FakeDB(lambda s: [])}, since_days=30)
+    assert out == {"persons": [], "labels": [], "since_days": 30}
+
+
+@pytest.mark.asyncio
+async def test_get_last_sightings_clamps_since_days(monkeypatch):
+    async def fake_access(user, db):
+        return set()
+
+    monkeypatch.setattr(tools_mod, "accessible_camera_ids", fake_access)
+    out = await get_last_sightings({"user": _user("admin"), "run_id": None, "db": FakeDB(lambda s: [])}, since_days=9999)
+    assert out["since_days"] == 365
+    out = await get_last_sightings({"user": _user("admin"), "run_id": None, "db": FakeDB(lambda s: [])}, since_days=0)
+    assert out["since_days"] == 1
+
+
+def test_get_last_sightings_in_registry():
+    entry = get_tool("get_last_sightings")
+    assert entry is not None
+    assert entry["side_effect"] == "read"
+    assert entry["cost_class"] == "cheap"
+
+
 def test_registry_lookup():
     assert get_tool("query_observations") is not None
     assert get_tool("doesnotexist") is None
@@ -407,6 +437,7 @@ def test_registry_lookup():
         "query_observations",
         "get_journeys",
         "get_camera_layout",
+        "get_last_sightings",
         "analyze_clip",
         "analyze_frame",
     }
