@@ -27,6 +27,7 @@ from services.agent.tools import (
     analyze_frame,
     get_camera_layout,
     get_journeys,
+    get_events,
     get_household_snapshot,
     get_last_sightings,
     get_tool,
@@ -442,6 +443,51 @@ def test_get_household_snapshot_in_registry():
     assert entry["cost_class"] == "cheap"
 
 
+def test_get_events_in_registry():
+    entry = get_tool("get_events")
+    assert entry is not None
+    assert entry["cost_class"] == "cheap"
+    assert entry["side_effect"] == "read"
+
+
+@pytest.mark.asyncio
+async def test_get_events_no_access_returns_no_events_from_other_cams(monkeypatch):
+    # With no allowed cameras, events tied to a camera_id payload are
+    # filtered out. Events without a camera_id pass through.
+    cam_a = uuid.uuid4()
+    rule_id = uuid.uuid4()
+
+    async def fake_access(user, db):
+        return set()  # no camera access
+
+    monkeypatch.setattr(tools_mod, "accessible_camera_ids", fake_access)
+
+    ev = SimpleNamespace(
+        id=uuid.uuid4(),
+        rule_id=rule_id,
+        observation_id=None,
+        fired_at=datetime.now(timezone.utc),
+        action_type="webhook",
+        action_status="success",
+        acked_at=None,
+        payload={"camera_id": str(cam_a)},
+    )
+    rule = SimpleNamespace(id=rule_id, name="Cat eating")
+
+    def responder(stmt: str):
+        s = stmt.lower()
+        if "from rules" in s and "lower" in s:
+            return []
+        if "from events" in s:
+            return [(ev, rule)]
+        return []
+
+    db = FakeDB(responder)
+    out = await get_events({"user": _user("admin"), "run_id": None, "db": db})
+    # Camera in payload, user has no access -> event hidden.
+    assert out["count"] == 0
+
+
 def test_get_last_sightings_in_registry():
     entry = get_tool("get_last_sightings")
     assert entry is not None
@@ -459,6 +505,7 @@ def test_registry_lookup():
         "get_camera_layout",
         "get_household_snapshot",
         "get_last_sightings",
+        "get_events",
         "analyze_clip",
         "analyze_frame",
     }

@@ -35,7 +35,7 @@ from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy import String as SAString
 
 from services.agent.access import accessible_camera_ids
-from shared.models import Camera, Journey, Observation, Person
+from shared.models import Camera, Event, Journey, Observation, Person, Rule
 
 logger = logging.getLogger("nurby.agent.tools")
 
@@ -844,6 +844,150 @@ async def get_last_sightings(
     return out
 
 
+# ── Tool 3c. get_events ───────────────────────────────────────────────
+
+
+_GET_EVENTS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": _MAX_WINDOW_HOURS,
+            "default": 24,
+            "description": "Look-back window. Defaults 24h.",
+        },
+        "rule_ids": {
+            "type": "array",
+            "items": {"type": "string", "format": "uuid"},
+            "maxItems": 50,
+        },
+        "rule_name_contains": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Case-insensitive substring match on rule name.",
+        },
+        "action_status": {
+            "type": "string",
+            "enum": ["pending", "success", "failed", "skipped"],
+        },
+        "include_payload": {
+            "type": "boolean",
+            "default": False,
+            "description": "Include the per-event payload dict. Off by default to keep responses small; turn on when you need camera_id or detection labels.",
+        },
+        "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 100,
+        },
+    },
+}
+
+
+async def get_events(
+    ctx: dict,
+    hours: int = 24,
+    rule_ids: list[str] | None = None,
+    rule_name_contains: str | None = None,
+    action_status: str | None = None,
+    include_payload: bool = False,
+    limit: int = 100,
+) -> dict:
+    """List rule firings (events) over a time window.
+
+    A rule firing is the strongest evidence Nurby has that something
+    happened. If a rule "cat eating" fired 7 times today, that's 7
+    confirmed feedings; you do NOT need to re-analyze frames to count
+    them. Use this BEFORE analyze_clip for any question shaped like
+    "how many times did X happen", "when did rule Y fire", or "did
+    rule Z fire today".
+    """
+    db = ctx["db"]
+    user = ctx["user"]
+
+    hours = _clamp_hours(hours)
+    limit = _clamp_limit(limit, default=100, max_=200)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    allowed = await accessible_camera_ids(user, db)
+
+    # Resolve rule_ids from name substring if needed.
+    target_rule_ids: set[uuid.UUID] = set()
+    if rule_ids:
+        target_rule_ids = _to_uuid_set(rule_ids)
+    if rule_name_contains:
+        needle = f"%{rule_name_contains.strip().lower()}%"
+        named = (
+            await db.execute(
+                select(Rule.id).where(func.lower(Rule.name).like(needle))
+            )
+        ).scalars().all()
+        target_rule_ids.update(named)
+        if not named and not rule_ids:
+            # User asked by name and we found no match. Return empty
+            # without scanning events.
+            return {
+                "count": 0,
+                "events": [],
+                "hours": hours,
+                "filter": {"rule_name_contains": rule_name_contains},
+            }
+
+    stmt = (
+        select(Event, Rule)
+        .join(Rule, Rule.id == Event.rule_id, isouter=True)
+        .where(Event.fired_at >= cutoff)
+    )
+    if target_rule_ids:
+        stmt = stmt.where(Event.rule_id.in_(target_rule_ids))
+    if action_status:
+        stmt = stmt.where(Event.action_status == action_status)
+    stmt = stmt.order_by(Event.fired_at.desc()).limit(limit)
+
+    rows = (await db.execute(stmt)).all()
+    out: list[dict] = []
+    for ev, rule in rows:
+        # Respect camera ACL. If the event's payload references a
+        # camera_id the user can't see, hide it. Events without a
+        # camera_id in payload (rare) pass through.
+        payload = ev.payload or {}
+        cam_id_raw = payload.get("camera_id")
+        if cam_id_raw:
+            try:
+                if uuid.UUID(str(cam_id_raw)) not in allowed:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        item = {
+            "event_id": str(ev.id),
+            "rule_id": str(ev.rule_id) if ev.rule_id else None,
+            "rule_name": rule.name if rule else None,
+            "fired_at": ev.fired_at.isoformat() if ev.fired_at else None,
+            "action_type": ev.action_type,
+            "action_status": ev.action_status,
+            "acked_at": ev.acked_at.isoformat() if ev.acked_at else None,
+            "observation_id": str(ev.observation_id) if ev.observation_id else None,
+        }
+        if include_payload:
+            item["payload"] = payload
+        out.append(item)
+
+    return {
+        "count": len(out),
+        "events": out,
+        "hours": hours,
+        "filter": {
+            "rule_ids": [str(r) for r in target_rule_ids] if target_rule_ids else None,
+            "rule_name_contains": rule_name_contains,
+            "action_status": action_status,
+        },
+    }
+
+
 # ── Tool 4. analyze_clip ──────────────────────────────────────────────
 
 
@@ -1142,6 +1286,24 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         ),
         "input_schema": _GET_LAST_SIGHTINGS_SCHEMA,
         "fn": get_last_sightings,
+        "side_effect": "read",
+        "cost_class": "cheap",
+    },
+    {
+        "name": "get_events",
+        "description": (
+            "List rule firings (Events) over a time window. Each Event "
+            "is a high-confidence semantic fact about something that "
+            "happened. the rule's trigger pattern already confirmed it. "
+            "Filter by rule_ids, rule_name_contains, action_status. "
+            "Use BEFORE analyze_clip for 'how many times did X happen?' "
+            "or 'when did rule Y fire?' questions. Cheap; one DB scan. "
+            "Default 24h window, max 30d, max 200 rows. Set "
+            "include_payload=true when you also need the per-event "
+            "camera_id or detection labels."
+        ),
+        "input_schema": _GET_EVENTS_SCHEMA,
+        "fn": get_events,
         "side_effect": "read",
         "cost_class": "cheap",
     },
