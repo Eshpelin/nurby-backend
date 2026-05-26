@@ -86,6 +86,13 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const [providerModel, setProviderModel] = useState<string>(PROVIDER_PRESETS[0].default_model);
   const [providerSubmitting, setProviderSubmitting] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
+  // Connection-test state. After we create the provider row we hit the
+  // backend test endpoint so a wrong key / unreachable endpoint fails
+  // fast in the wizard instead of silently later. forceAdvance lets the
+  // user proceed past a failed test on a second click.
+  const [providerTestMsg, setProviderTestMsg] = useState<string | null>(null);
+  const [providerForceAdvance, setProviderForceAdvance] = useState(false);
+  const [createdProviderId, setCreatedProviderId] = useState<string | null>(null);
   const [skipProvider, setSkipProvider] = useState(false);
 
   // Camera step state.
@@ -155,9 +162,36 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
       }
       const created: Provider = await res.json();
       setProviders((prev) => [...prev, created]);
+      setCreatedProviderId(created.id);
       return created;
     } finally {
       setProviderSubmitting(false);
+    }
+  }
+
+  /** Hit /providers/{id}/test. Returns true on a confirmed connection. */
+  async function testProvider(providerId: string): Promise<boolean> {
+    setProviderTestMsg("Testing connection...");
+    try {
+      const res = await authFetch(`/api/providers/${providerId}/test`, {
+        method: "POST",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) {
+        const lat = j.latency_ms != null ? ` (${j.latency_ms}ms)` : "";
+        setProviderTestMsg(`Connected${lat}. ${j.message || ""}`.trim());
+        return true;
+      }
+      setProviderTestMsg(
+        `Connection test failed: ${j.message || j.detail || `status ${res.status}`}. ` +
+          "Check the key / URL, or click again to continue anyway.",
+      );
+      return false;
+    } catch {
+      setProviderTestMsg(
+        "Could not reach the provider to test it. Click again to continue anyway.",
+      );
+      return false;
     }
   }
 
@@ -244,6 +278,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               providerModel={providerModel}
               setProviderModel={setProviderModel}
               error={providerError}
+              testMsg={providerTestMsg}
               submitting={providerSubmitting}
               skipProvider={skipProvider}
               setSkipProvider={setSkipProvider}
@@ -312,13 +347,36 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
                   setStep("camera");
                   return;
                 }
-                const created = await createProvider();
-                if (created) setStep("camera");
+                // Second click after a failed test = proceed anyway.
+                if (providerForceAdvance) {
+                  setStep("camera");
+                  return;
+                }
+                // Create the row if not already created, then test it.
+                let pid = createdProviderId;
+                if (!pid) {
+                  const created = await createProvider();
+                  if (!created) return;
+                  pid = created.id;
+                }
+                const ok = await testProvider(pid);
+                if (ok) {
+                  setStep("camera");
+                } else {
+                  // Allow the next click to advance past the failure.
+                  setProviderForceAdvance(true);
+                }
               }}
               disabled={providerSubmitting}
               className="px-4 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90 disabled:opacity-50"
             >
-              {skipProvider ? "Skip" : providerSubmitting ? "Adding." : "Add provider"}
+              {skipProvider
+                ? "Skip"
+                : providerSubmitting
+                ? "Adding."
+                : providerForceAdvance
+                ? "Continue anyway"
+                : "Add & test"}
             </button>
           )}
           {step === "camera" && (
@@ -420,6 +478,7 @@ function ProviderStep({
   providerModel,
   setProviderModel,
   error,
+  testMsg,
   submitting,
   skipProvider,
   setSkipProvider,
@@ -434,6 +493,7 @@ function ProviderStep({
   providerModel: string;
   setProviderModel: (s: string) => void;
   error: string | null;
+  testMsg: string | null;
   submitting: boolean;
   skipProvider: boolean;
   setSkipProvider: (b: boolean) => void;
@@ -519,6 +579,19 @@ function ProviderStep({
       </label>
 
       {error && <div className="text-xs text-danger">{error}</div>}
+      {testMsg && (
+        <div
+          className={`text-xs ${
+            testMsg.startsWith("Connected")
+              ? "text-emerald-400"
+              : testMsg.startsWith("Testing")
+              ? "text-muted-foreground"
+              : "text-amber-400"
+          }`}
+        >
+          {testMsg}
+        </div>
+      )}
     </div>
   );
 }
