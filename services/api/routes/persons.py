@@ -225,6 +225,7 @@ class PersonActivity(PydanticBaseModel):
 class PersonSummary(PydanticBaseModel):
     person_id: str
     display_name: str
+    nickname: str | None = None
     relationship: str | None = None
     photo_path: str | None = None
     total_sightings: int = 0
@@ -276,6 +277,7 @@ async def person_activity_summary(_current_user: User = Depends(get_current_user
         person_map[pid] = {
             "person_id": pid,
             "display_name": p.display_name,
+            "nickname": p.nickname,
             "relationship": p.relationship,
             "photo_path": p.photo_path,
             "total_sightings": 0,
