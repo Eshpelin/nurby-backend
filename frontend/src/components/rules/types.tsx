@@ -557,6 +557,9 @@ export interface WebhookDraft {
   authKey: string;
   authUser: string;
   authPass: string;
+  // Optional HMAC signing secret. when set, Nurby signs the request
+  // body with HMAC-SHA256 in the X-Nurby-Signature header.
+  secret: string;
   useCustomPayload: boolean;
   payloadTemplate: string;
   payloadError: string;
@@ -638,6 +641,7 @@ export function defaultDraftForType(type: ActionType): ActionDraft {
         authKey: "",
         authUser: "",
         authPass: "",
+        secret: "",
         useCustomPayload: false,
         payloadTemplate: "",
         payloadError: "",
@@ -703,6 +707,7 @@ export function dictToDraft(raw: Record<string, unknown>): ActionDraft {
         authKey: auth?.key || "",
         authUser: auth?.username || "",
         authPass: auth?.password || "",
+        secret: (raw.secret as string) || "",
         useCustomPayload: !!pt,
         payloadTemplate: pt ? JSON.stringify(pt, null, 2) : "",
         payloadError: "",
@@ -797,6 +802,7 @@ export function draftToDict(d: ActionDraft): Record<string, unknown> {
       }
       action.auth = auth;
     }
+    if (d.secret.trim()) action.secret = d.secret.trim();
     if (d.useCustomPayload && d.payloadTemplate.trim()) {
       try {
         action.payload_template = JSON.parse(d.payloadTemplate);

@@ -113,6 +113,25 @@ export function WebhookEditor({ draft, onChange, availableVars }: WebhookEditorP
         )}
       </div>
       <div>
+        <label className="text-xs text-muted-foreground block mb-1.5">
+          Sign body (HMAC-SHA256)
+        </label>
+        <input
+          type="password"
+          value={d.secret}
+          onChange={(e) => set({ secret: e.target.value })}
+          className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm font-mono"
+          placeholder="Shared secret (optional)"
+        />
+        <p className="text-[10px] text-muted-foreground mt-1">
+          When set, Nurby signs the exact request body and sends
+          {" "}
+          <span className="font-mono">X-Nurby-Signature</span>. Your receiver
+          recomputes the HMAC to verify the alert came from Nurby. Required for
+          the physical device presets on an untrusted network.
+        </p>
+      </div>
+      <div>
         <label className="flex items-center gap-2 cursor-pointer mb-2">
           <input
             type="checkbox"
