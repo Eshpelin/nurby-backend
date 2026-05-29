@@ -834,6 +834,7 @@ class SystemSettingsResponse(BaseModel):
     cluster_naming_min_sightings: int = 3
     public_base_url: str | None = None
     rules_cooldown_backend: str = "redis"
+    onboarding_dismissed: bool = False
 
 
 class SystemSettingsUpdate(BaseModel):
@@ -853,6 +854,7 @@ class SystemSettingsUpdate(BaseModel):
     cluster_naming_min_sightings: int | None = Field(default=None, ge=0, le=1000)
     public_base_url: str | None = None
     rules_cooldown_backend: str | None = Field(default=None, pattern="^(redis|memory)$")
+    onboarding_dismissed: bool | None = None
 
 
 # -- User schemas --

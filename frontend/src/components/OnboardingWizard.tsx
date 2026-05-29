@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { CAMERA_PERSONAS, type PersonaPatch } from "@/lib/camera-personas";
 
@@ -78,6 +78,24 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const { authFetch } = useAuth();
   const [step, setStep] = useState<Step>("welcome");
   const [providers, setProviders] = useState<Provider[]>([]);
+
+  // Persist dismissal both locally (fast path) and server-side (so it
+  // survives a browser/device change; an admin can re-trigger the wizard
+  // by flipping onboarding_dismissed back to false in Settings).
+  const markDismissed = useCallback(() => {
+    try {
+      localStorage.setItem("nurby-onboarding-dismissed", "1");
+    } catch {
+      /* ignore */
+    }
+    authFetch("/api/system/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ onboarding_dismissed: true }),
+    }).catch(() => {
+      /* best-effort; localStorage still gates this browser */
+    });
+  }, [authFetch]);
 
   // Provider step state.
   const [presetIdx, setPresetIdx] = useState<number>(0);
@@ -230,11 +248,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   }
 
   function dismiss() {
-    try {
-      localStorage.setItem("nurby-onboarding-dismissed", "1");
-    } catch {
-      /* ignore */
-    }
+    markDismissed();
     onClose();
   }
 
@@ -309,11 +323,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
           )}
           {step === "done" && (
             <DoneStep onClose={() => {
-              try {
-                localStorage.setItem("nurby-onboarding-dismissed", "1");
-              } catch {
-                /* ignore */
-              }
+              markDismissed();
               onComplete();
             }} />
           )}
@@ -406,11 +416,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
           {step === "done" && (
             <button
               onClick={() => {
-                try {
-                  localStorage.setItem("nurby-onboarding-dismissed", "1");
-                } catch {
-                  /* ignore */
-                }
+                markDismissed();
                 onComplete();
               }}
               className="px-4 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90"

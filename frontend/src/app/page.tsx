@@ -2306,18 +2306,38 @@ function DashboardContent() {
   useEffect(() => { if (cameras.length === 0) return; const i = setInterval(() => cameras.forEach((c) => fetchActivity(c.id)), 15000); return () => clearInterval(i); }, [cameras, fetchActivity]);
 
   // First-run onboarding. Pop the wizard if no cameras exist and the
-  // user has not dismissed it before.
+  // user has not dismissed it. Dismissal is checked both in localStorage
+  // (fast path) and server-side (onboarding_dismissed) so it survives a
+  // browser/device change. An admin can re-trigger the wizard by
+  // flipping onboarding_dismissed back to false in Settings.
   useEffect(() => {
     if (camerasLoading) return;
     if (cameras.length > 0) return;
-    let dismissed = false;
+    let localDismissed = false;
     try {
-      dismissed = localStorage.getItem("nurby-onboarding-dismissed") === "1";
+      localDismissed = localStorage.getItem("nurby-onboarding-dismissed") === "1";
     } catch {
-      dismissed = true;
+      localDismissed = true;
     }
-    if (!dismissed) setShowWizard(true);
-  }, [camerasLoading, cameras.length]);
+    if (localDismissed) return;
+    let cancelled = false;
+    (async () => {
+      let serverDismissed = false;
+      try {
+        const res = await authFetch("/api/system/settings");
+        if (res.ok) {
+          const data = await res.json();
+          serverDismissed = !!data?.onboarding_dismissed;
+        }
+      } catch {
+        /* fall through to showing the wizard */
+      }
+      if (!cancelled && !serverDismissed) setShowWizard(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [camerasLoading, cameras.length, authFetch]);
 
   // Build timeline entries
   let entries: TimelineEntry[] = [];

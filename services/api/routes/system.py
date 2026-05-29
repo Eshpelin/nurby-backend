@@ -263,6 +263,7 @@ SETTINGS_WHITELIST: tuple[str, ...] = (
     "cluster_naming_min_sightings",
     "public_base_url",
     "rules_cooldown_backend",
+    "onboarding_dismissed",
 )
 
 
