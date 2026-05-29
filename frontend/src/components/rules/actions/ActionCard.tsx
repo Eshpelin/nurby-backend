@@ -2,6 +2,8 @@
 
 import {
   ACTION_TYPES,
+  describeActions,
+  draftToDict,
   type ActionDraft,
   type ActionType,
   type WebhookDraft,
@@ -13,6 +15,8 @@ import {
   type VerifyDraft,
   type TelegramChannelOption,
 } from "../types";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { StyledSelect } from "../StyledSelect";
 import { WebhookEditor } from "./WebhookEditor";
 import { BroadcastEditor } from "./BroadcastEditor";
@@ -24,6 +28,7 @@ import { VerifyEditor } from "./VerifyEditor";
 import { type VarSpec } from "./VarInserter";
 
 export interface ActionCardProps {
+  sortableId: string;
   index: number;
   draft: ActionDraft;
   totalCount: number;
@@ -40,6 +45,7 @@ export interface ActionCardProps {
 }
 
 export function ActionCard({
+  sortableId,
   index,
   draft,
   totalCount,
@@ -56,21 +62,59 @@ export function ActionCard({
 }: ActionCardProps) {
   const typeLabel =
     ACTION_TYPES.find((a) => a.value === draft.type)?.label || draft.type;
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: sortableId });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  // A gate that can abort the rest of the chain. verify always can,
+  // vlm_call only when its on-error is set to stop.
+  const canStopChain =
+    draft.type === "verify" ||
+    (draft.type === "vlm_call" && (draft as VlmCallDraft).onError === "stop");
+
+  // One-line summary shown when the card is collapsed.
+  const collapsedSummary = describeActions(draftToDict(draft));
+
   return (
     <fieldset
+      ref={setNodeRef}
+      style={style}
       id={`rule-action-${index}`}
       className={`border rounded-md p-3 space-y-3 ${
         errorMessage ? "border-red-500/60" : "border-border"
-      }`}
+      } ${isDragging ? "ring-1 ring-accent" : ""}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground px-0.5 touch-none"
+            title="Drag to reorder"
+            aria-label="Drag to reorder"
+          >
+            ⠿
+          </button>
           <span className="px-1.5 py-0.5 text-[10px] rounded bg-muted text-zinc-300 font-mono">
             {index + 1}
           </span>
           <span className="text-xs px-1.5 py-0.5 rounded border border-border text-muted-foreground">
             {typeLabel}
           </span>
+          {canStopChain && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300"
+              title="If this gate fails, the remaining actions are skipped"
+            >
+              may stop chain
+            </span>
+          )}
           <button
             type="button"
             onClick={onToggleCollapsed}
@@ -109,6 +153,11 @@ export function ActionCard({
           </button>
         </div>
       </div>
+      {isCollapsed && (
+        <div className="text-[11px] text-muted-foreground truncate pl-1">
+          {collapsedSummary}
+        </div>
+      )}
       {!isCollapsed && (
         <>
           <StyledSelect
