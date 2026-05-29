@@ -23,6 +23,8 @@ Supported action types.
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -42,6 +44,58 @@ from services.events.templates import (
 )
 
 logger = logging.getLogger("nurby.events.actions")
+
+# Outbound delivery defaults. retries with exponential backoff.
+_RETRY_BACKOFF = (0.5, 1.5, 3.0)
+
+
+def sign_body(body: bytes, secret: str) -> str:
+    """HMAC-SHA256 signature of a raw body. Receivers recompute this
+    over the bytes they receive and compare to verify authenticity."""
+    mac = hmac.new(secret.encode("utf-8"), body, hashlib.sha256)
+    return "sha256=" + mac.hexdigest()
+
+
+async def deliver_signed(
+    method: str,
+    url: str,
+    payload,
+    *,
+    headers: dict | None = None,
+    secret: str | None = None,
+    params: dict | None = None,
+    timeout: float = 10.0,
+    attempts: int = 3,
+) -> tuple[bool, str]:
+    """Deliver a JSON payload with optional HMAC signing and retries.
+
+    Signs the exact serialized bytes so the receiver can verify. Retries
+    on timeout, connection error, and 5xx with exponential backoff.
+    Returns (ok, detail). 4xx is not retried (caller misconfig).
+    """
+    headers = dict(headers or {})
+    body = json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8")
+    headers.setdefault("Content-Type", "application/json")
+    if secret:
+        headers["X-Nurby-Signature"] = sign_body(body, secret)
+    last = "no attempt made"
+    async with httpx.AsyncClient() as client:
+        for i in range(max(1, attempts)):
+            try:
+                resp = await client.request(
+                    method, url, content=body, headers=headers,
+                    params=params, timeout=timeout,
+                )
+                if resp.status_code < 500:
+                    return (resp.status_code < 400, f"status {resp.status_code}")
+                last = f"status {resp.status_code}"
+            except httpx.TimeoutException:
+                last = f"timeout connecting to {url}"
+            except httpx.RequestError as exc:
+                last = str(exc)
+            if i < attempts - 1:
+                await asyncio.sleep(_RETRY_BACKOFF[min(i, len(_RETRY_BACKOFF) - 1)])
+    return (False, last)
 
 # Legacy single-segment template pattern kept for default payload builder.
 _TEMPLATE_VAR = re.compile(r"\{\{(\w+)\}\}")
@@ -267,19 +321,18 @@ async def _execute_webhook(action, observation_data, rule, event_id, ctx):
         payload = _build_default_payload(ctx)
 
     headers = render(dict(action.get("headers", {})), ctx)
-    headers.setdefault("Content-Type", "application/json")
     _apply_auth(headers, action.get("auth"))
     timeout = action.get("timeout", 10)
+    secret = action.get("secret") or None
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
-            logger.info("Webhook fired for rule '%s' -> %s (status %d)", rule.name, url, resp.status_code)
-            await _update_event_status(event_id, "webhook", "success")
-        except httpx.TimeoutException:
-            await _update_event_status(event_id, "webhook", "failed", f"Timeout connecting to {url}")
-        except httpx.RequestError as exc:
-            await _update_event_status(event_id, "webhook", "failed", str(exc))
+    ok, detail = await deliver_signed(
+        "POST", url, payload, headers=headers, secret=secret, timeout=timeout,
+    )
+    if ok:
+        logger.info("Webhook fired for rule '%s' -> %s (%s)", rule.name, url, detail)
+        await _update_event_status(event_id, "webhook", "success")
+    else:
+        await _update_event_status(event_id, "webhook", "failed", detail)
 
 
 async def _execute_api_call(action, observation_data, rule, event_id, ctx):
@@ -298,8 +351,6 @@ async def _execute_api_call(action, observation_data, rule, event_id, ctx):
         payload = _build_default_payload(ctx)
 
     headers = render(dict(action.get("headers", {})), ctx)
-    if payload is not None:
-        headers.setdefault("Content-Type", "application/json")
     _apply_auth(headers, action.get("auth"))
 
     query_params = action.get("query_params")
@@ -307,20 +358,32 @@ async def _execute_api_call(action, observation_data, rule, event_id, ctx):
         query_params = render(query_params, ctx)
 
     timeout = action.get("timeout", 10)
+    secret = action.get("secret") or None
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.request(
-                method, url,
-                json=payload if payload is not None else None,
-                headers=headers, params=query_params, timeout=timeout,
-            )
-            logger.info("API call fired for rule '%s' -> %s %s (status %d)", rule.name, method, url, resp.status_code)
-            await _update_event_status(event_id, "api_call", "success")
-        except httpx.TimeoutException:
-            await _update_event_status(event_id, "api_call", "failed", f"Timeout on {method} {url}")
-        except httpx.RequestError as exc:
-            await _update_event_status(event_id, "api_call", "failed", str(exc))
+    if payload is None:
+        # No body. fall back to a single plain request (nothing to sign).
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.request(
+                    method, url, headers=headers, params=query_params, timeout=timeout,
+                )
+                logger.info("API call fired for rule '%s' -> %s %s (status %d)", rule.name, method, url, resp.status_code)
+                await _update_event_status(event_id, "api_call", "success" if resp.status_code < 400 else "failed")
+            except httpx.TimeoutException:
+                await _update_event_status(event_id, "api_call", "failed", f"Timeout on {method} {url}")
+            except httpx.RequestError as exc:
+                await _update_event_status(event_id, "api_call", "failed", str(exc))
+        return
+
+    ok, detail = await deliver_signed(
+        method, url, payload, headers=headers, secret=secret,
+        params=query_params, timeout=timeout,
+    )
+    if ok:
+        logger.info("API call fired for rule '%s' -> %s %s (%s)", rule.name, method, url, detail)
+        await _update_event_status(event_id, "api_call", "success")
+    else:
+        await _update_event_status(event_id, "api_call", "failed", detail)
 
 
 async def _execute_broadcast(action, observation_data, rule, event_id, ctx):
