@@ -955,6 +955,58 @@ export function validateActionChainRefs(
   return null;
 }
 
+// Validate a single action draft. Returns the first problem as a short
+// message, or null when the card is valid. Used to surface errors
+// inline on each card instead of one string at the bottom of the form.
+export function validateActionDraft(d: ActionDraft): string | null {
+  if (d.type === "webhook" || d.type === "api_call") {
+    if (!d.url.trim()) return "URL is required";
+    if (d.useCustomPayload && d.payloadTemplate.trim()) {
+      try {
+        JSON.parse(d.payloadTemplate);
+      } catch {
+        return "Payload template is not valid JSON";
+      }
+    }
+    return null;
+  }
+  if (d.type === "broadcast") {
+    if (d.useCustomPayload && d.payloadTemplate.trim()) {
+      try {
+        JSON.parse(d.payloadTemplate);
+      } catch {
+        return "Payload template is not valid JSON";
+      }
+    }
+    return null;
+  }
+  if (d.type === "email") {
+    if (!d.to.trim()) return "Recipient email is required";
+    return null;
+  }
+  if (d.type === "telegram") {
+    if (!d.channelId) return "Pick a Telegram channel";
+    if (!d.template.trim()) return "Message template cannot be empty";
+    if (d.buttons.length > 4) return "Telegram supports at most 4 inline buttons";
+    for (let j = 0; j < d.buttons.length; j++) {
+      const b = d.buttons[j];
+      if (!b.label.trim()) return `Button ${j + 1}: label is required`;
+      if (b.action === "open" && (!b.url || !isValidHttpUrlOrTemplate(b.url))) {
+        return `Button ${j + 1}: URL must start with http(s) or use a template variable`;
+      }
+      if (
+        (b.action === "mute_event" || b.action === "snooze_rule") &&
+        b.duration_seconds !== undefined &&
+        (b.duration_seconds < 60 || b.duration_seconds > 24 * 3600)
+      ) {
+        return `Button ${j + 1}: duration must be between 60s and 24h`;
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
 // Available vars an action card at index `i` may reference. Used to
 // drive the "Insert var" dropdown. Pulled from prior vlm_call outputs.
 export function availableVarsBefore(

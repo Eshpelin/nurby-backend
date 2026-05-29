@@ -58,6 +58,7 @@ export function ActionCard({
     ACTION_TYPES.find((a) => a.value === draft.type)?.label || draft.type;
   return (
     <fieldset
+      id={`rule-action-${index}`}
       className={`border rounded-md p-3 space-y-3 ${
         errorMessage ? "border-red-500/60" : "border-border"
       }`}

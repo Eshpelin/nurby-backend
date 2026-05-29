@@ -8,9 +8,9 @@ import {
   describeSchedule,
   describeTrigger,
   resolveCameraNames,
-  isValidHttpUrlOrTemplate,
   draftToDict,
   validateActionChainRefs,
+  validateActionDraft,
   type Camera,
   type Person,
   type Rule,
@@ -280,80 +280,31 @@ export function RuleModal({
       return;
     }
 
-    for (let i = 0; i < s.formActions.length; i++) {
-      const d = s.formActions[i];
-      const tag = `Action ${i + 1}`;
-      if (d.type === "webhook" || d.type === "api_call") {
-        if (!d.url.trim()) {
-          setError(`${tag}: URL is required`);
-          return;
-        }
-        if (d.useCustomPayload && d.payloadTemplate.trim()) {
-          try {
-            JSON.parse(d.payloadTemplate);
-          } catch {
-            setError(`${tag}: payload template is not valid JSON`);
-            return;
-          }
-        }
-      }
-      if (d.type === "broadcast") {
-        if (d.useCustomPayload && d.payloadTemplate.trim()) {
-          try {
-            JSON.parse(d.payloadTemplate);
-          } catch {
-            setError(`${tag}: payload template is not valid JSON`);
-            return;
-          }
-        }
-      }
-      if (d.type === "email") {
-        if (!d.to.trim()) {
-          setError(`${tag}: recipient email is required`);
-          return;
-        }
-      }
-      if (d.type === "telegram") {
-        if (!d.channelId) {
-          setError(`${tag}: pick a Telegram channel`);
-          return;
-        }
-        if (!d.template.trim()) {
-          setError(`${tag}: message template cannot be empty`);
-          return;
-        }
-        if (d.buttons.length > 4) {
-          setError(`${tag}: Telegram supports at most 4 inline buttons`);
-          return;
-        }
-        for (let j = 0; j < d.buttons.length; j++) {
-          const b = d.buttons[j];
-          if (!b.label.trim()) {
-            setError(`${tag} button ${j + 1}: label is required`);
-            return;
-          }
-          if (b.action === "open") {
-            if (!b.url || !isValidHttpUrlOrTemplate(b.url)) {
-              setError(`${tag} button ${j + 1}: URL must start with http(s) or use a template variable`);
-              return;
-            }
-          }
-          if (
-            (b.action === "mute_event" || b.action === "snooze_rule") &&
-            b.duration_seconds !== undefined &&
-            (b.duration_seconds < 60 || b.duration_seconds > 24 * 3600)
-          ) {
-            setError(`${tag} button ${j + 1}: duration must be between 60s and 24h`);
-            return;
-          }
-        }
-      }
+    // Collect every per-card problem so each card shows its own error,
+    // instead of bailing on the first one with a single bottom message.
+    const errs: Record<number, string> = {};
+    s.formActions.forEach((d, i) => {
+      const e = validateActionDraft(d);
+      if (e) errs[i] = e;
+    });
+    // Chain-ref errors take a card that may otherwise look valid.
+    const chainErr = validateActionChainRefs(s.formActions);
+    if (chainErr && !errs[chainErr.index]) {
+      errs[chainErr.index] = chainErr.message;
     }
 
-    const chainErr = validateActionChainRefs(s.formActions);
-    if (chainErr) {
-      setCardErrors({ [chainErr.index]: chainErr.message });
-      setError(`Action ${chainErr.index + 1}: ${chainErr.message}`);
+    if (Object.keys(errs).length > 0) {
+      setCardErrors(errs);
+      const first = Math.min(...Object.keys(errs).map(Number));
+      setError(`Action ${first + 1}: ${errs[first]}`);
+      // Bring the first offending card into view.
+      if (typeof document !== "undefined") {
+        requestAnimationFrame(() => {
+          document
+            .getElementById(`rule-action-${first}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
       return;
     }
     setCardErrors({});
