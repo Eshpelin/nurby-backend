@@ -296,14 +296,20 @@ async def _read_whitelisted_settings() -> dict[str, object]:
     return out
 
 
-@router.get("/settings", response_model=SystemSettingsResponse)
+@router.get("/system/settings", response_model=SystemSettingsResponse)
 async def get_settings(_current_user: User = Depends(get_current_user)) -> SystemSettingsResponse:
-    """Return the whitelisted runtime flags. Auth required."""
+    """Return the whitelisted runtime flags. Auth required.
+
+    Path is /api/system/settings (router mounts at /api). Every frontend
+    caller (settings page, dashboard onboarding check, wizard dismissal,
+    rule-builder timezone hint) uses this path; the route previously sat
+    at /api/settings and silently 404'd all of them.
+    """
     data = await _read_whitelisted_settings()
     return SystemSettingsResponse(**data)
 
 
-@router.patch("/settings", response_model=SystemSettingsResponse)
+@router.patch("/system/settings", response_model=SystemSettingsResponse)
 async def patch_settings(
     body: SystemSettingsUpdate,
     _current_user: User = Depends(require_admin),
