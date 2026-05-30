@@ -2,12 +2,12 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_current_user, require_admin
 from shared.database import get_db
-from shared.models import Event, EventNote, Observation, User
+from shared.models import Event, EventNote, Observation, Person, User
 from shared.schemas import EventNoteCreate, EventNoteResponse, EventResponse
 
 router = APIRouter()
@@ -51,21 +51,47 @@ async def event_history(
     rule_id: uuid.UUID | None = Query(default=None),
     camera_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
+    from_: datetime | None = Query(default=None, alias="from", description="Inclusive start (ISO 8601)"),
+    to: datetime | None = Query(default=None, description="Inclusive end (ISO 8601)"),
+    person_id: uuid.UUID | None = Query(default=None, description="Filter to events whose observation names this person"),
+    label: str | None = Query(default=None, description="Filter to events whose observation carries this label"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """List events with optional filters for rule, camera, and action status."""
-    query = select(Event).order_by(Event.fired_at.desc()).limit(limit).offset(offset)
+    """List events with optional filters for rule, camera, action status,
+    time range, person, and label."""
+    query = select(Event).order_by(Event.fired_at.desc())
     if rule_id:
         query = query.where(Event.rule_id == rule_id)
     if status:
         query = query.where(Event.action_status == status)
+    if from_:
+        query = query.where(Event.fired_at >= from_)
+    if to:
+        query = query.where(Event.fired_at <= to)
+
+    # camera/person/label filters all reach through the linked Observation.
+    needs_obs = bool(camera_id or person_id or label)
+    if needs_obs:
+        query = query.join(Observation, Event.observation_id == Observation.id)
     if camera_id:
-        # Join through observation to filter by camera
-        query = query.join(Observation, Event.observation_id == Observation.id).where(
-            Observation.camera_id == camera_id
+        query = query.where(Observation.camera_id == camera_id)
+    if person_id:
+        name = (
+            await db.execute(select(Person.display_name).where(Person.id == person_id))
+        ).scalars().first()
+        if not name:
+            return []
+        query = query.where(
+            cast(Observation.person_detections, String).ilike(f'%"person_name": "{name}"%')
         )
+    if label:
+        query = query.where(
+            cast(Observation.object_detections, String).ilike(f'%"label": "{label}"%')
+        )
+
+    query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return result.scalars().all()
 
