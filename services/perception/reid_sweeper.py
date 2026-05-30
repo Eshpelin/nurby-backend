@@ -173,7 +173,7 @@ class BodyReIDSweeper:
         rows = (
             await db.execute(
                 select(Observation.id, Observation.person_detections)
-                .where(Observation.timestamp >= since)
+                .where(Observation.started_at >= since)
                 .where(Observation.person_detections.is_not(None))
             )
         ).all()
