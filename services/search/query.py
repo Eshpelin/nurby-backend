@@ -97,10 +97,22 @@ async def search_observations(
             cast(Observation.object_detections, String).ilike(f"%{object_label}%")
         )
 
-    # Person name filter (search inside JSON)
+    # Person name filter (search inside JSON). Detections store the
+    # canonical display_name, so reverse-map a typed household nickname
+    # ("mommy") to canonical names before matching. Falls back to the
+    # literal text when nothing resolves.
     if person_name:
+        from shared.person_alias import resolve_name_to_canonical
+
+        canon = await resolve_name_to_canonical(db, person_name)
+        needles = canon or [person_name]
         filters.append(
-            cast(Observation.person_detections, String).ilike(f"%{person_name}%")
+            or_(
+                *[
+                    cast(Observation.person_detections, String).ilike(f"%{n}%")
+                    for n in needles
+                ]
+            )
         )
 
     # ── Extract keywords for targeted label/name matching ──
@@ -334,16 +346,29 @@ async def answer_question(
             cid = f.get("cluster_id")
             if cid:
                 cluster_ids_seen.add(str(cid))
+    # Household nicknames replace canonical names in the answer. Live
+    # detections carry the canonical name, so build a name->nickname map.
+    alias_rows = (
+        await db.execute(select(Person.display_name, Person.nickname))
+    ).all()
+    name_alias = {
+        dn: nk.strip()
+        for dn, nk in alias_rows
+        if dn and isinstance(nk, str) and nk.strip()
+    }
+
     cluster_name_map: dict[str, str] = {}
     if cluster_ids_seen:
         try:
             rows = await db.execute(
-                select(FaceCluster.id, Person.display_name)
+                select(FaceCluster.id, Person.display_name, Person.nickname)
                 .join(Person, FaceCluster.person_id == Person.id)
                 .where(FaceCluster.id.in_([uuid.UUID(c) for c in cluster_ids_seen]))
             )
-            for cid, name in rows.all():
-                cluster_name_map[str(cid)] = name
+            for cid, name, nick in rows.all():
+                cluster_name_map[str(cid)] = (
+                    nick.strip() if isinstance(nick, str) and nick.strip() else name
+                )
         except Exception:
             logger.exception("Failed to resolve cluster -> person names for answer")
 
@@ -397,7 +422,9 @@ async def answer_question(
             unknown_ct = 0
             for f in faces:
                 name = f.get("person_name")
-                if not name:
+                if name:
+                    name = name_alias.get(name, name)
+                else:
                     cid = f.get("cluster_id")
                     if cid:
                         name = cluster_name_map.get(str(cid))
