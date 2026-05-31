@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
   cameraLookup,
@@ -13,21 +14,17 @@ import {
 } from "@/components/rules/types";
 import { RulesList } from "@/components/rules/RulesList";
 import { RuleEventsPanel } from "@/components/rules/RuleEventsPanel";
-import { RuleModal } from "@/components/rules/RuleModal";
+import { RULE_PREFILL_KEY } from "@/app/rules/new/page";
 
 const LAST_FIRED_CACHE_MS = 30_000;
 
 export default function RulesPage() {
   const { authFetch } = useAuth();
+  const router = useRouter();
   const [rules, setRules] = useState<Rule[]>([]);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editRule, setEditRule] = useState<Rule | null>(null);
-  // Pre-filled, non-persisted Rule used for persona templates + the
-  // Duplicate flow. RuleModal treats it as a new rule (POST on save).
-  const [prefillRule, setPrefillRule] = useState<Rule | null>(null);
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
 
   const [telegramChannels, setTelegramChannels] = useState<TelegramChannelOption[]>([]);
@@ -125,43 +122,26 @@ export default function RulesPage() {
     fetchLastFired(true);
   }, [fetchRules, fetchCameras, fetchPersons, fetchTelegramChannels, fetchLastFired]);
 
-  const refreshAfterSave = useCallback(() => {
-    fetchRules();
-    fetchLastFired(true);
-  }, [fetchRules, fetchLastFired]);
-
-  const openCreate = () => {
-    setEditRule(null);
-    setPrefillRule(null);
-    setShowModal(true);
+  const stashPrefillAndCreate = (synth: Rule) => {
+    try {
+      sessionStorage.setItem(RULE_PREFILL_KEY, JSON.stringify(synth));
+    } catch {
+      /* ignore quota errors. the create page just opens blank */
+    }
+    router.push("/rules/new");
   };
 
-  const openEdit = (r: Rule) => {
-    setEditRule(r);
-    setPrefillRule(null);
-    setShowModal(true);
-  };
+  const openCreate = () => router.push("/rules/new");
+
+  const openEdit = (r: Rule) => router.push(`/rules/${r.id}/edit`);
 
   const openDuplicate = (r: Rule) => {
-    // Duplicate flow. clone the rule, suffix name, force disabled so
-    // the copy doesn't fire silently. The id is cleared so RuleModal
-    // POSTs a new rule on save.
-    const copy: Rule = {
-      ...r,
-      id: "",
-      name: `${r.name} (copy)`,
-      enabled: false,
-    };
-    setEditRule(null);
-    setPrefillRule(copy);
-    setShowModal(true);
+    // Clone, suffix name, force disabled so the copy doesn't fire
+    // silently. Empty id means the create page POSTs a new rule.
+    stashPrefillAndCreate({ ...r, id: "", name: `${r.name} (copy)`, enabled: false });
   };
 
-  const openPersona = (synth: Rule) => {
-    setEditRule(null);
-    setPrefillRule(synth);
-    setShowModal(true);
-  };
+  const openPersona = (synth: Rule) => stashPrefillAndCreate(synth);
 
   const handleDelete = async (id: string) => {
     try {
@@ -236,18 +216,6 @@ export default function RulesPage() {
           )}
         </div>
       )}
-
-      <RuleModal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        editRule={editRule}
-        prefillRule={prefillRule}
-        cameras={cameras}
-        persons={persons}
-        telegramChannels={telegramChannels}
-        telegramChannelsLoading={telegramChannelsLoading}
-        onSaved={refreshAfterSave}
-      />
     </div>
   );
 }
