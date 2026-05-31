@@ -14,6 +14,7 @@ import {
 } from "@/components/rules/types";
 import { RulesList } from "@/components/rules/RulesList";
 import { RuleEventsPanel } from "@/components/rules/RuleEventsPanel";
+import { WebhookSubscriptions } from "@/components/rules/WebhookSubscriptions";
 import { RULE_PREFILL_KEY } from "@/app/rules/new/page";
 
 const LAST_FIRED_CACHE_MS = 30_000;
@@ -216,6 +217,8 @@ export default function RulesPage() {
           )}
         </div>
       )}
+
+      <WebhookSubscriptions />
     </div>
   );
 }
