@@ -286,7 +286,12 @@ alembic revision --autogenerate -m "description"
 
 ## API Overview
 
-All endpoints except `/api/auth/*` require a valid JWT in the Authorization header.
+All endpoints except `/api/auth/*` require a credential in the
+Authorization header. either a user JWT or a long-lived API key
+(`nrb_...`). See [docs/api.md](docs/api.md) for the full read API and
+filters, [docs/webhooks.md](docs/webhooks.md) for outbound webhooks and
+HMAC signing, and [docs/devices.md](docs/devices.md) for physical alert
+devices. Every route is auto-documented at `/docs` and `/openapi.json`.
 
 | Endpoint                          | Methods         | Auth       | Description                    |
 |-----------------------------------|-----------------|------------|--------------------------------|
@@ -294,6 +299,10 @@ All endpoints except `/api/auth/*` require a valid JWT in the Authorization head
 | `/api/auth/login`                 | POST            | Public     | Get JWT token                  |
 | `/api/auth/register`              | POST            | Public     | Register with invite key       |
 | `/api/auth/me`                    | GET             | User       | Current user profile           |
+| `/api/api-keys`                   | GET, POST, DEL  | User       | Manage programmatic API keys   |
+| `/api/webhook-subscriptions`      | GET, POST, PATCH, DEL | User/Admin | Standing outbound webhooks |
+| `/api/devices`                    | GET             | User       | Physical alert device presets  |
+| `/api/journeys`                   | GET             | User       | Cross-camera sighting sessions |
 | `/api/health`                     | GET             | Public     | Service and DB health          |
 | `/api/status`                     | GET             | User       | System health and camera counts|
 | `/api/cameras`                    | GET, POST       | User/Admin | List and add cameras           |
