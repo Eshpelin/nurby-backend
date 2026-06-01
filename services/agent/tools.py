@@ -349,12 +349,23 @@ async def get_journeys(
     if not effective_cams:
         return {"journeys": []}
 
-    resolved_person_id: uuid.UUID | None = None
+    # ── Subject resolution ──────────────────────────────────────────
+    # Person journeys key ``subject_key`` by a comma-joined,
+    # alphabetically-sorted set of display names (see
+    # incident_tracker.compute_signature), NOT by person_id. So a
+    # person filter resolves to a display name and matches the
+    # name-signature, not a UUID.
+    resolved_name: str | None = None
     if person_id:
         try:
-            resolved_person_id = uuid.UUID(person_id)
+            pid = uuid.UUID(person_id)
         except (TypeError, ValueError):
             return {"journeys": [], "error": "invalid person_id"}
+        resolved_name = (
+            await db.execute(select(Person.display_name).where(Person.id == pid))
+        ).scalars().first()
+        if not resolved_name:
+            return {"journeys": [], "error": "person not found"}
     elif person_name:
         like = f"%{person_name.strip()}%"
         person_rows = (
@@ -374,65 +385,89 @@ async def get_journeys(
                     for pid, dname in person_rows
                 ],
             }
-        resolved_person_id = person_rows[0][0]
+        resolved_name = person_rows[0][1]
 
     filters = [
         Journey.subject_kind == "person",
         Journey.last_seen_at >= cutoff,
     ]
-    if resolved_person_id is not None:
-        filters.append(Journey.subject_key == str(resolved_person_id))
+    # Coarse SQL prefilter on the name-signature. The precise
+    # exact-token check happens in Python below so "Ann" does not match
+    # a journey for "Anna".
+    if resolved_name is not None:
+        filters.append(Journey.subject_key.ilike(f"%{resolved_name}%"))
 
+    # When name-filtering, overfetch so the Python token filter still
+    # has enough candidates after dropping coincidental substring hits.
+    fetch_limit = max(limit, 200) if resolved_name is not None else limit
     stmt = (
         select(Journey)
         .where(and_(*filters))
         .order_by(Journey.last_seen_at.desc())
-        .limit(limit)
+        .limit(fetch_limit)
     )
-    rows = (await db.execute(stmt)).scalars().all()
+    rows = list((await db.execute(stmt)).scalars().all())
 
-    # Resolve display names for the subject persons.
-    subj_ids: set[uuid.UUID] = set()
+    def _names(subject_key: str | None) -> list[str]:
+        return [n.strip() for n in (subject_key or "").split(",") if n.strip()]
+
+    # Precise exact-token filter. subject_key is comma-joined names; the
+    # person matches only if their exact display name is one of them.
+    if resolved_name is not None:
+        rows = [j for j in rows if resolved_name in _names(j.subject_key)][:limit]
+    else:
+        rows = rows[:limit]
+
+    # Resolve person_id for single-name journeys so the agent can cite
+    # one. Multi-person journeys keep person_id null but list the names.
+    single_names: set[str] = set()
     for j in rows:
-        try:
-            subj_ids.add(uuid.UUID(j.subject_key))
-        except (TypeError, ValueError):
-            continue
-    person_name_map: dict[uuid.UUID, str] = {}
-    if subj_ids:
+        ns = _names(j.subject_key)
+        if len(ns) == 1:
+            single_names.add(ns[0])
+    name_to_id: dict[str, str] = {}
+    if single_names:
         for pid, dname in (
             await db.execute(
-                select(Person.id, Person.display_name).where(Person.id.in_(subj_ids))
+                select(Person.id, Person.display_name).where(
+                    Person.display_name.in_(single_names)
+                )
             )
         ).all():
-            person_name_map[pid] = dname
+            name_to_id[dname] = str(pid)
 
-    # Resolve camera names referenced by segments.
-    seg_cam_ids: set[uuid.UUID] = set()
+    # Resolve thumbnails from each journey's peak observation.
+    peak_ids: set[uuid.UUID] = set()
     for j in rows:
         for seg in j.segments or []:
-            cid = seg.get("camera_id") if isinstance(seg, dict) else None
-            if cid:
-                try:
-                    seg_cam_ids.add(uuid.UUID(cid))
-                except (TypeError, ValueError):
-                    continue
-    cam_name_map: dict[uuid.UUID, str] = {}
-    if seg_cam_ids:
-        for cid, cname in (
+            if isinstance(seg, dict):
+                poid = seg.get("peak_observation_id")
+                if poid:
+                    try:
+                        peak_ids.add(uuid.UUID(poid))
+                    except (TypeError, ValueError):
+                        continue
+    thumb_by_obs: dict[uuid.UUID, str] = {}
+    if peak_ids:
+        for oid, tpath in (
             await db.execute(
-                select(Camera.id, Camera.name).where(Camera.id.in_(seg_cam_ids))
+                select(Observation.id, Observation.thumbnail_path).where(
+                    Observation.id.in_(peak_ids)
+                )
             )
         ).all():
-            cam_name_map[cid] = cname
+            if tpath:
+                thumb_by_obs[oid] = tpath
 
     journeys_out: list[dict[str, Any]] = []
     for j in rows:
         # Filter segments to accessible cameras and skip the journey if
-        # nothing remains.
+        # nothing remains. Segments already carry camera_name +
+        # occurrence_count (see journey_tracker._segment).
         seg_cams: list[dict[str, str]] = []
         seen: set[uuid.UUID] = set()
         observation_count = 0
+        first_thumb: str | None = None
         for seg in j.segments or []:
             if not isinstance(seg, dict):
                 continue
@@ -445,40 +480,39 @@ async def get_journeys(
                 continue
             if cid not in seen:
                 seg_cams.append(
-                    {"id": str(cid), "name": cam_name_map.get(cid, "Unknown")}
+                    {"id": str(cid), "name": seg.get("camera_name") or "Unknown"}
                 )
                 seen.add(cid)
-            observation_count += int(seg.get("observation_count") or 0)
+            observation_count += int(seg.get("occurrence_count") or 0)
+            if first_thumb is None:
+                poid = seg.get("peak_observation_id")
+                if poid:
+                    try:
+                        first_thumb = thumb_by_obs.get(uuid.UUID(poid))
+                    except (TypeError, ValueError):
+                        first_thumb = None
         if not seg_cams:
             continue
 
-        try:
-            subj_uuid = uuid.UUID(j.subject_key)
-        except (TypeError, ValueError):
-            subj_uuid = None
+        ns = _names(j.subject_key)
+        person_id_out = name_to_id.get(ns[0]) if len(ns) == 1 else None
 
         started = j.started_at
         ended = j.ended_at or j.last_seen_at
         duration_s = int((ended - started).total_seconds()) if started and ended else None
 
-        # Use the first segment's thumbnail if present.
-        thumb = None
-        for seg in j.segments or []:
-            if isinstance(seg, dict) and seg.get("thumbnail_path"):
-                thumb = seg.get("thumbnail_path")
-                break
-
         journeys_out.append(
             {
                 "id": str(j.id),
-                "person_id": str(subj_uuid) if subj_uuid else None,
-                "person_name": person_name_map.get(subj_uuid) if subj_uuid else None,
+                "person_id": person_id_out,
+                "person_name": j.subject_key,
+                "person_names": ns,
                 "started_at": started.isoformat() if started else None,
                 "ended_at": ended.isoformat() if ended else None,
                 "duration_seconds": duration_s,
                 "cameras": seg_cams,
                 "observation_count": observation_count,
-                "thumbnail_url": _thumbnail_url(thumb),
+                "thumbnail_url": _thumbnail_url(first_thumb),
             }
         )
 
@@ -1506,6 +1540,23 @@ async def query_relationships(
     ).scalars().all()
     # Keep only journeys that touch at least one accessible camera.
     subj_journeys = [j for j in subj_journeys if _seg_cam_ids(j, allowed)]
+
+    # Exact-token guard. ``subject_key`` is a comma-joined set of names
+    # (persons) or labels (objects). The SQL ilike above is a coarse
+    # prefilter; require an exact member match here so "Ann" does not
+    # match a journey for "Anna", and "car" does not match "carriage".
+    if subject_desc["type"] == "person":
+        token = subject_desc["display_name"]
+    elif subject_desc["type"] == "label":
+        token = subject_desc["label"]
+    else:
+        token = None
+    if token is not None:
+        subj_journeys = [
+            j
+            for j in subj_journeys
+            if token in [n.strip() for n in (j.subject_key or "").split(",")]
+        ]
 
     if relation == "co_present_with":
         results = await _rel_co_present(

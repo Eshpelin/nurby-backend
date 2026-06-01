@@ -233,18 +233,28 @@ async def test_get_camera_layout_infers_roles(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_journeys_happy(monkeypatch):
+    # Journeys key persons by their display-name signature in
+    # subject_key (incident_tracker.compute_signature joins names, not
+    # ids). A person_id filter resolves to the display name, then
+    # matches the name-signature.
     cam_id = uuid.uuid4()
     person_id = uuid.uuid4()
+    peak_obs_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
     journey = SimpleNamespace(
         id=uuid.uuid4(),
         subject_kind="person",
-        subject_key=str(person_id),
+        subject_key="Dad",
         started_at=now - timedelta(minutes=10),
         last_seen_at=now,
         ended_at=now,
         segments=[
-            {"camera_id": str(cam_id), "observation_count": 3, "thumbnail_path": "t.jpg"}
+            {
+                "camera_id": str(cam_id),
+                "camera_name": "Kitchen",
+                "occurrence_count": 3,
+                "peak_observation_id": str(peak_obs_id),
+            }
         ],
     )
 
@@ -257,8 +267,15 @@ async def test_get_journeys_happy(monkeypatch):
         s = stmt.lower()
         if "from journeys" in s:
             return [(journey,)]
-        if "from persons" in s and "person.id" in s.replace("persons.id", "person.id") or "from persons" in s:
+        # person_id -> display_name lookup: WHERE persons.id = :pk.
+        if "from persons" in s and "persons.id =" in s:
+            return [("Dad",)]
+        # single-name -> id resolution: WHERE persons.display_name IN (...).
+        if "from persons" in s and "display_name in" in s:
             return [(person_id, "Dad")]
+        # peak_observation_id -> thumbnail_path.
+        if "from observations" in s:
+            return [(peak_obs_id, "t.jpg")]
         if "from cameras" in s:
             return [(cam_id, "Kitchen")]
         return []
@@ -269,8 +286,47 @@ async def test_get_journeys_happy(monkeypatch):
     assert len(out["journeys"]) == 1
     j = out["journeys"][0]
     assert j["person_name"] == "Dad"
+    assert j["person_names"] == ["Dad"]
+    assert j["person_id"] == str(person_id)
     assert j["cameras"] == [{"id": str(cam_id), "name": "Kitchen"}]
     assert j["observation_count"] == 3
+    assert j["thumbnail_url"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_journeys_exact_token_no_cross_match(monkeypatch):
+    # "Ann" must NOT match a journey whose subject_key is "Anna".
+    cam_id = uuid.uuid4()
+    ann_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    anna_journey = SimpleNamespace(
+        id=uuid.uuid4(),
+        subject_kind="person",
+        subject_key="Anna",  # different person, substring of "Ann" query? no - "Ann" is substring of "Anna"
+        started_at=now - timedelta(minutes=5),
+        last_seen_at=now,
+        ended_at=now,
+        segments=[{"camera_id": str(cam_id), "camera_name": "Hall", "occurrence_count": 1}],
+    )
+
+    async def fake_access(user, db):
+        return {cam_id}
+
+    monkeypatch.setattr(tools_mod, "accessible_camera_ids", fake_access)
+
+    def responder(stmt: str):
+        s = stmt.lower()
+        if "from journeys" in s:
+            return [(anna_journey,)]  # coarse ilike %Ann% would return Anna
+        if "from persons" in s and "persons.id =" in s:
+            return [("Ann",)]
+        return []
+
+    db = FakeDB(responder)
+    ctx = {"user": _user("admin"), "run_id": None, "db": db}
+    out = await get_journeys(ctx, person_id=str(ann_id), hours=24, limit=10)
+    # Exact-token guard drops the "Anna" journey.
+    assert out["journeys"] == []
 
 
 @pytest.mark.asyncio
