@@ -70,6 +70,41 @@ services:
       redis:
         condition: service_healthy
 
+  # Nurby MCP server. exposes the read-only agent tools over the Model
+  # Context Protocol so any MCP client (Claude Desktop, etc) can query a
+  # household's cameras. Behind the "mcp" profile so a plain
+  # `docker compose up` does NOT start it. Run explicitly with:
+  #   NURBY_MCP_TOKEN=<jwt> docker compose --profile mcp up mcp
+  # The operator sets NURBY_MCP_TOKEN to a Nurby JWT copied from a
+  # logged-in session. that token scopes every tool call to one user and
+  # the camera ACL still applies. See docs/mcp.md.
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: services/mcp/Dockerfile
+    restart: unless-stopped
+    # stdio is the default transport (Claude Desktop launches it). The
+    # port is only used when NURBY_MCP_HTTP=1 selects the HTTP transport.
+    ports:
+      - "4749:4749"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nurby:${POSTGRES_PASSWORD:-nurby_dev}@postgres:5432/nurby
+      REDIS_URL: redis://redis:6379/0
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      THUMBNAILS_PATH: /data/thumbnails
+      NURBY_MCP_TOKEN: ${NURBY_MCP_TOKEN:-}
+      # Set NURBY_MCP_HTTP=1 to serve over HTTP on port 4749 instead of
+      # stdio (SDK permitting). stdio is the must-have default.
+      NURBY_MCP_HTTP: ${NURBY_MCP_HTTP:-}
+    volumes:
+      - thumbnails:/data/thumbnails:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   ingestion:
     build:
       context: .

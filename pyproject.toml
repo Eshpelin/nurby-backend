@@ -36,6 +36,10 @@ dependencies = [
     "librosa>=0.10.0",
     "jsonschema>=4.0.0",
     "psutil>=5.9.0",
+    # Official Model Context Protocol Python SDK. powers the read-only
+    # Nurby MCP server (services/mcp/server.py) that re-exports the agent
+    # tool registry to MCP clients like Claude Desktop.
+    "mcp>=1.2.0",
 ]
 
 [project.optional-dependencies]
