@@ -596,6 +596,7 @@ def test_registry_lookup():
         "get_last_sightings",
         "get_events",
         "summarize_activity",
+        "summarize_window",
         "query_relationships",
         "analyze_clip",
         "analyze_frame",

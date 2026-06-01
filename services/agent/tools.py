@@ -1901,6 +1901,73 @@ async def _rel_transitions(
     return out
 
 
+# ── Tool 3f. summarize_window (map-reduce long-window summary) ────────
+
+
+_SUMMARIZE_WINDOW_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": _MAX_WINDOW_HOURS,
+            "default": 168,
+            "description": (
+                "Look-back window in hours. Default 168 (7 days), max 720 "
+                "(30 days)."
+            ),
+        },
+        "focus": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": (
+                "Optional free-text topic the final narrative weights "
+                "toward, e.g. 'front door' or 'the dog'."
+            ),
+        },
+        "chunk_by": {
+            "type": "string",
+            "enum": ["auto", "hour", "day", "incident", "journey"],
+            "default": "auto",
+            "description": (
+                "Chunk boundary strategy. auto picks hourly buckets for "
+                "windows <=48h and daily buckets for longer windows."
+            ),
+        },
+        "provider_id": {"type": "string", "format": "uuid"},
+    },
+}
+
+
+async def summarize_window(
+    ctx: dict,
+    *,
+    hours: int = 168,
+    focus: str | None = None,
+    chunk_by: str = "auto",
+    provider_id: str | None = None,
+) -> dict:
+    """Map-reduce summary of a LONG window (multiple days / weeks).
+
+    Thin wrapper over services.agent.summarizer.summarize_window. The
+    summarizer chunks the window, builds a deterministic zero-LLM
+    mini-summary per chunk, then folds them into one narrative with a
+    single budget-gated LLM reduce step. Use for 'summarize the last
+    week/month'. For a single day use summarize_activity (cheaper).
+    """
+    from services.agent.summarizer import summarize_window as _summarize_window
+
+    return await _summarize_window(
+        ctx,
+        hours=hours,
+        focus=focus,
+        chunk_by=chunk_by,
+        provider_id=provider_id,
+    )
+
+
 # ── Tool 4. analyze_clip ──────────────────────────────────────────────
 
 
@@ -2236,6 +2303,22 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "fn": summarize_activity,
         "side_effect": "read",
         "cost_class": "cheap",
+    },
+    {
+        "name": "summarize_window",
+        "description": (
+            "Summarize a LONG time window (multiple days/weeks) by "
+            "chunking it, summarizing each chunk, then folding into one "
+            "narrative. Use for 'summarize the last week/month' or 'what "
+            "happened at <camera> over <long period>'. For a single day "
+            "use summarize_activity (cheaper). Bounded token cost via "
+            "map-reduce. the per-chunk step is deterministic (zero LLM), "
+            "only the final reduce calls the model and it is budget-gated."
+        ),
+        "input_schema": _SUMMARIZE_WINDOW_SCHEMA,
+        "fn": summarize_window,
+        "side_effect": "read",
+        "cost_class": "medium",
     },
     {
         "name": "query_relationships",

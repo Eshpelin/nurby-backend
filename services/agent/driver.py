@@ -45,6 +45,7 @@ Workflow.
 - Plan briefly inside <plan> tags before any tool calls.
 - For most questions, call get_household_snapshot on turn 0 so you have camera + Person + active-journey context before deciding what to do next.
 - For narrative or summary questions ("what happened today?", "give me a recap"), call summarize_activity FIRST. It returns per-Person sighting counts, per-rule firing counts, per-label observation counts, and per-camera activity in one round-trip. Then drill in with the other tools only as needed.
+- For LONG summaries spanning multiple days or weeks ("summarize the last week", "what happened this month at the front door"), call summarize_window instead of summarize_activity. summarize_activity is for a single day.
 - For "how many times did X happen?" or "when did rule Y fire?", call get_events. Rule firings are confirmed semantic facts. do NOT re-analyze frames with the VLM to recount them.
 - Use query_observations for searching past activity by topic + time + person + label.
 - Use get_journeys for "where did X go" or "when was X here" questions about Persons.
