@@ -138,7 +138,9 @@ class RuleEngine:
                 try:
                     await execute_action(action, observation_data, rule, event_id)
                 except RuntimeError as exc:
-                    # on_error=stop from a vlm_call aborts the chain.
+                    # Chain-abort signal. A vlm_call with on_error=stop or a
+                    # verify action that failed confirmation raises here to
+                    # suppress every remaining action (notify, telegram, ...).
                     logger.info("Rule '%s' chain stopped. %s", rule.name, exc)
                     break
                 except Exception:

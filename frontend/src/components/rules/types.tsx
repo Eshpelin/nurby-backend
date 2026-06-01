@@ -197,6 +197,7 @@ export const ACTION_TYPES = [
   { value: "email", label: "Email" },
   { value: "telegram", label: "Telegram" },
   { value: "vlm_call", label: "VLM Call" },
+  { value: "verify", label: "Verify with AI" },
 ];
 
 export const TELEGRAM_TEMPLATE_VARS = [
@@ -412,6 +413,10 @@ export function describeActions(actions: Record<string, unknown> | Record<string
         const cid = (a.channel_id as string) || "";
         return cid ? `Telegram via channel ${cid.slice(0, 8)}` : "Telegram (no channel selected)";
       }
+      if (a.type === "verify") {
+        const q = (a.question as string) || "...";
+        return `confirm with AI that ${q}`;
+      }
       return String(a.type);
     })
     .join(", ");
@@ -531,7 +536,8 @@ export type ActionType =
   | "notify"
   | "email"
   | "telegram"
-  | "vlm_call";
+  | "vlm_call"
+  | "verify";
 
 export interface WebhookDraft {
   type: "webhook" | "api_call";
@@ -588,13 +594,22 @@ export interface VlmCallDraft {
   timeoutMs: string;
 }
 
+export interface VerifyDraft {
+  type: "verify";
+  question: string;
+  minConfidence: number;
+  onFail: "stop" | "continue";
+  providerId?: string;
+}
+
 export type ActionDraft =
   | WebhookDraft
   | BroadcastDraft
   | NotifyDraft
   | EmailDraft
   | TelegramDraft
-  | VlmCallDraft;
+  | VlmCallDraft
+  | VerifyDraft;
 
 export const MAX_ACTIONS_PER_RULE = 8;
 
@@ -649,6 +664,13 @@ export function defaultDraftForType(type: ActionType): ActionDraft {
         maxRetries: "1",
         onError: "continue",
         timeoutMs: "20000",
+      };
+    case "verify":
+      return {
+        type,
+        question: "",
+        minConfidence: 0.6,
+        onFail: "stop",
       };
   }
 }
@@ -733,6 +755,17 @@ export function dictToDraft(raw: Record<string, unknown>): ActionDraft {
         onError: (raw.on_error as string) || "continue",
         timeoutMs: raw.timeout_ms != null ? String(raw.timeout_ms) : "20000",
       };
+    case "verify": {
+      const mc = raw.min_confidence;
+      const onFail = raw.on_fail === "continue" ? "continue" : "stop";
+      return {
+        type: "verify",
+        question: (raw.question as string) || "",
+        minConfidence: typeof mc === "number" ? mc : 0.6,
+        onFail,
+        providerId: (raw.provider_id as string) || "",
+      };
+    }
   }
   // Fallback. unknown type. coerce to notify.
   return defaultDraftForType("notify");
@@ -832,6 +865,18 @@ export function draftToDict(d: ActionDraft): Record<string, unknown> {
       } catch {
         /* caught at submit */
       }
+    }
+    return action;
+  }
+  if (d.type === "verify") {
+    const action: Record<string, unknown> = {
+      type: "verify",
+      question: d.question,
+      min_confidence: d.minConfidence,
+      on_fail: d.onFail,
+    };
+    if (d.providerId && d.providerId.trim()) {
+      action.provider_id = d.providerId.trim();
     }
     return action;
   }

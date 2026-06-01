@@ -371,6 +371,7 @@ class NotificationResponse(BaseModel):
 
 _VALID_ACTION_TYPES = {
     "webhook", "api_call", "broadcast", "notify", "email", "vlm_call", "telegram",
+    "verify",
 }
 
 # Phase 2 inline-button actions. Kept in lockstep with
@@ -433,6 +434,26 @@ def _validate_telegram_buttons(buttons, idx: int) -> None:
                     )
 
 
+def _validate_verify_action(action, idx: int) -> None:
+    """Validate a ``verify`` action. question is a required non-empty
+    string; min_confidence (if present) is a float in [0,1]; on_fail (if
+    present) is one of {stop, continue}."""
+    question = action.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError(f"action[{idx}] verify requires a non-empty 'question'")
+
+    mc = action.get("min_confidence")
+    if mc is not None:
+        if isinstance(mc, bool) or not isinstance(mc, (int, float)):
+            raise ValueError(f"action[{idx}] verify min_confidence must be a number")
+        if not (0.0 <= float(mc) <= 1.0):
+            raise ValueError(f"action[{idx}] verify min_confidence must be in [0, 1]")
+
+    on_fail = action.get("on_fail")
+    if on_fail is not None and on_fail not in ("stop", "continue"):
+        raise ValueError(f"action[{idx}] verify on_fail must be 'stop' or 'continue'")
+
+
 def _validate_action_chain(actions):
     """Static checks. each action is a dict, has a known type, and
     any `{{vars.X.*}}` references point to an `output` declared by a
@@ -454,6 +475,9 @@ def _validate_action_chain(actions):
 
         if a_type == "telegram":
             _validate_telegram_buttons(action.get("buttons"), idx)
+
+        if a_type == "verify":
+            _validate_verify_action(action, idx)
 
         refs = collect_refs(action)
         for ref in refs:

@@ -10,6 +10,7 @@ import {
   type EmailDraft,
   type TelegramDraft,
   type VlmCallDraft,
+  type VerifyDraft,
   type TelegramChannelOption,
 } from "../types";
 import { StyledSelect } from "../StyledSelect";
@@ -19,6 +20,7 @@ import { NotifyEditor } from "./NotifyEditor";
 import { EmailEditor } from "./EmailEditor";
 import { TelegramEditor } from "./TelegramEditor";
 import { VlmCallEditor } from "./VlmCallEditor";
+import { VerifyEditor } from "./VerifyEditor";
 import { type VarSpec } from "./VarInserter";
 
 export interface ActionCardProps {
@@ -153,6 +155,12 @@ export function ActionCard({
           {draft.type === "vlm_call" && (
             <VlmCallEditor
               draft={draft as VlmCallDraft}
+              onChange={(next) => onReplace(next)}
+            />
+          )}
+          {draft.type === "verify" && (
+            <VerifyEditor
+              draft={draft as VerifyDraft}
               onChange={(next) => onReplace(next)}
             />
           )}

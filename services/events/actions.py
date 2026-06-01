@@ -238,6 +238,8 @@ async def execute_action(
         await _execute_vlm_call(action, observation_data, rule, event_id, ctx)
     elif action_type == "telegram":
         await _execute_telegram(action, observation_data, rule, event_id, ctx)
+    elif action_type == "verify":
+        await _execute_verify(action, observation_data, rule, event_id, ctx)
     else:
         logger.warning("Unknown action type '%s' in rule '%s'", action_type, rule.name)
         await _update_event_status(event_id, action_type or "unknown", "failed", f"Unknown action type '{action_type}'")
@@ -691,6 +693,202 @@ def _apply_vlm_error(observation_data, output_name, on_error, fallback_value, er
     if on_error == "stop":
         raise RuntimeError(f"vlm_call stopped chain. {err_msg}")
     # continue. no-op
+
+
+# ── Verify action (VLM confirmation gate) ──
+
+
+async def _record_verify_on_event(event_id: uuid.UUID, verify_result: dict) -> None:
+    """Stamp the verification outcome onto Event.payload['verify'] so the
+    timeline + the agent can see "fired but VLM rejected, suppressed".
+
+    JSON columns need an explicit reassignment for SQLAlchemy to detect
+    the mutation, so we copy, set, and reassign payload wholesale.
+    """
+    try:
+        async with async_session() as db:
+            event = await db.get(Event, event_id)
+            if event is None:
+                return
+            payload = dict(event.payload or {})
+            payload["verify"] = verify_result
+            event.payload = payload
+            await db.commit()
+    except Exception:
+        logger.exception("Failed to record verify result on event %s", event_id)
+
+
+async def _execute_verify(action, observation_data, rule, event_id, ctx):
+    """Confirm the triggering observation actually shows what the rule
+    claims before the rest of the chain runs.
+
+    Calls the agent analyzer (``analyze_frame_target``) with the verify
+    question against the triggering observation's frame. The analyzer
+    already owns the eternal frame cache, so a repeat verification of the
+    same observation+question+model is free.
+
+    Gate. The verification PASSES only when ``verdict == "yes"`` AND
+    ``confidence >= min_confidence``. Anything else (no, uncertain,
+    cannot_tell, low confidence, missing frame, or an analyzer error) is
+    a FAIL. On a fail with ``on_fail == "stop"`` we raise RuntimeError so
+    the engine's existing chain-abort path suppresses every later action
+    (the notification, telegram, etc). On ``on_fail == "continue"`` we log
+    and let the chain proceed.
+    """
+    question = (action.get("question") or "").strip()
+    if not question:
+        await _update_event_status(event_id, "verify", "failed", "Missing 'question' in verify action")
+        # No question to ask. Treat as a hard fail so a misconfigured
+        # rule does not silently let everything through.
+        await _apply_verify_outcome(
+            action, observation_data, rule, event_id,
+            passed=False, verdict="cannot_tell", confidence=0.0,
+            question=question, summary="verify action has no question",
+        )
+        return
+
+    provider_id_raw = action.get("provider_id")
+    provider_id: uuid.UUID | None = None
+    if provider_id_raw:
+        try:
+            provider_id = uuid.UUID(str(provider_id_raw))
+        except (ValueError, TypeError):
+            provider_id = None
+
+    try:
+        min_confidence = float(action.get("min_confidence", 0.6))
+    except (TypeError, ValueError):
+        min_confidence = 0.6
+
+    on_fail = action.get("on_fail", "stop")
+    if on_fail not in ("stop", "continue"):
+        on_fail = "stop"
+
+    observation_id = observation_data.get("observation_id")
+
+    # No observation to verify against. Without a frame we cannot
+    # confirm anything, so treat it as cannot_tell -> fail.
+    if not observation_id:
+        logger.info("verify for rule '%s' has no observation_id. treating as cannot_tell", rule.name)
+        await _apply_verify_outcome(
+            action, observation_data, rule, event_id,
+            passed=False, verdict="cannot_tell", confidence=0.0,
+            question=question, summary="no observation frame to verify",
+        )
+        return
+
+    try:
+        obs_uuid = uuid.UUID(str(observation_id))
+    except (ValueError, TypeError):
+        await _apply_verify_outcome(
+            action, observation_data, rule, event_id,
+            passed=False, verdict="cannot_tell", confidence=0.0,
+            question=question, summary="invalid observation id",
+        )
+        return
+
+    # Call the analyzer. It reads ctx.db (optional. None -> own session)
+    # and ctx.run_id (optional. None -> skips audit persistence but still
+    # returns the answer). We pass a tiny attribute-bag ctx with both
+    # unset so the analyzer runs read-only against its own session.
+    analyzer_ctx = _VerifyCtx()
+    try:
+        from services.agent.analyzer import analyze_frame_target
+
+        result = await analyze_frame_target(
+            analyzer_ctx,
+            obs_uuid,
+            question,
+            provider_id=provider_id,
+        )
+    except Exception:
+        logger.exception("verify analyzer call failed for rule '%s'", rule.name)
+        await _apply_verify_outcome(
+            action, observation_data, rule, event_id,
+            passed=False, verdict="cannot_tell", confidence=0.0,
+            question=question, summary="analyzer error",
+        )
+        return
+
+    answer = result.answer or {}
+    # An analyzer hard failure returns an answer dict carrying an
+    # ``error`` key (e.g. media_evicted, no_provider). No frame =
+    # cannot_tell -> fail.
+    if answer.get("error"):
+        verdict = "cannot_tell"
+        confidence = 0.0
+        summary = f"analyzer. {answer['error']}"
+    else:
+        verdict = answer.get("verdict", "cannot_tell")
+        try:
+            confidence = float(answer.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        summary = answer.get("summary", "")
+
+    passed = verdict == "yes" and confidence >= min_confidence
+
+    await _apply_verify_outcome(
+        action, observation_data, rule, event_id,
+        passed=passed, verdict=verdict, confidence=confidence,
+        question=question, summary=summary,
+    )
+
+
+class _VerifyCtx:
+    """Minimal ctx object for the analyzer. ``db`` and ``run_id`` are
+    both None so the analyzer opens its own read-only session and skips
+    agent-run audit persistence while still returning the verdict."""
+
+    db = None
+    run_id = None
+    tool_call_id = None
+
+
+async def _apply_verify_outcome(
+    action, observation_data, rule, event_id,
+    *, passed, verdict, confidence, question, summary,
+):
+    """Record the verify result onto the event and decide whether to
+    abort the chain. Shared by every exit path of ``_execute_verify`` so
+    the audit stamp is never skipped."""
+    verify_result = {
+        "passed": bool(passed),
+        "verdict": verdict,
+        "confidence": confidence,
+        "question": question,
+        "summary": summary,
+    }
+    await _record_verify_on_event(event_id, verify_result)
+
+    if passed:
+        logger.info(
+            "verify PASSED for rule '%s'. verdict=%s conf=%.2f", rule.name, verdict, confidence,
+        )
+        await _update_event_status(event_id, "verify", "success")
+        return
+
+    on_fail = action.get("on_fail", "stop")
+    if on_fail not in ("stop", "continue"):
+        on_fail = "stop"
+
+    if on_fail == "stop":
+        logger.info(
+            "verify FAILED for rule '%s'. verdict=%s conf=%.2f. stopping chain",
+            rule.name, verdict, confidence,
+        )
+        await _update_event_status(
+            event_id, "verify", "skipped", f"verify failed. {verdict} conf={confidence:.2f}",
+        )
+        raise RuntimeError(f"verify failed: {verdict} conf={confidence}")
+
+    logger.info(
+        "verify FAILED for rule '%s'. verdict=%s conf=%.2f. continuing (on_fail=continue)",
+        rule.name, verdict, confidence,
+    )
+    await _update_event_status(
+        event_id, "verify", "success", f"verify failed but on_fail=continue. {verdict}",
+    )
 
 
 # ── Telegram action ──
