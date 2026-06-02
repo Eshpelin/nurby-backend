@@ -1,364 +1,251 @@
 # Nurby
 
-AI camera monitoring platform that turns any existing IP camera into a context-aware sentry. Connect cameras, point Nurby at a vision language model (local or cloud), and define what to watch, who to recognize, what events trigger alerts, and how to search historical footage.
+Self-hostable, privacy-first AI camera surveillance you fully own. Point Nurby at any IP camera and a vision model of your choice (local or cloud), and it turns raw video into people, journeys, events, and answers. Ask it "where was the dog last night" in plain language, wire a rule that flashes a siren when a stranger appears after 10pm, and keep every frame on your own hardware.
 
-Privacy first. Developer friendly. Model agnostic.
+Privacy first. Provider agnostic. CPU friendly. Yours to run and modify.
+
+```
+"Where was Mom last seen?"  ->  Kitchen, today at 7:42pm (cross-camera journey)
+"Anything unusual today?"   ->  Map-reduce summary of every observation
+Stranger at the door 2am    ->  Email you + record a clip + sound an ESP32 buzzer
+```
+
+## Why Nurby
+
+- **You own the data.** Runs entirely on your hardware via Docker Compose. With a local model nothing ever leaves your network.
+- **Bring your own brain.** Use a free local model through Ollama, or OpenAI, Anthropic, or Gemini. Swap them per camera with no restart.
+- **It understands, not just detects.** YOLO finds objects, faces are recognized and grouped into people, and a vision model captions scenes. A built-in agent answers questions over all of it.
+- **Automation that reaches the real world.** Rules can notify, email, call webhooks, sound physical alarms, and gate on a second AI confirmation before firing.
+- **Programmable.** A documented REST API, long-lived API keys, signed webhooks, and an MCP server let you build on top of it.
+
+## Feature highlights
+
+### Cameras and ingestion
+- Multi-protocol cameras. RTSP, HTTP MJPEG, HTTP snapshot, HLS, USB, file, and a phone or laptop webcam as a camera.
+- ONVIF auto-discovery with network scanning, plus USB and local device probing.
+- A guided camera-brand cheat sheet (26 brands) that shows where to find each vendor's RTSP/ONVIF URL during setup.
+- Smart recording per camera. continuous, motion, object, or clip with pre/post buffers.
+- Retention policies enforced automatically, by time or by size, with thumbnail cleanup.
+
+### Perception and reasoning
+- YOLO detection with a curated 17-model catalog (yolov8, yolo11, yolo-world open-vocabulary, OIV7 600-class, RT-DETR).
+- Dynamic class vocabulary per camera sourced from whichever model is active, not a hardcoded list.
+- Face detection and recognition with 512-dim embeddings in pgvector, auto-clustering of unknown faces, and body re-identification.
+- Vision-model scene captions with a CPU-friendly pipeline. a CLIP zero-shot gate, perceptual-hash dedupe, a Redis backlog with priority lanes, and late-frame flagging keep it responsive on modest hardware.
+- License plate OCR on vehicle crops, audio events (baby cry, dog bark, glass break, smoke alarm), and motion-zone masking.
+- Privacy post-processing. per-person blur and NudeNet nudity blur.
+
+### People, journeys, and nicknames
+- Named person profiles with relationship tags, consent tracking, and per-person privacy blur.
+- Household nicknames. call your mother "Mom" and your daughter "Lee" and that is what shows up everywhere, while identity stays canonical under the hood.
+- Cross-camera journeys. a subject's sightings are stitched into a single timeline across cameras, with co-presence and transitions.
+
+### Ask Nurby (agentic Q&A)
+- Ask questions in plain language and get grounded, cited answers from your footage.
+- A tool-use agent drives read-only tools over observations, journeys, people, events, and relationships, with a map-reduce summarizer for long windows.
+- Per-user daily token and cost budgets, streamed over WebSocket.
+- An MCP server exposes the read tools so external agents (Claude Desktop and others) can query Nurby with a scoped token.
+
+### Rules and automation
+- A full-page rule builder with a drag-to-reorder action chain, a live plain-language preview, and a dry-run plus historical-replay tester.
+- Trigger types. object detected, face recognized, unknown face, motion, audio event, loitering, line cross (tripwire), and more, with an inline canvas geometry editor that draws zones on the live feed.
+- Conditions for camera scope, schedule, and confidence, with cooldowns to prevent spam.
+- Action chain. webhook, API call, in-app notify, email, Telegram, broadcast, an AI verify gate that can stop the chain, and a VLM call whose output later actions can reference.
+- Physical device presets. pick an ESP32 buzzer, ESP8266 relay lights, or a Raspberry Pi speaker or siren, and Nurby fills the webhook and links you the receiver script to flash.
+
+### Integrations and API
+- Programmatic REST API documented at `/docs` and `/openapi.json`, with read filters by time, person, label, and camera.
+- Long-lived API keys (`nrb_...`) for scripts, scoped and revocable, alongside user JWTs.
+- Outbound webhooks with HMAC-SHA256 body signing, automatic retries with backoff, and standing event subscriptions independent of any single rule. Every alert can carry a direct link to its footage clip.
+- Email via SMTP and Telegram with inline acknowledge, mute, and snooze buttons.
+
+### Operations
+- Live dashboard with a camera grid, hover PTZ controls, an activity timeline, and a 24h digest with a people gallery.
+- Natural-language search over observations via pgvector, plus keyword and regex fallbacks.
+- Notification center, per-camera storage and retention views, dark and light themes with no flash on load.
+- JWT auth with bcrypt, a first-run admin setup, and invite keys with per-camera access grants.
+
+See the [docs](docs/) for deeper guides. [REST API](docs/api.md), [webhooks](docs/webhooks.md), [physical devices](docs/devices.md), [MCP server](docs/mcp.md), and the [agent design](docs/agent-design.md).
 
 ## Architecture
 
-Nurby uses a three-layer architecture with services running in a single Docker Compose stack.
+A four-layer pipeline runs as services in one Docker Compose stack.
 
 ```
 +---------------------------------------------------------+
-|  Frontend (Next.js)                                     |
-|  Dashboard . People . Rules . Recordings . Settings     |
+|  Frontend (Next.js 16 / React 19)                       |
+|  Dashboard . People . Rules . Ask . Recordings . Settings|
 +----------------------------+----------------------------+
                              |
 +----------------------------v----------------------------+
-|  API (FastAPI)             |  Streaming (MediaMTX)      |
-|  REST + WebSocket + Auth   |  WebRTC . HLS . RTSP       |
+|  API (FastAPI)             |  Streaming (MediaMTX)       |
+|  REST + WebSocket + Auth   |  WebRTC . HLS . RTSP        |
+|  API keys . MCP server     |                             |
 +----------------------------+----------------------------+
                              |
 +----------------------------v----------------------------+
-|  Layer 3. Events & Automation                           |
-|  Rule evaluation . Notifications . Webhooks . Email     |
-|  Digests . Action execution log                         |
+|  Layer 4. Agent. tool-use Q&A, summarizer, budgets      |
 +---------------------------------------------------------+
-|  Layer 2. Perception & Reasoning                        |
-|  YOLO detection . Tracking . Face recognition . VLM     |
-|  Plate OCR . Audio events . NudeNet blur                |
+|  Layer 3. Events. rules, verify gates, webhooks (HMAC), |
+|           email, Telegram, device alerts, digests       |
 +---------------------------------------------------------+
-|  Layer 1. Ingestion                                     |
-|  RTSP decode . Motion detection . Recording . Clips     |
-|  Retention enforcement                                  |
+|  Layer 2. Perception. YOLO, tracking, face + body re-id,|
+|           VLM captions, plate OCR, audio, privacy blur  |
++---------------------------------------------------------+
+|  Layer 1. Ingestion. RTSP decode, motion, recording,    |
+|           clips, retention enforcement                  |
 +---------------------------------------------------------+
          |                          |
-    +----v----+              +------v------+
-    | Postgres |              |    Redis    |
-    | pgvector |              |   Streams   |
-    +---------+              +-------------+
+    +----v-----+             +------v------+
+    | Postgres |             |    Redis    |
+    | pgvector |             |   Streams   |
+    +----------+             +-------------+
 ```
 
-## Features
+## Requirements
 
-### Camera Management
-- Multi-protocol camera support (RTSP, HTTP MJPEG, HTTP snapshot, HLS, USB, file)
-- ONVIF auto-discovery with network scanning
-- USB and local device probing
-- Per-camera configuration for detection, recording, and VLM settings
-- Camera status logging and health monitoring
+- Docker and Docker Compose (the supported way to run the full stack).
+- About 4 GB RAM free for a small setup. more if you run larger local vision models.
+- A vision model. either Ollama on the host for fully local inference, or an API key for OpenAI, Anthropic, or Gemini.
+- For local development. Python 3.11+, Node.js 20+, and PostgreSQL 15+ with the pgvector extension.
 
-### Live Dashboard
-- Real-time camera grid with configurable layouts (single, 2x2, 3x3)
-- Hover PTZ controls overlaid on camera tiles
-- Activity timeline with recordings, AI observations, and status events
-- Collapsible filter sidebar for time range, event type, person, and object filters
-- Live event ticker via WebSocket
-- Camera-specific activity feeds with auto-refresh
-- 24h digest with people and unknown-cluster gallery
+GPU is optional. The perception pipeline is tuned to run on CPU.
 
-### AI Perception Pipeline
-- YOLO detection with multi-model support and consensus modes
-- Curated detection model catalog covering yolov8, yolo11, yolo-world, oiv7, rt-detr families
-- Dynamic class vocabulary per camera sourced from whichever model is active
-- IoU tracker producing stable track IDs for inline geometry rules
-- Face detection and recognition with 128-dim embeddings (pgvector)
-- VLM integration for scene descriptions
-- Automatic license plate detection via EasyOCR on vehicle crops
-- Motion zone masking with include/exclude polygon regions
-- Audio event detection (baby cry, dog bark, glass break, smoke alarm)
-- VLM trigger conditions separated from rate limit (always, on detection)
-- Description embedding generation for vector search
-- Privacy post-processing with per-person blur and NudeNet-based nudity blur
-
-### People Management
-- Named person profiles with relationship tags (Family, Neighbor, Delivery, etc.)
-- Face photo upload and embedding generation
-- Activity feed with per-person observation timeline
-- Sighting counters (1h, 24h, total) with auto-refresh
-- Unknown face auto-clustering with merge suggestions
-- Per-person privacy blur toggle
-- Consent tracking per person
-
-### PTZ Camera Control
-- ONVIF SOAP-based pan/tilt/zoom via directional pad UI
-- Adjustable speed control
-- Preset positions with save and goto
-- Dashboard tile overlay and dedicated panel on camera config page
-
-### Smart Recording
-- Recording modes per camera (always, motion-triggered, object-triggered)
-- Configurable pre/post clip buffers
-- Dedicated recordings browser with camera and date filters
-- Download and streaming playback
-- Retention policies enforced on a background loop (time-based or size-based)
-- Thumbnail cleanup tied to retention evictions
-
-### Rules Engine
-- Visual rule builder with card-grid trigger picker
-- Trigger types. object detected, face recognized, unknown face, motion, audio event, loitering, line cross (tripwire), any
-- Inline geometry editor draws tripwires and loiter zones directly on the live camera feed with canvas overlay
-- Known-face trigger uses a person picker tied to the People database
-- Object-detection trigger labels come from the live detection model, not a hardcoded list
-- Plain-language rule preview composited from trigger, condition, and action
-- Conditions for camera scope, days, time windows, minimum confidence
-- Cooldown periods to prevent alert spam
-- Action types. webhook, API call, broadcast, in-app notification, email
-- Execution log with action status tracking and error audit trail
-
-### Notification Center
-- Persistent in-app notifications stored in Postgres
-- Bell icon with unread count badge in navbar
-- Mark individual or all notifications as read
-- Severity levels per notification
-- Linked to rules, cameras, and observations
-- Email delivery channel via SMTP with per-rule template
-
-### Search and QA
-- Three-strategy search. keyword label matching, vector similarity (pgvector cosine distance), broad regex fallback
-- Synonym expansion for common terms (bike to bicycle, car to vehicle, dog to puppy, etc.)
-- PostgreSQL word boundary regex to prevent substring false positives
-- Person and object type filters
-- Natural language QA via RAG. search results fed as context to configured VLM
-- AI answer loading state with observation count feedback
-- Rotating search hint placeholders (30 example queries)
-
-### Digest Scheduling
-- Background scheduler checks cameras every 60 seconds
-- Configurable digest periods per camera (1h, 6h, 12h, 24h, 48h, 7d)
-- Auto-generates observation summaries with person sightings and object counts
-- People and unknown-cluster gallery included in 24h digest
-
-### Storage and Retention
-- Per-camera disk usage visualization
-- Recording count and byte totals
-- Retention policy display per camera
-- System-wide storage overview
-- Automatic eviction loop in the ingestion service removes expired recordings and thumbnails
-
-### Authentication and Access Control
-- JWT-based authentication with bcrypt password hashing and auto-logout on stale tokens
-- Admin setup flow for first-time installation
-- Invite key system for user registration with role assignment and camera access grants
-- Protected API routes with role-based guards (admin vs viewer)
-- Auth-aware frontend with automatic token injection
-- Login/setup pages with navbar hidden on public routes
-
-### Theme Support
-- Dark and light mode toggle
-- System preference detection
-- Theme persistence via localStorage
-- Inline init script to prevent flash of wrong theme
-
-### VLM Provider Support
-- OpenAI (GPT-4o, GPT-4o-mini, text-embedding-3-small)
-- Anthropic (Claude Sonnet, Claude Haiku)
-- Google Gemini (Gemini 2.0 Flash, Gemini Pro)
-- Ollama with one-click local deploy
-- SMTP configuration with test endpoint for email actions
-- Provider health testing from settings UI
-- Hot-swappable with no restart required
-
-### One-Click Local AI (Ollama)
-- Auto-detects Ollama installation across PATH and common macOS/Linux locations
-- Curated vision model catalog with per-model RAM requirements
-- System RAM probe with in-fit filtering and recommended-model highlight
-- Deploy button orchestrates pull, start, and provider registration
-- Works fully offline once the model is pulled
-
-## Tech Stack
-
-**Backend.** Python 3.12, FastAPI, SQLAlchemy 2.0 (async), Alembic, OpenCV, PyAV, Ultralytics YOLO, EasyOCR, NudeNet, aiosmtplib, Postgres with pgvector, Redis
-
-**Frontend.** Next.js 16, React 19, Tailwind CSS 4, Geist typography, dark/light mode, custom styled selects, canvas-based geometry editor
-
-**Infrastructure.** Docker Compose, MediaMTX (WebRTC/HLS relay), optional Ollama runtime
-
-## Project Structure
-
-```
-nurby-backend/
-+-- services/
-|   +-- api/            # FastAPI REST + WebSocket + auth
-|   |   +-- routes/     # cameras, persons, rules, events, search,
-|   |                   # recordings, notifications, providers,
-|   |                   # digests, invites, users, system, auth,
-|   |                   # detection_models, ollama_deploy, observations
-|   +-- ingestion/      # RTSP stream processing, motion detection,
-|   |                   # recording, retention enforcement
-|   +-- perception/     # YOLO detection, IoU tracker, face recognition,
-|   |                   # VLM, plate OCR, audio events, privacy blur
-|   +-- events/         # Rule evaluation, inline geometry checks,
-|   |                   # action execution, email, notifications
-|   +-- search/         # Vector search, embeddings, backfill,
-|   |                   # digest generation
-|   +-- digest/         # Background digest scheduler
-|   +-- discovery/      # ONVIF camera discovery and PTZ control
-|   +-- streaming/      # Live video relay config
-+-- shared/
-|   +-- auth.py         # JWT tokens, bcrypt hashing, route guards
-|   +-- config.py       # App settings via pydantic-settings (SMTP, CORS)
-|   +-- database.py     # Async SQLAlchemy engine and session
-|   +-- models.py       # All Postgres models
-|   +-- schemas.py      # Pydantic request/response schemas
-|   +-- spatial_events.py # Point-in-polygon and segment-crossing helpers
-+-- frontend/           # Next.js app
-|   +-- src/app/        # Dashboard, People, Rules, Recordings, Timeline,
-|   |                   # Settings, Search, Login, Setup, Camera config
-|   +-- src/lib/        # Auth context, theme context
-|   +-- src/components/ # Navbar, notifications, auth shell
-+-- alembic/            # Database migrations
-+-- scripts/            # Seed data generator
-+-- config/             # MediaMTX and service configs
-+-- docker-compose.yml  # Full stack orchestration
-+-- pyproject.toml      # Python dependencies
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Docker and Docker Compose
-- Python 3.11+ (for local development)
-- Node.js 20+ (for frontend development)
-- PostgreSQL 15+ with pgvector extension
-- Optional. Ollama for fully local vision inference
-
-### Run the full stack
+## Quick start
 
 ```bash
+git clone https://github.com/Eshpelin/nurby-backend.git
+cd nurby-backend
 cp .env.example .env
 docker compose up --build
 ```
 
-The services will be available at these addresses.
+With the default compose file the stack is exposed on these host ports.
 
-| Service   | URL                    |
-|-----------|------------------------|
-| Frontend  | http://localhost:3000   |
-| API       | http://localhost:8000   |
-| API docs  | http://localhost:8000/docs |
-| WebRTC    | http://localhost:8889   |
-| RTSP      | rtsp://localhost:8554   |
+| Service        | URL                          |
+|----------------|------------------------------|
+| Frontend       | http://localhost:4747        |
+| API            | http://localhost:4748        |
+| API docs       | http://localhost:4748/docs   |
+| WebRTC (WHEP)  | http://localhost:8889        |
+| HLS            | http://localhost:8888        |
+| RTSP           | rtsp://localhost:8554        |
+| Postgres       | localhost:5433               |
+| Redis          | localhost:6379               |
 
-### Local development
+Then open http://localhost:4747 and follow first-run setup.
 
-**Backend**
+### First-run setup
+
+1. Open http://localhost:4747. a fresh install routes you to `/setup`.
+2. Create the first admin account.
+3. Pick a vision model. if Ollama is reachable (locally or on your Docker host) the onboarding detects it and lets you use an installed model in one click, or pull a RAM-appropriate one. Otherwise enter a provider API key.
+4. Add your first camera. the brand cheat sheet helps you find the RTSP/ONVIF URL.
+5. Choose a detection model on the camera page so the rule builder can source its class list.
+6. Create a rule, or just open Ask and ask a question.
+
+### Using a local model with Docker
+
+One-click Ollama deploy pulls models on the machine that runs the API. When the API runs in Docker, install Ollama on the host and Nurby will auto-detect it at `http://host.docker.internal:11434`. You can also set `OLLAMA_BASE_URL` to point anywhere on your network.
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust. Key variables.
+
+| Variable | Purpose |
+|---|---|
+| `POSTGRES_PASSWORD` | Database password (compose wires it into `DATABASE_URL`). |
+| `DATABASE_URL` | Async Postgres DSN. |
+| `REDIS_URL` | Redis connection for streams and queues. |
+| `JWT_SECRET` | Signing secret for auth tokens. set a strong value for any real deployment. |
+| `RECORDINGS_PATH`, `THUMBNAILS_PATH` | Where clips and thumbnails are stored. |
+| `OLLAMA_BASE_URL` | Override where Nurby looks for Ollama. |
+| `SMTP_*` | SMTP host, port, user, password, and from-address for email actions. |
+| `PUBLIC_BASE_URL` | Public URL used to build clip and event links in alerts. |
+| `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_WEBRTC_URL` | Frontend endpoints for local development outside Docker. |
+
+Runtime settings such as timezone, blur defaults, and digest options live in the database and are editable from the Settings page.
+
+## Local development
+
+Backend.
 
 ```bash
 pip install -e ".[dev]"
-uvicorn services.api.main:app --reload
+alembic upgrade head
+uvicorn services.api.main:app --reload   # serves on :8000
 ```
 
-**Frontend**
+Frontend.
 
 ```bash
 cd frontend
 npm install
-npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev   # serves on :3000
 ```
 
-### First-time setup
-
-1. Start the backend and frontend
-2. Navigate to http://localhost:3000/setup
-3. Create an admin account (minimum 8 character password)
-4. Add your first camera from the dashboard
-5. Configure a VLM provider in Settings, or click Deploy Local AI to use Ollama
-6. Pick a detection model on the camera settings page so the rule builder can source its class list
-
-### Seed demo data
+Seed realistic demo data (cameras, people, observations, and real journeys built through the production aggregation path).
 
 ```bash
-python3 scripts/seed_demo_data.py          # populate with sample data
-python3 scripts/seed_demo_data.py --clean   # wipe and repopulate
+python3 scripts/seed_demo_data.py            # add demo data
+python3 scripts/seed_demo_data.py --clean    # wipe and repopulate
 ```
 
-### Database migrations
+## Tests
+
+The backend ships a fast, deterministic suite that runs without a database or an LLM.
 
 ```bash
-# Apply all pending migrations
-alembic upgrade head
-
-# Generate a new migration after model changes
-alembic revision --autogenerate -m "description"
+python -m pytest -q
 ```
 
-## API Overview
+The agentic Q&A surface has a separate 30-fixture eval suite (`tests/test_agent_eval.py`) run nightly in CI. See [docs/agent-eval.md](docs/agent-eval.md).
 
-All endpoints except `/api/auth/*` require a credential in the
-Authorization header. either a user JWT or a long-lived API key
-(`nrb_...`). See [docs/api.md](docs/api.md) for the full read API and
-filters, [docs/webhooks.md](docs/webhooks.md) for outbound webhooks and
-HMAC signing, and [docs/devices.md](docs/devices.md) for physical alert
-devices. Every route is auto-documented at `/docs` and `/openapi.json`.
+## Database migrations
 
-| Endpoint                          | Methods         | Auth       | Description                    |
-|-----------------------------------|-----------------|------------|--------------------------------|
-| `/api/auth/setup`                 | POST            | Public     | Create first admin account     |
-| `/api/auth/login`                 | POST            | Public     | Get JWT token                  |
-| `/api/auth/register`              | POST            | Public     | Register with invite key       |
-| `/api/auth/me`                    | GET             | User       | Current user profile           |
-| `/api/api-keys`                   | GET, POST, DEL  | User       | Manage programmatic API keys   |
-| `/api/webhook-subscriptions`      | GET, POST, PATCH, DEL | User/Admin | Standing outbound webhooks |
-| `/api/devices`                    | GET             | User       | Physical alert device presets  |
-| `/api/journeys`                   | GET             | User       | Cross-camera sighting sessions |
-| `/api/health`                     | GET             | Public     | Service and DB health          |
-| `/api/status`                     | GET             | User       | System health and camera counts|
-| `/api/cameras`                    | GET, POST       | User/Admin | List and add cameras           |
-| `/api/cameras/{id}`               | GET, PATCH, DEL | User/Admin | Manage individual cameras      |
-| `/api/cameras/{id}/ptz/*`         | POST            | User       | PTZ move, stop, presets, goto  |
-| `/api/cameras/discover`           | GET             | User       | ONVIF network scan             |
-| `/api/cameras/devices`            | GET             | User       | USB device probe               |
-| `/api/detection-models/classes`   | GET             | User       | Union of class names across models |
-| `/api/recordings`                 | GET             | User       | Browse recorded segments       |
-| `/api/observations`               | GET             | User       | Browse AI observations         |
-| `/api/persons`                    | GET, POST       | User       | People management              |
-| `/api/persons/activity/summary`   | GET             | User       | All persons with sighting counts |
-| `/api/persons/activity/{id}`      | GET             | User       | Person observation timeline    |
-| `/api/rules`                      | GET, POST       | User       | List and create rules          |
-| `/api/rules/{id}`                 | GET, PATCH, DEL | User/Admin | Manage individual rules        |
-| `/api/events`                     | GET             | User       | Browse fired events            |
-| `/api/events/{id}/acknowledge`    | POST            | User       | Acknowledge an alert           |
-| `/api/notifications`              | GET             | User       | List notifications             |
-| `/api/notifications/count`        | GET             | User       | Unread notification count      |
-| `/api/notifications/read-all`     | POST            | User       | Mark all as read               |
-| `/api/providers`                  | GET, POST       | User/Admin | Manage VLM providers           |
-| `/api/providers/{id}/test`        | POST            | User       | Test provider connectivity     |
-| `/api/ollama/status`              | GET             | Admin      | Ollama install and model status |
-| `/api/ollama/deploy`              | POST            | Admin      | Pull a vision model and auto-register |
-| `/api/system/smtp-test`           | POST            | Admin      | Test SMTP settings             |
-| `/api/system/settings`            | GET, PATCH      | User/Admin | App-wide settings (blur, etc.) |
-| `/api/search`                     | GET             | User       | Search observations            |
-| `/api/search/ask`                 | POST            | User       | Natural language QA via RAG    |
-| `/api/search/digest`              | GET             | User       | Generate on-demand digest      |
-| `/api/search/backfill`            | POST            | Admin      | Backfill vector embeddings     |
-| `/api/digests`                    | GET             | User       | List digest entries            |
-| `/api/invites`                    | GET, POST, DEL  | Admin      | Manage invite keys             |
-| `/api/users`                      | GET, PATCH      | Admin      | User management                |
-| `/api/storage`                    | GET             | User       | Storage stats per camera       |
-| `WS /ws`                          |                 | User       | Real-time event stream         |
-
-Full interactive docs available at `/docs` when the API is running.
-
-## Agent eval suite
-
-The agentic Q&A surface is gated by a 30-fixture eval suite under
-`tests/agent_fixtures/`. The harness is fully mocked so it runs in
-seconds without a database or LLM provider, and Phase 1 ships when
-at least 27 of 30 fixtures pass on three consecutive nightly runs.
-
-Run locally.
-
-```
-python -m pytest tests/test_agent_eval.py -v
+```bash
+alembic upgrade head                                  # apply pending migrations
+alembic revision --autogenerate -m "describe change"  # after model changes
 ```
 
-CI runs the same command nightly via `.github/workflows/agent-eval.yml`
-and posts the per-fixture report (`.eval-report.md`) as a PR comment
-when the workflow is triggered on a pull request. See
-`docs/agent-eval.md` for the fixture format and how to add new cases.
+In Docker the API applies migrations automatically on startup.
+
+## Project structure
+
+```
+nurby-backend/
++-- services/
+|   +-- api/            FastAPI REST + WebSocket + auth + routes
+|   +-- ingestion/      RTSP decode, motion, recording, retention
+|   +-- perception/     YOLO, tracking, face + body re-id, VLM, audio, blur
+|   +-- events/         rule engine, actions, webhooks, email, Telegram
+|   +-- agent/          tool-use Q&A driver, tools, summarizer
+|   +-- mcp/            MCP server exposing read tools
+|   +-- search/         vector search, embeddings, digests
+|   +-- digest/         background digest scheduler
+|   +-- discovery/      ONVIF discovery and PTZ
++-- shared/             models, schemas, auth, config, database
++-- integrations/
+|   +-- devices/        physical alert device presets + receiver scripts
++-- frontend/           Next.js app (dashboard, rules, ask, people, ...)
++-- alembic/            database migrations
++-- scripts/            demo + eval seed generators
++-- docs/               API, webhooks, devices, MCP, agent guides
++-- docker-compose.yml  full stack
+```
+
+## Contributing
+
+Contributions are welcome. A good loop is.
+
+1. Fork and branch from `main`.
+2. Make focused changes with tests. run `python -m pytest -q` and, for frontend work, `cd frontend && npm run build`.
+3. Open a pull request describing the change and how you verified it.
+
+By contributing you agree your contributions are licensed under the project license below.
 
 ## License
 
-Proprietary. All rights reserved.
+Nurby is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). See [LICENSE](LICENSE).
+
+In short, you are free to use, run, study, modify, and share Nurby. If you run a modified version as a network service, you must make your modified source available to its users under the same license. This keeps Nurby and its derivatives open.

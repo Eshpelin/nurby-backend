@@ -1,8 +1,9 @@
 [project]
 name = "nurby"
 version = "0.1.0"
-description = "AI camera monitoring platform"
+description = "Self-hostable, privacy-first AI camera surveillance platform"
 requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
