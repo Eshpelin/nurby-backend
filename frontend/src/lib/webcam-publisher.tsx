@@ -42,7 +42,7 @@ export type PublisherStatus =
   | "held-by-other-tab";
 
 export interface WebcamPublisher {
-  /** stable key. currently the camera id as a string. */
+  /** stable key. Currently the camera id as a string. */
   key: string;
   cameraId: string;
   cameraName: string;
@@ -112,7 +112,7 @@ function saveIntents(list: WebcamIntent[]) {
   try {
     localStorage.setItem(INTENT_KEY, JSON.stringify(list));
   } catch {
-    /* quota. ignore */
+    /* quota. Ignore */
   }
 }
 
@@ -155,7 +155,7 @@ export function WebcamPublisherProvider({ children }: { children: React.ReactNod
     console.debug("[webcam] tick", cameraId, vw, vh, "readyState", video.readyState);
     if (!vw || !vh) return;
 
-    // Scale down if huge. keeps uploads snappy.
+    // Scale down if huge. Keeps uploads snappy.
     const scale = vw > FRAME_MAX_WIDTH ? FRAME_MAX_WIDTH / vw : 1;
     const w = Math.round(vw * scale);
     const h = Math.round(vh * scale);
@@ -251,7 +251,7 @@ export function WebcamPublisherProvider({ children }: { children: React.ReactNod
       try {
         await video.play();
       } catch {
-        /* some browsers need user gesture. play resumes later. */
+        /* some browsers need user gesture. Play resumes later. */
       }
 
       const canvas = document.createElement("canvas");
@@ -337,7 +337,7 @@ export function WebcamPublisherProvider({ children }: { children: React.ReactNod
     []
   );
 
-  // Init. auto-resume saved intents. cross-tab coordination. unload cleanup.
+  // Init. Auto-resume saved intents. Cross-tab coordination. Unload cleanup.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (didInitRef.current) return;
@@ -371,7 +371,7 @@ export function WebcamPublisherProvider({ children }: { children: React.ReactNod
         }
       };
     } catch {
-      /* BroadcastChannel unavailable. single-tab mode. */
+      /* BroadcastChannel unavailable. Single-tab mode. */
     }
 
     // Auto-resume every saved intent.

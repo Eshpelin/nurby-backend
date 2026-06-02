@@ -28,7 +28,7 @@ logged-in browser session uses.
    `Authorization: Bearer <token>` header on API calls). Alternatively,
    any token minted by `shared.auth.create_access_token` for your user
    works.
-3. Treat it like a password. it grants read access to every camera your
+3. Treat it like a password. It grants read access to every camera your
    user can see, counted against your daily budget.
 
 The token scopes the whole server to that one user. To query a different
@@ -60,7 +60,7 @@ NURBY_MCP_TOKEN=<your-jwt> docker compose --profile mcp up mcp
 ### HTTP transport (optional)
 
 Set `NURBY_MCP_HTTP=1` (or pass `--http`) to serve over Streamable HTTP on
-port 4749 instead of stdio, when the installed MCP SDK supports it. stdio
+port 4749 instead of stdio, when the installed MCP SDK supports it. Stdio
 is the must-have default; HTTP is best-effort.
 
 ```bash
@@ -98,7 +98,7 @@ tool picker.
 
 ## Tools exposed
 
-All read-only agent tools. write / action tools are intentionally NOT
+All read-only agent tools. Write / action tools are intentionally NOT
 exposed in v1.6.
 
 | Tool | What it answers |
@@ -126,7 +126,7 @@ exposed in v1.6.
 - **Budget counted.** Before any tool runs, the server checks the user's
   daily budget (`services.agent.budget.check_budget`). When the budget is
   exhausted the call returns a clear error and the tool does not run.
-  Pure reads record no token usage. the gate is the enforcement. The
+  Pure reads record no token usage. The gate is the enforcement. The
   `analyze_*` tools do their own internal VLM budget accounting when they
   actually call a model.
 
@@ -134,8 +134,8 @@ exposed in v1.6.
 
 - **No write tools.** The verify action and any future write / action
   tools stay internal until there is a confirmation flow for external
-  clients. v1.6 is read-only by design.
-- **One token per server.** The token is read once at launch. refreshing
+  clients. V1.6 is read-only by design.
+- **One token per server.** The token is read once at launch. Refreshing
   it requires restarting the server. Launch a separate server per user.
 - **HTTP transport is best-effort.** The exact Streamable-HTTP app symbol
-  has churned across MCP SDK versions. stdio is the supported path.
+  has churned across MCP SDK versions. Stdio is the supported path.

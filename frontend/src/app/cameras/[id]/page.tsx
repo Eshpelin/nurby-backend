@@ -400,7 +400,7 @@ function LabelPicker({
             ))}
             {filtered.length > 80 && (
               <span className="text-[10px] text-muted-foreground self-center px-1">
-                +{filtered.length - 80} more. keep typing to narrow.
+                +{filtered.length - 80} more. Keep typing to narrow.
               </span>
             )}
           </div>
@@ -802,7 +802,7 @@ function ZoneEditorCanvas({
         if (i > 0) ctx.lineTo(p[0] * scaleX, p[1] * scaleY);
       });
       if (zone.type === "tripwire") {
-        // Leave open. draw as a thick line with an arrow indicator for direction.
+        // Leave open. Draw as a thick line with an arrow indicator for direction.
         ctx.strokeStyle = colors.stroke;
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -1293,9 +1293,9 @@ export default function CameraConfigPage() {
     if (patch.privacy_zone_targets !== undefined) setPrivacyZoneTargets(patch.privacy_zone_targets);
   }
 
-  // Autosave plumbing. firstLoadDone flips true after fetchData
+  // Autosave plumbing. FirstLoadDone flips true after fetchData
   // hydrates the form so the initial setState burst does not trigger
-  // a save loop. autosaveTimer holds the pending debounce so a flurry
+  // a save loop. AutosaveTimer holds the pending debounce so a flurry
   // of slider drags collapses into a single PATCH.
   const firstLoadDone = useRef(false);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2971,7 +2971,7 @@ export default function CameraConfigPage() {
       </div>
       )}
 
-      {/* Sticky save bar. only on settings tab. */}
+      {/* Sticky save bar. Only on settings tab. */}
       {activeTab === "settings" && (
       <div className="sticky bottom-0 mt-6 -mx-6 px-6 py-3 bg-background/80 backdrop-blur-sm border-t border-border flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs">

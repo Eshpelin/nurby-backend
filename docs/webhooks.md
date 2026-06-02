@@ -3,9 +3,9 @@
 Nurby pushes alerts to your own services and devices over HTTP. There
 are two ways to receive them.
 
-- Per-rule webhook action. add a `webhook` or `api_call` action to a
+- Per-rule webhook action. Add a `webhook` or `api_call` action to a
   rule. Fires only when that rule fires.
-- Standing subscription. register a URL once and receive every fired
+- Standing subscription. Register a URL once and receive every fired
   event (optionally filtered by rule or camera).
 
 ## The payload
@@ -73,7 +73,7 @@ def verify(raw_body: bytes, header: str, secret: str) -> bool:
 
 Nurby retries on timeout, connection error, and 5xx with exponential
 backoff (three attempts). A 4xx is treated as a permanent misconfig and
-is not retried. Keep your receiver fast and return 2xx quickly. do any
+is not retried. Keep your receiver fast and return 2xx quickly. Do any
 slow work in the background.
 
 ## Standing subscriptions

@@ -7,7 +7,7 @@ export interface RuleCardProps {
   rule: Rule;
   cameras: Camera[];
   selected: boolean;
-  // Last-fired-at timestamp (ISO). null/undefined renders "Never fired".
+  // Last-fired-at timestamp (ISO). Null/undefined renders "Never fired".
   lastFiredAt?: string | null;
   onSelect: () => void;
   onToggleEnabled: () => void;
@@ -43,7 +43,7 @@ export function RuleCard({
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Color the badge red-ish if Never AND rule older than 24h. Likely
-  // a broken rule. callers can investigate.
+  // a broken rule. Callers can investigate.
   const createdMs = rule.created_at ? new Date(rule.created_at).getTime() : 0;
   const olderThan24h = createdMs > 0 && Date.now() - createdMs > 24 * 3600 * 1000;
   const neverFired = !lastFiredAt;

@@ -82,7 +82,7 @@ export function TelegramEditor({
           placeholder="<b>{rule_name}</b> on {camera_name}"
         />
         <div className="text-[10px] text-muted-foreground mt-1">
-          HTML formatting is supported (e.g. &lt;b&gt;bold&lt;/b&gt;). Variables. click to insert.
+          HTML formatting is supported (e.g. &lt;b&gt;bold&lt;/b&gt;). Variables. Click to insert.
         </div>
         <div className="flex flex-wrap gap-1 mt-1 items-center">
           {TELEGRAM_TEMPLATE_VARS.map((v) => (

@@ -557,7 +557,7 @@ export interface WebhookDraft {
   authKey: string;
   authUser: string;
   authPass: string;
-  // Optional HMAC signing secret. when set, Nurby signs the request
+  // Optional HMAC signing secret. When set, Nurby signs the request
   // body with HMAC-SHA256 in the X-Nurby-Signature header.
   secret: string;
   useCustomPayload: boolean;
@@ -780,7 +780,7 @@ export function dictToDraft(raw: Record<string, unknown>): ActionDraft {
       };
     }
   }
-  // Fallback. unknown type. coerce to notify.
+  // Fallback. Unknown type. Coerce to notify.
   return defaultDraftForType("notify");
 }
 
@@ -894,7 +894,7 @@ export function draftToDict(d: ActionDraft): Record<string, unknown> {
     }
     return action;
   }
-  // Unreachable. all union members handled above.
+  // Unreachable. All union members handled above.
   return { type: (d as ActionDraft).type };
 }
 

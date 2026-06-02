@@ -1,7 +1,7 @@
 "use client";
 
 // Brand-aware "how do I find my camera's connection details?" helper.
-// Pick a brand. get the RTSP URL template(s) and the exact steps to
+// Pick a brand. Get the RTSP URL template(s) and the exact steps to
 // enable RTSP/ONVIF and find credentials. "Use this URL" drops the
 // template into the stream-URL field so the user only swaps <ip>.
 
@@ -11,7 +11,7 @@ import { CAMERA_BRANDS, findBrand, type RtspSupport } from "@/lib/camera-brands"
 interface Props {
   // Called when the user clicks "Use this URL" on a template.
   onUseTemplate: (url: string) => void;
-  // Optional. start collapsed unless the user opens it.
+  // Optional. Start collapsed unless the user opens it.
   defaultOpen?: boolean;
 }
 

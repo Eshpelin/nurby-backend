@@ -14,7 +14,7 @@ Stranger at the door 2am    ->  Email you + record a clip + sound an ESP32 buzze
 
 ## What is Nurby?
 
-Nurby is free, open-source software for recording and understanding your security cameras on your own server. It is a self-hosted network video recorder (NVR) and AI surveillance platform. it ingests RTSP and ONVIF IP cameras, detects objects and recognizes faces locally, captions scenes with a vision-language model, and lets you ask questions about your footage in plain language. Everything runs on hardware you control with Docker, so with a local model no video ever leaves your network. People use it as a private home-security camera system, a small-business CCTV setup, and a programmable surveillance platform with a REST API, webhooks, and physical alarm integrations.
+Nurby is free, open-source software for recording and understanding your security cameras on your own server. It is a self-hosted network video recorder (NVR) and AI surveillance platform. It ingests RTSP and ONVIF IP cameras, detects objects and recognizes faces locally, captions scenes with a vision-language model, and lets you ask questions about your footage in plain language. Everything runs on hardware you control with Docker, so with a local model no video ever leaves your network. People use it as a private home-security camera system, a small-business CCTV setup, and a programmable surveillance platform with a REST API, webhooks, and physical alarm integrations.
 
 ## Why Nurby
 
@@ -35,11 +35,11 @@ Docker is the one tool Nurby needs. It runs everything else for you (the databas
 - Download and install **Docker Desktop** from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/).
 - Open it once after installing and leave it running. You will see a whale icon in your menu bar or system tray when it is ready.
 
-On Windows, accept the WSL 2 prompt if it appears. that is Docker setting itself up, and it is normal.
+On Windows, accept the WSL 2 prompt if it appears. That is Docker setting itself up, and it is normal.
 
 ### Step 2. Download Nurby
 
-Open a terminal (on Mac, the Terminal app. on Windows, PowerShell) and run.
+Open a terminal (on Mac, the Terminal app. On Windows, PowerShell) and run.
 
 ```bash
 git clone https://github.com/Eshpelin/nurby.git
@@ -54,7 +54,7 @@ No `git`? Install [Git](https://git-scm.com/downloads), or download the project 
 cp .env.example .env
 ```
 
-This makes a `.env` file from the template. The defaults are fine for trying it on your own machine. you do not need to edit anything yet.
+This makes a `.env` file from the template. The defaults are fine for trying it on your own machine. You do not need to edit anything yet.
 
 ### Step 4. Start it
 
@@ -62,7 +62,7 @@ This makes a `.env` file from the template. The defaults are fine for trying it 
 docker compose up --build
 ```
 
-The first time, this downloads and assembles everything. it can take **5 to 15 minutes** and print a lot of text. That is expected, and only happens once. Later starts take seconds. When it settles and stops scrolling, Nurby is running. Leave this terminal window open while you use it.
+The first time, this downloads and assembles everything. It can take **5 to 15 minutes** and print a lot of text. That is expected, and only happens once. Later starts take seconds. When it settles and stops scrolling, Nurby is running. Leave this terminal window open while you use it.
 
 ### Step 5. Open Nurby
 
@@ -81,7 +81,7 @@ That is it. You now have Nurby running. Open **Ask** and try a question, or buil
 - **Stop it.** press `Ctrl+C` in the terminal, or run `docker compose down`.
 - **Start it again.** `docker compose up` (no `--build` needed after the first time).
 - **Update to the latest version.** `./scripts/update.sh`. See [Updating](#updating).
-- **Start completely fresh.** `docker compose down -v` wipes all data and gives you a clean slate. this deletes everything, so only do it on purpose.
+- **Start completely fresh.** `docker compose down -v` wipes all data and gives you a clean slate. This deletes everything, so only do it on purpose.
 
 ### If something does not work
 
@@ -89,7 +89,7 @@ That is it. You now have Nurby running. Open **Ask** and try a question, or buil
 |---|---|
 | `docker: command not found` or "Cannot connect to the Docker daemon" | Docker Desktop is not installed or not running. Open it and wait for the whale icon, then retry. |
 | "port is already allocated" | Another program is using a port Nurby needs (4747 or 4748). Quit that program, or change the port on the left side of the mapping in `docker-compose.yml`. |
-| The first `up --build` seems stuck | It is downloading. give it up to 15 minutes the first time. A fast internet connection helps. |
+| The first `up --build` seems stuck | It is downloading. Give it up to 15 minutes the first time. A fast internet connection helps. |
 | The page at localhost:4747 will not load | Wait until the terminal stops scrolling and shows the services are up, then refresh. On Windows make sure Docker is using WSL 2. |
 | "I do not have an RTSP link for my camera" | Use the in-app brand guide when adding a camera, or start with your webcam to explore. |
 | No AI model offered in setup | Install [Ollama](https://ollama.com/download) and start it, then click "Check again" in the model step, or paste a cloud provider API key. |
@@ -102,21 +102,21 @@ Want more control (custom passwords, HTTPS, a public address)? See [Configuratio
 - Multi-protocol cameras. RTSP, HTTP MJPEG, HTTP snapshot, HLS, USB, file, and a phone or laptop webcam as a camera.
 - ONVIF auto-discovery with network scanning, plus USB and local device probing.
 - A guided camera-brand cheat sheet (26 brands) that shows where to find each vendor's RTSP/ONVIF URL during setup.
-- Smart recording per camera. continuous, motion, object, or clip with pre/post buffers.
+- Smart recording per camera. Continuous, motion, object, or clip with pre/post buffers.
 - Retention policies enforced automatically, by time or by size, with thumbnail cleanup.
 
 ### Perception and reasoning
 - YOLO detection with a curated 17-model catalog (yolov8, yolo11, yolo-world open-vocabulary, OIV7 600-class, RT-DETR).
 - Dynamic class vocabulary per camera sourced from whichever model is active, not a hardcoded list.
 - Face detection and recognition with 512-dim embeddings in pgvector, auto-clustering of unknown faces, and body re-identification.
-- Vision-model scene captions with a CPU-friendly pipeline. a CLIP zero-shot gate, perceptual-hash dedupe, a Redis backlog with priority lanes, and late-frame flagging keep it responsive on modest hardware.
+- Vision-model scene captions with a CPU-friendly pipeline. A CLIP zero-shot gate, perceptual-hash dedupe, a Redis backlog with priority lanes, and late-frame flagging keep it responsive on modest hardware.
 - License plate OCR on vehicle crops, audio events (baby cry, dog bark, glass break, smoke alarm), and motion-zone masking.
-- Privacy post-processing. per-person blur and NudeNet nudity blur.
+- Privacy post-processing. Per-person blur and NudeNet nudity blur.
 
 ### People, journeys, and nicknames
 - Named person profiles with relationship tags, consent tracking, and per-person privacy blur.
-- Household nicknames. call your mother "Mom" and your daughter "Lee" and that is what shows up everywhere, while identity stays canonical under the hood.
-- Cross-camera journeys. a subject's sightings are stitched into a single timeline across cameras, with co-presence and transitions.
+- Household nicknames. Call your mother "Mom" and your daughter "Lee" and that is what shows up everywhere, while identity stays canonical under the hood.
+- Cross-camera journeys. A subject's sightings are stitched into a single timeline across cameras, with co-presence and transitions.
 
 ### Ask Nurby (agentic Q&A)
 - Ask questions in plain language and get grounded, cited answers from your footage.
@@ -126,10 +126,10 @@ Want more control (custom passwords, HTTPS, a public address)? See [Configuratio
 
 ### Rules and automation
 - A full-page rule builder with a drag-to-reorder action chain, a live plain-language preview, and a dry-run plus historical-replay tester.
-- Trigger types. object detected, face recognized, unknown face, motion, audio event, loitering, line cross (tripwire), and more, with an inline canvas geometry editor that draws zones on the live feed.
+- Trigger types. Object detected, face recognized, unknown face, motion, audio event, loitering, line cross (tripwire), and more, with an inline canvas geometry editor that draws zones on the live feed.
 - Conditions for camera scope, schedule, and confidence, with cooldowns to prevent spam.
-- Action chain. webhook, API call, in-app notify, email, Telegram, broadcast, an AI verify gate that can stop the chain, and a VLM call whose output later actions can reference.
-- Physical device presets. pick an ESP32 buzzer, ESP8266 relay lights, or a Raspberry Pi speaker or siren, and Nurby fills the webhook and links you the receiver script to flash.
+- Action chain. Webhook, API call, in-app notify, email, Telegram, broadcast, an AI verify gate that can stop the chain, and a VLM call whose output later actions can reference.
+- Physical device presets. Pick an ESP32 buzzer, ESP8266 relay lights, or a Raspberry Pi speaker or siren, and Nurby fills the webhook and links you the receiver script to flash.
 
 ### Integrations and API
 - Programmatic REST API documented at `/docs` and `/openapi.json`, with read filters by time, person, label, and camera.
@@ -162,9 +162,9 @@ A four-layer pipeline runs as services in one Docker Compose stack.
 +----------------------------+----------------------------+
                              |
 +----------------------------v----------------------------+
-|  Layer 4. Agent. tool-use Q&A, summarizer, budgets      |
+|  Layer 4. Agent. Tool-use Q&A, summarizer, budgets      |
 +---------------------------------------------------------+
-|  Layer 3. Events. rules, verify gates, webhooks (HMAC), |
+|  Layer 3. Events. Rules, verify gates, webhooks (HMAC), |
 |           email, Telegram, device alerts, digests       |
 +---------------------------------------------------------+
 |  Layer 2. Perception. YOLO, tracking, face + body re-id,|
@@ -183,8 +183,8 @@ A four-layer pipeline runs as services in one Docker Compose stack.
 ## Requirements
 
 - Docker and Docker Compose (the supported way to run the full stack).
-- About 4 GB RAM free for a small setup. more if you run larger local vision models.
-- A vision model. either Ollama on the host for fully local inference, or an API key for OpenAI, Anthropic, or Gemini.
+- About 4 GB RAM free for a small setup. More if you run larger local vision models.
+- A vision model. Either Ollama on the host for fully local inference, or an API key for OpenAI, Anthropic, or Gemini.
 - For local development. Python 3.11+, Node.js 20+, and PostgreSQL 15+ with the pgvector extension.
 
 GPU is optional. The perception pipeline is tuned to run on CPU.
@@ -204,7 +204,7 @@ The setup walkthrough is in [Get Nurby running on your computer](#get-nurby-runn
 | Postgres       | localhost:5433               |
 | Redis          | localhost:6379               |
 
-Running a local model with Docker. one-click Ollama deploy pulls models on the machine that runs the API, so when the API runs in Docker, install Ollama on the host and Nurby auto-detects it at `http://host.docker.internal:11434`. You can also set `OLLAMA_BASE_URL` to point anywhere on your network.
+Running a local model with Docker. One-click Ollama deploy pulls models on the machine that runs the API, so when the API runs in Docker, install Ollama on the host and Nurby auto-detects it at `http://host.docker.internal:11434`. You can also set `OLLAMA_BASE_URL` to point anywhere on your network.
 
 ## Configuration
 
@@ -215,7 +215,7 @@ Copy `.env.example` to `.env` and adjust. Key variables.
 | `POSTGRES_PASSWORD` | Database password (compose wires it into `DATABASE_URL`). |
 | `DATABASE_URL` | Async Postgres DSN. |
 | `REDIS_URL` | Redis connection for streams and queues. |
-| `JWT_SECRET` | Signing secret for auth tokens. set a strong value for any real deployment. |
+| `JWT_SECRET` | Signing secret for auth tokens. Set a strong value for any real deployment. |
 | `RECORDINGS_PATH`, `THUMBNAILS_PATH` | Where clips and thumbnails are stored. |
 | `OLLAMA_BASE_URL` | Override where Nurby looks for Ollama. |
 | `SMTP_*` | SMTP host, port, user, password, and from-address for email actions. |
@@ -268,9 +268,9 @@ banner in Settings. To update, run one command on the host.
 ./scripts/update.sh
 ```
 
-It pulls the latest code, rebuilds, and restarts. migrations run
+It pulls the latest code, rebuilds, and restarts. Migrations run
 automatically on startup. An optional in-app one-click update button is
-available too. see [docs/updating.md](docs/updating.md).
+available too. See [docs/updating.md](docs/updating.md).
 
 Prefer not to build on a low-power box? Every release publishes prebuilt
 images to the GitHub Container Registry, so you can `docker compose pull`
@@ -313,10 +313,10 @@ nurby/
 ## FAQ
 
 **Is Nurby free and open source?**
-Yes. Nurby is free and open source under the AGPL-3.0 license. There is no paid tier, no account, and no cloud lock-in. you self-host it.
+Yes. Nurby is free and open source under the AGPL-3.0 license. There is no paid tier, no account, and no cloud lock-in. You self-host it.
 
 **Is Nurby a Frigate alternative?**
-Nurby covers similar ground to Frigate, Scrypted, Shinobi, MotionEye, and Blue Iris (recording IP cameras, object detection, alerts) and adds AI on top. faces and people, cross-camera journeys, vision-language scene understanding, and plain-language questions about your footage. You can run it instead of or alongside them.
+Nurby covers similar ground to Frigate, Scrypted, Shinobi, MotionEye, and Blue Iris (recording IP cameras, object detection, alerts) and adds AI on top. Faces and people, cross-camera journeys, vision-language scene understanding, and plain-language questions about your footage. You can run it instead of or alongside them.
 
 **Does it work fully offline and keep my video private?**
 Yes. With a local model via Ollama, all detection and reasoning happen on your hardware and no video leaves your network. Cloud vision models are optional.
@@ -328,7 +328,7 @@ Any RTSP or ONVIF IP camera, plus HTTP MJPEG and snapshot cameras, HLS streams, 
 No. The perception pipeline is tuned to run on CPU. A GPU helps with larger local vision models but is not required.
 
 **What hardware do I need?**
-A machine that runs Docker with roughly 4 GB of free RAM for a small setup. more for bigger local models. It runs on a NAS, a mini PC, an old laptop, or a home server.
+A machine that runs Docker with roughly 4 GB of free RAM for a small setup. More for bigger local models. It runs on a NAS, a mini PC, an old laptop, or a home server.
 
 **How do I install it?**
 Install Docker Desktop, clone the repo, and run `docker compose up --build`, then open http://localhost:4747. See [Get Nurby running on your computer](#get-nurby-running-on-your-computer).
@@ -347,7 +347,7 @@ Open source CCTV, self-hosted NVR, network video recorder, video management syst
 Contributions are welcome. A good loop is.
 
 1. Fork and branch from `main`.
-2. Make focused changes with tests. run `python -m pytest -q` and, for frontend work, `cd frontend && npm run build`.
+2. Make focused changes with tests. Run `python -m pytest -q` and, for frontend work, `cd frontend && npm run build`.
 3. Open a pull request describing the change and how you verified it.
 
 By contributing you agree your contributions are licensed under the project license below.

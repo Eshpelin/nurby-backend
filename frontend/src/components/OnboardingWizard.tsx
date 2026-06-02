@@ -109,7 +109,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const [providerError, setProviderError] = useState<string | null>(null);
   // Connection-test state. After we create the provider row we hit the
   // backend test endpoint so a wrong key / unreachable endpoint fails
-  // fast in the wizard instead of silently later. forceAdvance lets the
+  // fast in the wizard instead of silently later. ForceAdvance lets the
   // user proceed past a failed test on a second click.
   const [providerTestMsg, setProviderTestMsg] = useState<string | null>(null);
   const [providerForceAdvance, setProviderForceAdvance] = useState(false);
@@ -138,14 +138,14 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
     setProviderBaseUrl(PROVIDER_PRESETS[presetIdx].base_url);
   }, [presetIdx]);
 
-  // The Ollama deploy endpoint auto-creates the provider. refresh the
+  // The Ollama deploy endpoint auto-creates the provider. Refresh the
   // provider list and jump straight to the camera step.
   async function onOllamaProvisioned() {
     try {
       const r = await authFetch("/api/providers");
       if (r.ok) setProviders(await r.json());
     } catch {
-      /* non-fatal. the provider was created server-side regardless */
+      /* non-fatal. The provider was created server-side regardless */
     }
     setStep("camera");
   }
@@ -572,7 +572,7 @@ function ProviderStep({
           </FieldRow>
           <FieldRow
             label="Base URL"
-            hint={isOllama ? "Where Ollama is reachable. e.g. http://host.docker.internal:11434 from Docker." : "Auto-filled from preset"}
+            hint={isOllama ? "Where Ollama is reachable. E.g. http://host.docker.internal:11434 from Docker." : "Auto-filled from preset"}
           >
             <input
               type="text"
@@ -615,7 +615,7 @@ function ProviderStep({
             </div>
           ) : (
             <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-300/90 leading-relaxed">
-              Local models are free and private. nothing leaves your network. This
+              Local models are free and private. Nothing leaves your network. This
               model captions what cameras see. For Ask-Nurby you&apos;ll also want a
               tool-capable local model (e.g. qwen2.5:3b) which you can deploy from
               Settings → Local AI.

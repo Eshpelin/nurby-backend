@@ -179,7 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers.set("Authorization", `Bearer ${token}`);
       }
       const res = await fetch(url, { ...init, headers });
-      // Stale or invalid token. clear auth and bounce to login.
+      // Stale or invalid token. Clear auth and bounce to login.
       if (res.status === 401 && token) {
         setToken(null);
         setUser(null);

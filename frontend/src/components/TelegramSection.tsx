@@ -33,7 +33,7 @@ export interface TelegramChannel {
   last_test_ok: boolean | null;
   last_error: string | null;
   pairing_status: "pending" | "paired" | "blocked" | "disabled" | "error";
-  // Phase 3 fields. webhook_secret is intentionally never sent over the wire.
+  // Phase 3 fields. Webhook_secret is intentionally never sent over the wire.
   delivery_mode: "long_poll" | "webhook";
   webhook_url: string | null;
   media_quality: "off" | "low" | "high";
@@ -126,7 +126,7 @@ export default function TelegramSection() {
 
   return (
     <>
-      {/* Section card. mirrors the Email card style */}
+      {/* Section card. Mirrors the Email card style */}
       <div className="rounded-lg border border-border bg-card px-4 py-3.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1146,7 +1146,7 @@ function AddOrPairModal({
               <span>
                 {pairExpired
                   ? "Pairing link expired."
-                  : `Waiting for Telegram. expires in ${Math.max(0, secondsLeft)}s.`}
+                  : `Waiting for Telegram. Expires in ${Math.max(0, secondsLeft)}s.`}
               </span>
               {pairExpired && (
                 <button

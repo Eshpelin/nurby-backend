@@ -23,13 +23,13 @@ interface Props {
 }
 
 /**
- * Reinterpret control. opens a small popover with a provider picker
+ * Reinterpret control. Opens a small popover with a provider picker
  * and re-runs the underlying VLM call with the chosen model. Lets
  * the user ask "what would Claude make of this?" on a journey
  * already narrated by local Gemma, or fall back to "use default" if
  * they just want a fresh take from the same provider.
  *
- * Backwards-compatible. when the endpoint is hit with no body the
+ * Backwards-compatible. When the endpoint is hit with no body the
  * old camera-precedence chain still runs (existing /resummarize
  * behavior).
  */

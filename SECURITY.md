@@ -14,18 +14,18 @@ Before exposing Nurby beyond your local machine.
   `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 - **Change `POSTGRES_PASSWORD`** from the `nurby_dev` template default.
 - **Do not expose Postgres, Redis, or the MediaMTX API** to the public
-  internet. The compose file binds them to localhost. keep it that way.
+  internet. The compose file binds them to localhost. Keep it that way.
 - **Put the API and frontend behind HTTPS** via a reverse proxy. Set
   `PUBLIC_BASE_URL` to the public address so alert links are correct.
 - **Restrict CORS** with `CORS_ORIGINS` to the origins you actually use.
 - **Treat API keys and webhook secrets as credentials.** the API key
-  plaintext is shown once. signed webhooks use an HMAC secret you share
+  plaintext is shown once. Signed webhooks use an HMAC secret you share
   with the receiver.
 - **Keep physical device receivers on your LAN.** the ESP32 / Raspberry
   Pi alert scripts listen on plain HTTP and verify a shared HMAC secret.
   do not port-forward them.
 - **Review who has accounts.** invite keys grant access with a role and
-  per-camera scope. revoke unused keys and accounts.
+  per-camera scope. Revoke unused keys and accounts.
 
 ## What ships safe by default
 

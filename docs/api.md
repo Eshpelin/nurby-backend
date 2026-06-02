@@ -10,7 +10,7 @@ Two credential types work in the `Authorization: Bearer` header.
 
 - User JWT. obtained from `POST /api/auth/login`. Short-lived. Good for
   the web app.
-- API key. long-lived `nrb_...` token for scripts and integrations.
+- API key. Long-lived `nrb_...` token for scripts and integrations.
   Preferred for programmatic access.
 
 ### Create an API key

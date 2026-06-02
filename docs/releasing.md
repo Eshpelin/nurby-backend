@@ -31,7 +31,7 @@ That is it. The `release` workflow then.
   Open each package on GitHub (Profile -> Packages) and set its
   visibility to **Public** so anyone can pull. You only do this once per
   package.
-- No secrets are needed. the workflow uses the built-in `GITHUB_TOKEN`.
+- No secrets are needed. The workflow uses the built-in `GITHUB_TOKEN`.
 
 ## How users consume releases
 

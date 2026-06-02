@@ -71,7 +71,7 @@ export function ActionCard({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // A gate that can abort the rest of the chain. verify always can,
+  // A gate that can abort the rest of the chain. Verify always can,
   // vlm_call only when its on-error is set to stop.
   const canStopChain =
     draft.type === "verify" ||

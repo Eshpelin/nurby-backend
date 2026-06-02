@@ -389,7 +389,7 @@ export function RuleBuilder({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Left. definition */}
+        {/* Left. Definition */}
         <div className="lg:col-span-3 space-y-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground block mb-1">Rule name</label>
@@ -534,7 +534,7 @@ export function RuleBuilder({
           </div>
         </div>
 
-        {/* Right. live preview + test + save (sticky) */}
+        {/* Right. Live preview + test + save (sticky) */}
         <div className="lg:col-span-2">
           <div className="lg:sticky lg:top-6 space-y-4">
             <div>

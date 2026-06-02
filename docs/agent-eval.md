@@ -52,7 +52,7 @@ tags: [indexed, household, package]
 
 # Canned data the in-process tool registry returns. Top-level shortcuts
 # (observations / cameras / journeys) auto-wrap into the canonical
-# tool result envelope. tool_results lets you override per-tool with
+# tool result envelope. Tool_results lets you override per-tool with
 # either a dict (single response) or a list (sequence on repeat calls,
 # used for cache simulation).
 seed:
@@ -64,7 +64,7 @@ seed:
       description: "A package was left on the porch"
       detections: { objects: [{ label: "package", confidence: 0.91 }] }
 
-# Scripted LLM transcript. Each entry is one assistant turn. tool_uses
+# Scripted LLM transcript. Each entry is one assistant turn. Tool_uses
 # triggers tool dispatch; text + stop_reason ends the loop with the
 # final synthesis.
 mocked_llm:
@@ -133,11 +133,11 @@ Each run produces `.eval-report.md` at the repo root.
 - Cost. $0.00 (mocked)
 - Avg turns per fixture. 2.6
 - Phase 1 exit threshold. 27 / 30
-- Threshold met. yes
+- Threshold met. Yes
 
 ## Failures
-- q15_disambiguation_two_johns. final_answer missing substring 'two'; got 'I found people...'
-- q22_camera_access_denied. expected zero results, got 1
+- q15_disambiguation_two_johns. Final_answer missing substring 'two'; got 'I found people...'
+- q22_camera_access_denied. Expected zero results, got 1
 
 ## By tag
 - indexed. 8/8
@@ -146,7 +146,7 @@ Each run produces `.eval-report.md` at the repo root.
 - ...
 ```
 
-`Threshold met. no` makes the workflow fail. CI also uploads the file
+`Threshold met. No` makes the workflow fail. CI also uploads the file
 as a build artifact and (for pull requests) posts it as a PR comment
 so reviewers do not have to dig through job logs.
 

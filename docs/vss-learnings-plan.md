@@ -39,13 +39,13 @@ self-host. None of the work below regresses any of these.
 ## Learning 1. Alert verification stage
 
 ### The VSS idea
-VSS runs a dedicated Alert Verification Service. cheap perception fires
+VSS runs a dedicated Alert Verification Service. Cheap perception fires
 a candidate alert, a VLM verifies the candidate before the alert is
 published downstream. Kills false positives (shadow flagged as person,
 swaying branch flagged as intruder).
 
 ### Where Nurby is today
-`services/events/actions.py` dispatches action types. webhook, api_call,
+`services/events/actions.py` dispatches action types. Webhook, api_call,
 broadcast, notify, email, vlm_call, telegram. A rule fires on a YOLO
 label or face match and immediately runs its actions. There is a
 cascade refiner in the VLM queue, but no verify-before-notify gate on
@@ -94,12 +94,12 @@ action chain conditional on a VLM confirmation.
    to `_VALID_ACTION_TYPES` in `shared/schemas.py`.
 2. Schema validation. `verify` requires `question`, optional
    `min_confidence` (0-1), `on_fail` in {stop, continue}.
-3. Rule builder. new `VerifyEditor.tsx` action card under
+3. Rule builder. New `VerifyEditor.tsx` action card under
    `frontend/src/components/rules/actions/`.
-4. Engine. honor the abort signal from a failed verify the same way
+4. Engine. Honor the abort signal from a failed verify the same way
    it honors `vlm_call` `on_error=stop`.
-5. Tests. verify passes → chain continues. verify fails →
-   chain aborts. cannot_tell → treated as fail. cached frame → no
+5. Tests. Verify passes → chain continues. Verify fails →
+   chain aborts. Cannot_tell → treated as fail. Cached frame → no
    second VLM call.
 6. Plain-language preview. "When a person is detected on Front Door,
    confirm with AI that it is really a person, then send Telegram."
@@ -120,7 +120,7 @@ relational questions flat vector search cannot. "Did the same vehicle
 from Tuesday return Friday?" "Who was with Dad in the kitchen?"
 
 ### Where Nurby is today
-We already have the graph. it is just relational rows we do not expose
+We already have the graph. It is just relational rows we do not expose
 to the agent relationally.
 
 - `Person` ←→ `Journey` (subject_key) ←→ `Incident` ←→ `Observation`
@@ -181,7 +181,7 @@ the existing foreign keys + JSON segment data.
 4. System-prompt nudge. "For 'who was with X', 'did X come back',
    'where did X go', use query_relationships before stitching multiple
    tools."
-5. Eval fixtures. co-presence, revisit-by-body-cluster, camera path.
+5. Eval fixtures. Co-presence, revisit-by-body-cluster, camera path.
 
 ### Exit criterion
 The eval suite answers "did the same person come back later today?"
@@ -209,15 +209,15 @@ re-exports the existing tool registry over MCP stdio + HTTP transports.
 
 - Each MCP tool maps 1:1 to a `TOOL_REGISTRY` entry. We already have
   name, description, input_schema.
-- Auth. an MCP-issued token scoped to a Nurby user, so
+- Auth. An MCP-issued token scoped to a Nurby user, so
   `accessible_camera_ids` filtering still applies. No tool bypasses
   the household ACL.
 - Budget. MCP calls count against the same per-user daily token /
   cost budget as `/ask` (reuse `services/agent/budget.py`).
-- Read-only by default. only `side_effect: read` tools are exposed
+- Read-only by default. Only `side_effect: read` tools are exposed
   over MCP in v1.6. The verify / write tools stay internal until we
   have a confirmation flow for external clients.
-- Distribution. a `docker compose` profile + a documented
+- Distribution. A `docker compose` profile + a documented
   `claude_desktop_config.json` snippet so a user can point Claude
   Desktop at their own Nurby.
 
@@ -238,7 +238,7 @@ we offer it to a household on a NUC.
 3. Budget enforcement reuse.
 4. Compose profile `mcp` + docs in `docs/mcp.md` with the Claude
    Desktop config snippet.
-5. Smoke. start the MCP server, list tools, call `summarize_activity`
+5. Smoke. Start the MCP server, list tools, call `summarize_activity`
    through an MCP client, get a household rollup back.
 
 ### Exit criterion
@@ -267,13 +267,13 @@ captioning.
 A **hierarchical summarizer** invoked when a requested summary window
 exceeds a threshold.
 
-- Map. partition the window into chunks (by hour, or by Incident/Journey
+- Map. Partition the window into chunks (by hour, or by Incident/Journey
   boundary which is more semantic). Produce a mini-summary per chunk from
   the rollup + any cached VLM captions. Cheap, no new VLM calls when
   cache hits.
-- Reduce. fold mini-summaries pairwise / in batches into a final
+- Reduce. Fold mini-summaries pairwise / in batches into a final
   narrative, each reduce step bounded to a safe token budget.
-- Surface. a new agent path (the driver detects a large-window summary
+- Surface. A new agent path (the driver detects a large-window summary
   request and runs the map-reduce loop) + reuse in `daily_digest` for
   weekly / monthly digests.
 
@@ -282,8 +282,8 @@ exceeds a threshold.
    chunk → map → reduce.
 2. Chunk boundary by Incident/Journey when available, else hourly.
 3. Token-budget-aware reduce (respect `agent_max_*` settings).
-4. Driver. route "summarize the last N days" to this path.
-5. Tests. a 7-day fixture produces a bounded-context summary that
+4. Driver. Route "summarize the last N days" to this path.
+5. Tests. A 7-day fixture produces a bounded-context summary that
    names the top entities + events per day.
 
 ### Exit criterion
@@ -306,7 +306,7 @@ image-embedding item already parked in `docs/agent-design.md` Phase 3.
 
 ### What we build (deferred to v2)
 - Add a CLIP image embedding per keyframe (reuse the ViT-B-32 we just
-  pulled in for the v1.4 CLIP gate. no new model download).
+  pulled in for the v1.4 CLIP gate. No new model download).
 - New `image_embeddings` table + pgvector index.
 - New agent tool `search_visual(query)` doing CLIP text→image cosine,
   so visual concepts never described in text become searchable.

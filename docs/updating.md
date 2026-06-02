@@ -1,7 +1,7 @@
 # Updating Nurby
 
 Nurby tells you when a new release is out and gives you two ways to
-update. a one-command host update, and an optional in-app one-click
+update. A one-command host update, and an optional in-app one-click
 button.
 
 ## How you know an update is available

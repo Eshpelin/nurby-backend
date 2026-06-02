@@ -42,7 +42,7 @@ export function ActionsSection(props: ActionsSectionProps) {
     props;
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
 
-  // Stable per-card ids for drag. kept in lockstep with formActions so a
+  // Stable per-card ids for drag. Kept in lockstep with formActions so a
   // reorder animates correctly. Length changes (add/delete/hydrate) are
   // reconciled here; in-place edits keep the same ids.
   const counter = useRef(0);

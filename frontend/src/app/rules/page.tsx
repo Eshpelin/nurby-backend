@@ -127,7 +127,7 @@ export default function RulesPage() {
     try {
       sessionStorage.setItem(RULE_PREFILL_KEY, JSON.stringify(synth));
     } catch {
-      /* ignore quota errors. the create page just opens blank */
+      /* ignore quota errors. The create page just opens blank */
     }
     router.push("/rules/new");
   };
@@ -168,7 +168,7 @@ export default function RulesPage() {
       });
       fetchRules();
     } catch {
-      /* silent. revert handled on next fetchRules */
+      /* silent. Revert handled on next fetchRules */
       fetchRules();
     }
   };

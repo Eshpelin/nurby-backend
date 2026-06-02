@@ -16,7 +16,7 @@ interface Subscription {
   created_at: string;
 }
 
-// Standing outbound webhooks. independent of any single rule, they
+// Standing outbound webhooks. Independent of any single rule, they
 // receive every fired event. Listed and managed here so the capability
 // is discoverable from the Rules page.
 export function WebhookSubscriptions() {
@@ -112,7 +112,7 @@ export function WebhookSubscriptions() {
         <div className="text-left">
           <div className="text-sm font-medium">Webhook subscribers</div>
           <div className="text-[11px] text-muted-foreground">
-            Standing endpoints that receive every fired event. signed and retried.
+            Standing endpoints that receive every fired event. Signed and retried.
           </div>
         </div>
         <span className="text-muted-foreground text-xs">{open ? "▾" : "▸"}</span>

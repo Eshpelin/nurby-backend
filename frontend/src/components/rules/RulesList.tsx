@@ -64,7 +64,7 @@ const PERSONAS: Persona[] = [
       const paired = telegramChannels.find(
         (c) => c.enabled && c.pairing_status === "paired",
       );
-      // Emit the dict form expected by hydrateFromRule. dictToDraft
+      // Emit the dict form expected by hydrateFromRule. DictToDraft
       // maps it into an ActionDraft for the chain editor.
       const dict: Record<string, unknown> = paired
         ? {
@@ -96,7 +96,7 @@ const PERSONAS: Persona[] = [
           {
             type: "email",
             to: "",
-            subject: "Nurby. unknown face spotted",
+            subject: "Nurby. Unknown face spotted",
             body:
               "An unknown face was detected at {{timestamp}} on camera {{camera_id}}.",
           },

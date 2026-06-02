@@ -15,7 +15,7 @@ interface VersionInfo {
 }
 
 // Shows the running version, checks GitHub for a newer release, and
-// offers an update path. one-click when the optional updater sidecar is
+// offers an update path. One-click when the optional updater sidecar is
 // enabled, otherwise the manual command.
 export function SoftwareUpdateCard() {
   const { authFetch } = useAuth();

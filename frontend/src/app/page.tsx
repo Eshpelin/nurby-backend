@@ -546,7 +546,7 @@ function DetectionOverlay({ cameraId, visible, frameWidth, frameHeight }: {
           }
         }
 
-        // Fallback. observation record (slower cadence, includes faces).
+        // Fallback. Observation record (slower cadence, includes faces).
         const res = await authFetch(`/api/observations?camera_id=${cameraId}&limit=1`);
         if (!res.ok || cancelled) return;
         const obs: Observation[] = await res.json();
@@ -916,12 +916,12 @@ function CameraSidebarCard({
           <DetectionOverlay cameraId={camera.id} visible={overlayVisible} frameWidth={frameW} frameHeight={frameH} />
         )}
 
-        {/* Live caption overlay. only when transcription enabled */}
+        {/* Live caption overlay. Only when transcription enabled */}
         {camera.status !== "offline" && camera.audio_transcribe_enabled && (
           <LiveCaptionOverlay cameraId={camera.id} position="bottom" />
         )}
 
-        {/* Audio active dot + VLM thinking badge. stack top-left so the
+        {/* Audio active dot + VLM thinking badge. Stack top-left so the
             two are visually grouped and out of the way of overlay
             controls top-right. */}
         {camera.status !== "offline" && (
@@ -1572,7 +1572,7 @@ function AddCameraModal({ onClose, onSuccess, initialStreamType }: { onClose: ()
     if (streamType === "webcam") return handleWebcamSubmit(e);
     if (streamType === "browser_mic") {
       // Phone-as-mic. No URL needed; backend derives the tcp:// path
-      // from the camera id. audio_only flag skips the video pipeline.
+      // from the camera id. Audio_only flag skips the video pipeline.
       if (!name.trim()) return;
       await handleSubmitCamera({
         name: name.trim(),
@@ -1885,7 +1885,7 @@ function DashboardContent() {
     }
     return "single";
   });
-  // User-customised sidebar width. null means fall back to preset for layout.
+  // User-customised sidebar width. Null means fall back to preset for layout.
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
     const raw = localStorage.getItem("nurby-sidebar-width");
@@ -2042,7 +2042,7 @@ function DashboardContent() {
     });
   }, [authFetch]);
 
-  // Resizable sidebar. attach global mousemove while resizing.
+  // Resizable sidebar. Attach global mousemove while resizing.
   useEffect(() => {
     if (!resizing) return;
     const onMove = (e: MouseEvent) => {
@@ -2435,7 +2435,7 @@ function DashboardContent() {
     if (eventFilters.has("conversations")) entries.push(...conversations.map((c) => ({ id: `conv-${c.id}`, type: "conversation" as const, camera_id: c.camera_id, timestamp: c.ended_at_provisional, data: c })));
     if (eventFilters.has("transcripts")) entries.push(...transcripts.map((t) => ({ id: `tx-${t.id}`, type: "transcript" as const, camera_id: t.camera_id, timestamp: t.started_at, data: t })));
     if (eventFilters.has("summaries")) entries.push(...summaries.map((s) => ({ id: `sum-${s.id}`, type: "summary" as const, camera_id: s.camera_id, timestamp: s.ended_at, data: s })));
-    // Always include notifications. they are explicit rule fires and deserve
+    // Always include notifications. They are explicit rule fires and deserve
     // priority in the digest even when the "status" filter is off.
     entries.push(...notifications.map((n) => ({
       id: `notif-${n.id}`,
@@ -2521,17 +2521,17 @@ function DashboardContent() {
 
     const highlights: BucketHighlight[] = [];
 
-    // Named persons are the most useful signal. list them by name.
+    // Named persons are the most useful signal. List them by name.
     for (const p of persons) {
       highlights.push({ tone: "person", text: `${p} seen`, thumbnailObsId: personObsId[p] });
     }
 
-    // Plates. show the OCR text, not just a count.
+    // Plates. Show the OCR text, not just a count.
     for (const pt of plates) {
       highlights.push({ tone: "plate", text: `Plate ${pt}`, thumbnailObsId: plateObsId[pt] });
     }
 
-    // Unknown faces. a single row noting the count + thumbnail.
+    // Unknown faces. A single row noting the count + thumbnail.
     if (unknownFaces > 0) {
       highlights.push({
         tone: "unknown",
@@ -2540,7 +2540,7 @@ function DashboardContent() {
       });
     }
 
-    // Rule fires. pull the real message so the user sees the reason.
+    // Rule fires. Pull the real message so the user sees the reason.
     for (const f of ruleFires.slice(0, 3)) {
       highlights.push({ tone: "rule", text: f.message, camName: f.camName });
     }
@@ -2548,7 +2548,7 @@ function DashboardContent() {
       highlights.push({ tone: "rule", text: `${ruleFires.length - 3} more rule fires` });
     }
 
-    // Interesting objects. skip the long tail.
+    // Interesting objects. Skip the long tail.
     const interesting = Object.entries(objectCounts).filter(([l]) => INTERESTING_OBJECTS.has(l));
     interesting.sort((a, b) => b[1] - a[1]);
     for (const [label, n] of interesting.slice(0, 3)) {
@@ -2938,7 +2938,7 @@ function DashboardContent() {
             )}
           </div>
 
-          {/* AI Digest panel. always visible (except in search) */}
+          {/* AI Digest panel. Always visible (except in search) */}
           {!searchActive && (
             <div className="rounded-xl border border-accent/30 bg-gradient-to-br from-accent/10 to-card/50 p-4 mb-3 flex-shrink-0 shadow-sm">
               <div className="flex items-center gap-3 mb-2">

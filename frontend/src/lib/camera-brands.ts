@@ -3,7 +3,7 @@
  *
  * The single biggest snag for new users is "what's my camera's stream
  * URL and where do I turn on RTSP/ONVIF?" These entries answer that per
- * brand. each carries one or more RTSP URL templates and the exact
+ * brand. Each carries one or more RTSP URL templates and the exact
  * clicks to enable RTSP/ONVIF + find credentials.
  *
  * Templates use <user> <pass> <ip> placeholders. The help panel can
@@ -14,7 +14,7 @@
  * support:
  *   "yes"     RTSP works out of the box or after a setting toggle
  *   "limited" only some models / requires extra firmware or an add-on
- *   "no"      cloud-locked. no direct RTSP without a bridge
+ *   "no"      cloud-locked. No direct RTSP without a bridge
  */
 
 export type RtspSupport = "yes" | "limited" | "no";
@@ -102,7 +102,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera's IP (router list, or the Amcrest IP Config tool).",
       "Log into http://<ip> with your admin account.",
-      "Setup → Network → Connection. confirm RTSP port 554. ONVIF is usually on by default.",
+      "Setup → Network → Connection. Confirm RTSP port 554. ONVIF is usually on by default.",
       "Use your admin username and password.",
     ],
     notes: ["Amcrest shares Dahua's URL scheme."],
@@ -122,7 +122,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       "Find the camera IP under Settings → Device Info, or in your router.",
       "Use the Camera Account username and password you just made.",
     ],
-    notes: ["The most common Tapo mistake. using the TP-Link app login instead of the separate Camera Account."],
+    notes: ["The most common Tapo mistake. Using the TP-Link app login instead of the separate Camera Account."],
   },
   {
     id: "wyze",
@@ -150,7 +150,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Open UniFi Protect → pick the camera → Settings → Advanced → RTSP.",
       "Toggle on one of the quality streams (High / Medium / Low). Protect generates a full rtsps:// URL.",
-      "Copy that exact URL here. it already includes the stream id and port.",
+      "Copy that exact URL here. It already includes the stream id and port.",
     ],
     notes: ["UniFi uses RTSPS (TLS) on port 7441. credentials are embedded in the generated URL, so the Credentials section can stay empty."],
   },
@@ -165,7 +165,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera IP (router list, or the AXIS IP Utility).",
       "Log into http://<ip> with your admin account.",
-      "RTSP and ONVIF are supported by default. add an ONVIF user under System → ONVIF if you want a separate account.",
+      "RTSP and ONVIF are supported by default. Add an ONVIF user under System → ONVIF if you want a separate account.",
     ],
   },
   {
@@ -182,7 +182,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       "Log into the web UI and enable RTSP/ONVIF under Settings → Network → Port if not already on.",
       "Foscam often uses port 88, sometimes 554. check the Port settings page.",
     ],
-    notes: ["Port varies by model. if 88 fails, try 554."],
+    notes: ["Port varies by model. If 88 fails, try 554."],
   },
   {
     id: "lorex",
@@ -212,7 +212,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera IP (router list).",
       "Log into the web UI and enable ONVIF under Network → Advanced.",
-      "Annke uses either the Hikvision or Dahua URL scheme depending on the model. try the Hikvision one first.",
+      "Annke uses either the Hikvision or Dahua URL scheme depending on the model. Try the Hikvision one first.",
     ],
     notes: ["If the Hikvision-style URL fails, the camera is Dahua-based, so use the second template."],
   },
@@ -228,8 +228,8 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera IP (router list, or Uniview's EZTools / Guard tool).",
       "Log into http://<ip> with your admin account.",
-      "Setup → Network → Port. confirm RTSP 554. ONVIF is on by default; add an ONVIF user under Network → Platform if you want a separate login.",
-      "Use your admin username and password. for an NVR, change c1 to the channel number.",
+      "Setup → Network → Port. Confirm RTSP 554. ONVIF is on by default; add an ONVIF user under Network → Platform if you want a separate login.",
+      "Use your admin username and password. For an NVR, change c1 to the channel number.",
     ],
     notes: ["c1 = channel 1, s0 = main / s1 = sub."],
   },
@@ -248,7 +248,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       "Setup → Network → ONVIF. add an ONVIF user. RTSP is enabled by default on 554.",
       "Use your admin username and password.",
     ],
-    notes: ["Profile names can differ per model. if profile1/2 fail, check Setup → Video profiles for the exact profile name."],
+    notes: ["Profile names can differ per model. If profile1/2 fail, check Setup → Video profiles for the exact profile name."],
   },
   {
     id: "bosch",
@@ -260,11 +260,11 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       { label: "Stream 2", url: "rtsp://<user>:<pass>@<ip>:554/?inst=2" },
     ],
     steps: [
-      "Easiest path. use the Scan tab above. Bosch cameras are ONVIF-compliant and discover cleanly.",
+      "Easiest path. Use the Scan tab above. Bosch cameras are ONVIF-compliant and discover cleanly.",
       "Otherwise log into http://<ip>, go to Configuration → Network → Network Access, and confirm the RTSP port.",
       "Use your camera's service/admin account.",
     ],
-    notes: ["Bosch RTSP paths vary by firmware. if the templates fail, the Scan tab + ONVIF is the reliable route."],
+    notes: ["Bosch RTSP paths vary by firmware. If the templates fail, the Scan tab + ONVIF is the reliable route."],
   },
   {
     id: "vivotek",
@@ -293,7 +293,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       { label: "Channel/stream", url: "rtsp://<user>:<pass>@<ip>:554/ch01/0" },
     ],
     steps: [
-      "Use the Scan tab above first. most Honeywell IP cameras are ONVIF-compliant.",
+      "Use the Scan tab above first. Most Honeywell IP cameras are ONVIF-compliant.",
       "Otherwise log into http://<ip>, confirm the RTSP port under Network settings, and enable ONVIF if present.",
       "Use your admin username and password.",
     ],
@@ -311,7 +311,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera IP (router list, or the Avigilon Camera Configuration Tool).",
       "Log into the camera web UI and confirm RTSP/ONVIF are enabled.",
-      "Use the camera's admin account. streamType=u requests UDP.",
+      "Use the camera's admin account. StreamType=u requests UDP.",
     ],
   },
   {
@@ -326,7 +326,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera IP (router list, or the i-PRO Configuration Tool / Easy IP Setup).",
       "Log into http://<ip> with your admin account.",
-      "Setup → Network → ONVIF. add an ONVIF user. confirm RTSP is enabled.",
+      "Setup → Network → ONVIF. add an ONVIF user. Confirm RTSP is enabled.",
       "Use your admin username and password.",
     ],
     notes: ["Older Panasonic units use /MediaInput/h264 without the stream suffix."],
@@ -343,9 +343,9 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the DVR/NVR or camera IP in the Swann app or on the recorder's network screen.",
       "Enable RTSP/ONVIF in the recorder's Network settings.",
-      "Use the device admin account. for an NVR, set channel to the camera you want.",
+      "Use the device admin account. For an NVR, set channel to the camera you want.",
     ],
-    notes: ["Many Swann recorders are Dahua-based. if the Dahua URL fails, try the channel-style path."],
+    notes: ["Many Swann recorders are Dahua-based. If the Dahua URL fails, try the channel-style path."],
   },
   {
     id: "ezviz",
@@ -362,7 +362,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       "Find the camera IP in your router. EZVIZ is Hikvision-based, so it uses the Hikvision URL scheme.",
     ],
     notes: [
-      "EZVIZ leans cloud-first. some models only allow RTSP on the local network and only after disabling encryption in the app.",
+      "EZVIZ leans cloud-first. Some models only allow RTSP on the local network and only after disabling encryption in the app.",
     ],
   },
   {
@@ -391,7 +391,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
     steps: [
       "Find the camera IP (router list, or the GV-IP Device Utility).",
       "Log into the web UI and confirm RTSP/ONVIF are enabled under Network settings.",
-      "Use your admin username and password. change CH001 to the channel you want.",
+      "Use your admin username and password. Change CH001 to the channel you want.",
     ],
   },
   {
@@ -453,7 +453,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       "Find the camera IP (router list, or MxManagementCenter).",
       "Use your admin username and password.",
     ],
-    notes: ["RTSP is off by default on Mobotix. you must enable the RTSP server first. ONVIF/Scan also works once enabled."],
+    notes: ["RTSP is off by default on Mobotix. You must enable the RTSP server first. ONVIF/Scan also works once enabled."],
   },
   {
     id: "generic_onvif",
@@ -469,7 +469,7 @@ export const CAMERA_BRANDS: CameraBrand[] = [
       "If the scan finds it, just enter the camera's username and password.",
       "If you have to type it manually, check the maker's manual for the RTSP path, then add it after rtsp://<user>:<pass>@<ip>:554/.",
     ],
-    notes: ["When in doubt, try the Scan tab first. it removes the guesswork for any ONVIF-compliant camera."],
+    notes: ["When in doubt, try the Scan tab first. It removes the guesswork for any ONVIF-compliant camera."],
   },
   {
     id: "cloud_only",

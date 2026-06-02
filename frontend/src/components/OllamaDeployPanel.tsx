@@ -23,7 +23,7 @@ interface OllamaStatus {
 }
 
 export interface OllamaDeployPanelProps {
-  // Called after the provider is provisioned (deployed or reused). the
+  // Called after the provider is provisioned (deployed or reused). The
   // parent refreshes providers and advances the wizard.
   onProvisioned: () => void;
 }
@@ -113,7 +113,7 @@ export function OllamaDeployPanel({ onProvisioned }: OllamaDeployPanelProps) {
     if (!model) return;
     setBusy(true);
     setError("");
-    setMsg("Deploying. starting Ollama and pulling the model. This can take a few minutes on first run.");
+    setMsg("Deploying. Starting Ollama and pulling the model. This can take a few minutes on first run.");
     try {
       const res = await authFetch("/api/ollama/deploy", {
         method: "POST",
@@ -147,7 +147,7 @@ export function OllamaDeployPanel({ onProvisioned }: OllamaDeployPanelProps) {
     return <div className="text-[11px] text-muted-foreground">Checking for a local AI.</div>;
   }
 
-  // Case A. an Ollama is reachable. reuse it.
+  // Case A. an Ollama is reachable. Reuse it.
   const detectedBlock = status.running && status.reachable_url && (
     <div className="rounded-md border border-emerald-500/25 bg-emerald-500/[0.05] px-3 py-3 space-y-2">
       <div className="flex items-center justify-between">

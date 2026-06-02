@@ -6,7 +6,7 @@ Audience. Junior engineers picking up Phase 1 tickets, plus product + privacy re
 
 This document specifies the design of an agentic question-answering surface on top of Nurby. The user types a natural-language question ("Did Daddy eat today?"), the system plans, queries indexed observations, optionally falls back to running ad-hoc VLM analysis against raw stored footage for concepts that were never indexed, synthesizes a cited answer, and streams progress live. The agent is read-only in Phase 1. The agent is bounded by per-request and per-user budgets at all times.
 
-The "agent loop" itself (tool-use, observe-think-act-observe, exit on budget cap) is standard. The interesting choices are domain-specific. tool surface, privacy invariants, hallucination control, cost ceilings, identity grounding, time grounding, eval methodology. This doc names those choices explicitly. Every choice is tagged `Decision.` Every rejected alternative is tagged `Rejected.` Every unresolved question is tagged **OPEN.**
+The "agent loop" itself (tool-use, observe-think-act-observe, exit on budget cap) is standard. The interesting choices are domain-specific. Tool surface, privacy invariants, hallucination control, cost ceilings, identity grounding, time grounding, eval methodology. This doc names those choices explicitly. Every choice is tagged `Decision.` Every rejected alternative is tagged `Rejected.` Every unresolved question is tagged **OPEN.**
 
 ---
 
@@ -18,7 +18,7 @@ Deliver a natural-language question-answering surface that lets a household user
 
 ### 1.2 Non-goals
 
-Phase 1 is not a general assistant. it does not answer questions outside the camera domain, does not take action on the household's behalf, does not maintain long-term memory across sessions, does not learn from corrections, and does not federate across households. It is not a replacement for Rules. rules fire automatically on events; the agent answers ad-hoc queries. It is not a replacement for the existing keyword search at `/api/search` (services/api/routes/search.py). it sits beside it and the search endpoint stays the primary low-latency lookup surface for trivial keyword queries.
+Phase 1 is not a general assistant. It does not answer questions outside the camera domain, does not take action on the household's behalf, does not maintain long-term memory across sessions, does not learn from corrections, and does not federate across households. It is not a replacement for Rules. Rules fire automatically on events; the agent answers ad-hoc queries. It is not a replacement for the existing keyword search at `/api/search` (services/api/routes/search.py). It sits beside it and the search endpoint stays the primary low-latency lookup surface for trivial keyword queries.
 
 ---
 
@@ -36,9 +36,9 @@ A new top-level "Ask Nurby" page in the frontend. Chat-style. Single text input 
 User. Did anyone visit today?
 
 [trace, streamed live]
-  plan. resolve "today" in household timezone -> 2026-05-24 00:00 to now.
+  plan. Resolve "today" in household timezone -> 2026-05-24 00:00 to now.
         Look up named-person observations in that window.
-  tool_call. query_observations(time_from=..., time_to=..., kinds=[person])
+  tool_call. Query_observations(time_from=..., time_to=..., kinds=[person])
   tool_result. 14 observations, 3 distinct persons. Mom (07:12), Mailman (10:45), Neighbor Jane (15:30).
 
 Final.
@@ -58,19 +58,19 @@ User. Did Daddy eat today?
         Eating is not an indexed concept. Need to. (a) find when Daddy was at the
         kitchen camera today, (b) run VLM on those clips with question
         "Is the person eating?"
-  tool_call. resolve_person(name="Daddy")
-  tool_result. matched Person "Dad" (display_name), id=p_001
-  tool_call. query_observations(person_id=p_001, time_from=..., camera_role="kitchen")
+  tool_call. Resolve_person(name="Daddy")
+  tool_result. Matched Person "Dad" (display_name), id=p_001
+  tool_call. Query_observations(person_id=p_001, time_from=..., camera_role="kitchen")
   tool_result. 3 observations. 08:14 (12 min), 12:30 (8 min), 19:05 (22 min)
-  tool_call. analyze_clip_with_vlm(observation_id=..., question="Is the person eating? Look for food, utensils, hand-to-mouth motion.")
+  tool_call. Analyze_clip_with_vlm(observation_id=..., question="Is the person eating? Look for food, utensils, hand-to-mouth motion.")
   tool_result. {confidence: 0.92, answer: "yes", evidence: ["bowl on table", "spoon in hand at 19:08"], frame_ts: [19:07, 19:08, 19:11]}
-  tool_call. analyze_clip_with_vlm(observation_id=..., question="Is the person eating?") (08:14 clip)
+  tool_call. Analyze_clip_with_vlm(observation_id=..., question="Is the person eating?") (08:14 clip)
   tool_result. {confidence: 0.71, answer: "yes", evidence: ["coffee mug", "toast on plate"], frame_ts: [08:15]}
 
 Final.
 Yes. Dad ate at least twice today.
-- 08:14 in the Kitchen. coffee and toast (high confidence) [clip:..., frames 08:15]
-- 19:05 in the Kitchen. dinner with a bowl and spoon (high confidence) [clip:..., frames 19:07-19:11]
+- 08:14 in the Kitchen. Coffee and toast (high confidence) [clip:..., frames 08:15]
+- 19:05 in the Kitchen. Dinner with a bowl and spoon (high confidence) [clip:..., frames 19:07-19:11]
 Midday clip at 12:30 was inconclusive.
 ```
 
@@ -83,9 +83,9 @@ User. Did the cat go outside last night?
   plan. "last night" = 2026-05-23 18:00 to 2026-05-24 06:00 local. Look for
         cat detections on outdoor cameras in that window. If none, look for
         cat detections on indoor cameras near outdoor-adjacent doors.
-  tool_call. query_observations(object_label="cat", scene_mode="outdoor", time_from=..., time_to=...)
+  tool_call. Query_observations(object_label="cat", scene_mode="outdoor", time_from=..., time_to=...)
   tool_result. 0 results.
-  tool_call. query_observations(object_label="cat", time_from=..., time_to=...)
+  tool_call. Query_observations(object_label="cat", time_from=..., time_to=...)
   tool_result. 2 indoor observations at 22:14, 02:30 on Living Room cam.
 
 Final.
@@ -194,13 +194,13 @@ The original brief listed 12 candidate tools. We ship 5 in Phase 1, trading per-
 | `query_observations` | read | Filtered + ranked lookup over Observation, Transcript, Conversation, Summary, Incident, Journey. |
 | `resolve_person` | read | Fuzzy match a name to a Person row, with disambiguation candidates. |
 | `analyze_clip_with_vlm` | read (but expensive) | Ad-hoc VLM analysis of a Recording or Observation clip against a freeform question. |
-| `request_clarification` | none | Special tool. ends the loop and surfaces a clarification question to the user. |
+| `request_clarification` | none | Special tool. Ends the loop and surfaces a clarification question to the user. |
 
 ### 4.2 Tool specifications
 
 #### 4.2.1 `get_household_context`
 
-Purpose. Bootstraps the agent with the same orientation a new household member would get. cameras, who lives here, what time zone, what time it is now. Always called first in Phase 1 (driver injects the result as the first observation so the LLM does not have to choose to call it).
+Purpose. Bootstraps the agent with the same orientation a new household member would get. Cameras, who lives here, what time zone, what time it is now. Always called first in Phase 1 (driver injects the result as the first observation so the LLM does not have to choose to call it).
 
 Params schema.
 ```json
@@ -368,7 +368,7 @@ Rejected alternative. Auto-pick the best match silently. Too unsafe when "Daddy"
 
 #### 4.2.4 `analyze_clip_with_vlm`
 
-Purpose. Run an ad-hoc VLM call against frames extracted from a Recording or Observation clip with a focused question. This is the escape hatch for any concept that was never indexed by the perception pipeline (eating, sleeping, holding object X, wearing color Y). The hard part is not the call. it is sampling, redaction, schema enforcement, hallucination control. Section 5 covers this tool in depth.
+Purpose. Run an ad-hoc VLM call against frames extracted from a Recording or Observation clip with a focused question. This is the escape hatch for any concept that was never indexed by the perception pipeline (eating, sleeping, holding object X, wearing color Y). The hard part is not the call. It is sampling, redaction, schema enforcement, hallucination control. Section 5 covers this tool in depth.
 
 Params schema.
 ```json
@@ -438,7 +438,7 @@ This is the single most important component of the agentic layer because it is t
 
 ### 5.1 Frame sampling strategy
 
-Inputs. a target (observation, recording, or camera+time-range), a question, a `max_frames` cap.
+Inputs. A target (observation, recording, or camera+time-range), a question, a `max_frames` cap.
 
 Decision tree.
 
@@ -449,10 +449,10 @@ Decision tree.
 5. Frame sampling:
    - If `D <= 5s`. take 2 frames evenly spaced (1/3, 2/3).
    - If `5s < D <= 30s`. take `max_frames` frames evenly spaced.
-   - If `D > 30s`. take 1 keyframe per `D/max_frames` seconds, BUT prefer frames with high motion (use existing Observation rows in the window as motion anchors. each Observation marks a "something happened here" moment).
-6. Always include the Observation thumbnail (`thumbnail_path`) as the first frame when available. it has already been blurred for privacy and is free.
+   - If `D > 30s`. take 1 keyframe per `D/max_frames` seconds, BUT prefer frames with high motion (use existing Observation rows in the window as motion anchors. Each Observation marks a "something happened here" moment).
+6. Always include the Observation thumbnail (`thumbnail_path`) as the first frame when available. It has already been blurred for privacy and is free.
 
-Decision. Default sampler is "even-spaced with Observation-anchored bias for clips >30s, capped at 4 frames." Rationale. four frames at 720p fit comfortably in every provider's vision context, cost is bounded, and Observation-anchored sampling means we are looking at the moments the perception pipeline already flagged as interesting.
+Decision. Default sampler is "even-spaced with Observation-anchored bias for clips >30s, capped at 4 frames." Rationale. Four frames at 720p fit comfortably in every provider's vision context, cost is bounded, and Observation-anchored sampling means we are looking at the moments the perception pipeline already flagged as interesting.
 
 Rejected. Scene-change detection (pyscenedetect or histogram-diff). Too slow on cold clips, and the existing Observation rows are a cheaper "interesting moments" proxy.
 
@@ -550,11 +550,11 @@ vlm_frame_analysis (
 )
 ```
 
-Rationale. If we burned tokens analyzing frame F for "is the person eating?", that judgment about F is permanent. Any future user, in any future question, that finds itself looking at frame F for an eating-related question gets the cached answer for free. The cache key is the FRAME + QUESTION, not the household + question. This is the asymmetry. work is per-frame; the same frame answers many questions.
+Rationale. If we burned tokens analyzing frame F for "is the person eating?", that judgment about F is permanent. Any future user, in any future question, that finds itself looking at frame F for an eating-related question gets the cached answer for free. The cache key is the FRAME + QUESTION, not the household + question. This is the asymmetry. Work is per-frame; the same frame answers many questions.
 
 Lookup. Before each analyzer call, the analyzer checks the table. Cache hit = the analyzer skips the VLM, returns the cached JSON, and the AgentRun records `cached: true` in the audit trail.
 
-Question normalization for the hash. lowercase, strip punctuation, collapse whitespace. Still exact-string. No semantic cache (see below).
+Question normalization for the hash. Lowercase, strip punctuation, collapse whitespace. Still exact-string. No semantic cache (see below).
 
 Cross-user note. Cache rows are household-scoped because the underlying observations + recordings are household-scoped; there is no cross-household leakage. Within a household, any user benefits from any prior user's analyzer work.
 
@@ -562,7 +562,7 @@ Rejected. Semantic (embedding-similarity) question cache. Two reasons. (1) cheap
 
 Rejected. TTL-based cache. Frames do not change; their VLM answer does not need to expire. Provider model upgrades are addressed by keying on `provider_id + model`, so a new model produces a new row alongside the old.
 
-Cache invalidation. Single rule. cache rows die with their media. Foreign key `ON DELETE CASCADE` from both `observations.id` and `recordings.id`. When the retention loop deletes a Recording mp4, all `vlm_frame_analysis` rows for it vanish in the same transaction. When perception eventually prunes old Observations (Phase 2 retention), their cache rows go with them. AgentRuns that cite a now-deleted cache row keep their textual citation but lose the playback + re-verify link.
+Cache invalidation. Single rule. Cache rows die with their media. Foreign key `ON DELETE CASCADE` from both `observations.id` and `recordings.id`. When the retention loop deletes a Recording mp4, all `vlm_frame_analysis` rows for it vanish in the same transaction. When perception eventually prunes old Observations (Phase 2 retention), their cache rows go with them. AgentRuns that cite a now-deleted cache row keep their textual citation but lose the playback + re-verify link.
 
 ### 5.5 Long-clip stitching
 
@@ -570,7 +570,7 @@ When a logical event spans multiple Recording rows (the ingestion service rolls 
 
 Decision. The analyzer accepts a `camera_id + time_from + time_to` target. It looks up all Recording rows whose `[started_at, ended_at]` intersects the window, sorts by start time, samples frames from each in proportion to its intersection length with the window, and merges into one ordered list capped at `max_frames`. Frame indices in the VLM response remain global to the merged list.
 
-Rejected. ffmpeg concat then sample. Adds I/O overhead and re-encode risk. Per-file `ffmpeg -ss` is faster.
+Rejected. Ffmpeg concat then sample. Adds I/O overhead and re-encode risk. Per-file `ffmpeg -ss` is faster.
 
 ---
 
@@ -583,7 +583,7 @@ The agent's ad-hoc VLM path bypasses the perception pipeline at services/percept
 In order, every time:
 
 1. **Per-camera privacy zones.** Apply `PrivacyZone` rows for the source camera via `apply_privacy_blur` from services/perception/privacy.py. Filter to zones with `active=true` and (`source='manual'` OR `locked=true` OR `last_seen_at` within `stale_after_seconds`).
-2. **Per-Person privacy_blur.** For every face detected in the frame whose embedding matches a `Person.privacy_blur=true`, blur the face bbox. Implementation. reuse the existing face-recognition pipeline's blur step. Sourced via the same code path as the recording-blur worker.
+2. **Per-Person privacy_blur.** For every face detected in the frame whose embedding matches a `Person.privacy_blur=true`, blur the face bbox. Implementation. Reuse the existing face-recognition pipeline's blur step. Sourced via the same code path as the recording-blur worker.
 3. **Nudity safety floor.** Always run NudeNet blur on agent frames, regardless of the `nudity_blur` AppSetting. The agent is not allowed to disable this. Cloud providers' TOS uniformly require it.
 4. **Audit stamp.** Stamp the frame metadata with `{"redaction_applied": [...]}` and log to `AgentVLMCall.redaction_log`.
 
@@ -688,7 +688,7 @@ Disambiguation flow. If `resolve_person` returns 2+ candidates with scores withi
 
 ### 8.2 Time resolution
 
-Sources. household timezone (AppSetting `system_timezone`) is the primary anchor. Per-camera `Camera.timezone` overrides when a question is about a specific camera in a different time zone (vacation cabin scenario).
+Sources. Household timezone (AppSetting `system_timezone`) is the primary anchor. Per-camera `Camera.timezone` overrides when a question is about a specific camera in a different time zone (vacation cabin scenario).
 
 Algorithm (in driver, before passing the question to the LLM, AND inside `query_observations` when the LLM passes natural-language time hints).
 
@@ -706,7 +706,7 @@ Algorithm (in driver, before passing the question to the LLM, AND inside `query_
    - "an hour ago" / "5 minutes ago" -> sliding window of given length anchored at now
 4. If the question references a specific camera and that camera has its own `Camera.timezone`, recompute the window in that camera's tz.
 
-Decision. Time resolution happens twice. once eagerly in the driver (so the LLM's first orientation includes resolved windows for any time phrases in the question), and once on demand inside `query_observations` when the LLM passes a freeform `time_phrase` parameter (added to the schema in Phase 2; Phase 1 only accepts ISO datetimes).
+Decision. Time resolution happens twice. Once eagerly in the driver (so the LLM's first orientation includes resolved windows for any time phrases in the question), and once on demand inside `query_observations` when the LLM passes a freeform `time_phrase` parameter (added to the schema in Phase 2; Phase 1 only accepts ISO datetimes).
 
 Decision. Reject ambiguous times. If the user says "earlier" with no anchor and no prior turn context, call `request_clarification` with reason=`ambiguous_time`.
 
@@ -732,7 +732,7 @@ Rejected. Adding a `Camera.role` enum column. Schema churn for a bootstrap heuri
 
 Rejected. Asking the user to label every camera with a role on first run. Too much friction.
 
-**OPEN.** Should the role classifier be VLM-driven (one-shot prompt over the camera name + most-recent thumbnail) at first-boot to be more robust than keyword matching? Recommendation. yes, in Phase 2. Phase 1 ships the keyword classifier.
+**OPEN.** Should the role classifier be VLM-driven (one-shot prompt over the camera name + most-recent thumbnail) at first-boot to be more robust than keyword matching? Recommendation. Yes, in Phase 2. Phase 1 ships the keyword classifier.
 
 ### 9.3 Cross-camera journeys
 
@@ -786,7 +786,7 @@ New table `agent_runs`.
 | `id` | UUID PK | |
 | `user_id` | UUID FK users | |
 | `question` | Text | Verbatim user input |
-| `question_hash` | String(64) | sha256 of normalized question. dedupe + cache lookup |
+| `question_hash` | String(64) | sha256 of normalized question. Dedupe + cache lookup |
 | `parent_run_id` | UUID FK agent_runs nullable | For multi-turn follow-ups (section 14) |
 | `plan` | JSON nullable | First LLM plan text |
 | `tool_calls` | JSON | List of {call_id, tool, params, result_summary, latency_ms, error} |
@@ -813,7 +813,7 @@ Companion table `agent_run_events` for the trace replay (schema. `run_id`, `seq`
 - The original question.
 - The plan.
 - A timeline of tool calls + analyzer calls with collapsible payloads.
-- For each analyzer call. the blurred frames as thumbnails, the question sent, the response received, the redaction log.
+- For each analyzer call. The blurred frames as thumbnails, the question sent, the response received, the redaction log.
 - The final answer with citation links.
 - Cost summary.
 
@@ -841,7 +841,7 @@ max_vlm_calls: 2
 expected_final_status: completed
 ```
 
-CI strategy. Nightly job runs the full suite against a pinned fixture DB (loaded from `scripts/seed_demo_data.py` plus a curated supplement). The orchestration LLM is the real LLM call (cached on disk per `(model, prompt) -> response` so reruns are deterministic until prompts change). The VLM analyzer in CI is mocked. it returns canned structured responses keyed by `(recording_id, question_hash)` from a `tests/agent_fixtures/vlm_responses/*.yaml` file.
+CI strategy. Nightly job runs the full suite against a pinned fixture DB (loaded from `scripts/seed_demo_data.py` plus a curated supplement). The orchestration LLM is the real LLM call (cached on disk per `(model, prompt) -> response` so reruns are deterministic until prompts change). The VLM analyzer in CI is mocked. It returns canned structured responses keyed by `(recording_id, question_hash)` from a `tests/agent_fixtures/vlm_responses/*.yaml` file.
 
 Decision. The 30 initial fixture questions span. 6 indexed-concept questions, 8 unindexed-VLM-required questions, 6 person-disambiguation questions, 4 time-resolution edge cases, 3 no-evidence cases, 3 out-of-scope cases. Each fixture is owned by a named team member who is on the hook to update it when the household DB schema changes.
 
@@ -865,7 +865,7 @@ Rejected. Always use the household's existing VLM provider. The VLM provider cha
 
 ### 12.2 Synthesis model (final answer composition)
 
-Decision. Same model as orchestration. Do NOT escalate to Opus for synthesis in Phase 1. Reason. doubles cost on every run for marginal quality gain on a 1-paragraph answer. Reconsider in Phase 2 if eval shows synthesis is the weak link.
+Decision. Same model as orchestration. Do NOT escalate to Opus for synthesis in Phase 1. Reason. Doubles cost on every run for marginal quality gain on a 1-paragraph answer. Reconsider in Phase 2 if eval shows synthesis is the weak link.
 
 ### 12.3 VLM analyzer model
 
@@ -873,7 +873,7 @@ Decision. Resolve in this order per call. (1) source camera's `Camera.vlm_provid
 
 ### 12.4 Cheap path for single-fact questions
 
-Decision. No cheap-path shortcut in Phase 1. Every request goes through the full agent loop. Rationale. detection of "trivial" questions ("is the camera online", "when was the last motion") is itself an LLM call that costs ~as much as a Sonnet tool-use turn, and the wins on rare trivial questions do not pay back the complexity. Reconsider in Phase 2 with telemetry on actual question distribution.
+Decision. No cheap-path shortcut in Phase 1. Every request goes through the full agent loop. Rationale. Detection of "trivial" questions ("is the camera online", "when was the last motion") is itself an LLM call that costs ~as much as a Sonnet tool-use turn, and the wins on rare trivial questions do not pay back the complexity. Reconsider in Phase 2 with telemetry on actual question distribution.
 
 Rejected. Route everything looking like "when did" or "how many" to a single SQL-generating Haiku call. Hard to bound for safety; SQL surface is too dangerous even read-only against the household DB.
 
@@ -887,7 +887,7 @@ Rejected. Route everything looking like "when did" or "how many" to a single SQL
 | Tool returns empty | First empty result is a normal observation. Two consecutive empty results across distinct tools triggers a soft "no evidence so far" hint to the LLM. |
 | VLM 5xx | Retry once with exponential backoff (reuse `services.perception.llm_errors.call_with_retry`). On second failure, surface as a `vlm_call_result` with `error=true` and let the agent continue. |
 | VLM rate limit | Treat as 5xx but with longer backoff. Mark `error.retryable=true` so the agent can re-queue later if it has budget. |
-| User abandons mid-investigation (WS closes) | Driver continues to completion regardless (so the audit row finalizes). Result lands in AgentRun. user can revisit via history. After 60s wall-clock cap the loop terminates anyway. |
+| User abandons mid-investigation (WS closes) | Driver continues to completion regardless (so the audit row finalizes). Result lands in AgentRun. User can revisit via history. After 60s wall-clock cap the loop terminates anyway. |
 | Concurrent identical questions from same user | Dedupe via `question_hash` lookup. If a run with the same hash is `running` and started < 30s ago, return its run_id and join the same WS channel. |
 | Off-domain question ("what's the weather") | LLM is system-prompted to call `request_clarification(reason="outside_scope")` instead of trying tools. |
 | Adversarial / destructive question | LLM has no write tools to call. Even so, system prompt explicitly forbids interpreting questions as commands. "delete all observations" returns a polite decline with no tool calls. |
@@ -906,7 +906,7 @@ Decision. New row in agent_runs with `parent_run_id` set to the previous run. Th
 
 Decision. The frontend chat composer always sends `parent_run_id` of the previous turn when the user types a follow-up within 5 minutes; users can "start fresh" with an explicit button that drops the parent link.
 
-Rejected. Reusing the existing `Conversation` model (shared/models.py Conversation). That model is for audio transcripts grouped by speech gaps. semantically unrelated and would confuse anyone reading the schema.
+Rejected. Reusing the existing `Conversation` model (shared/models.py Conversation). That model is for audio transcripts grouped by speech gaps. Semantically unrelated and would confuse anyone reading the schema.
 
 ### 14.2 Session TTL
 
@@ -1002,7 +1002,7 @@ Exit criterion. CLIP image search wins eval delta of >= 5 fixtures over text-onl
 
 Resolved by product. Recorded here as the source of truth that supersedes earlier sections.
 
-1. **RESOLVED. Question caching policy.** Cache lives at the FRAME level, eternal, keyed by `(observation_id OR recording_id, question_hash, provider_id, model)`. Not per-household, not per-user, not per-question-string. Section 5.4 holds the authoritative spec. Rationale. work is per-frame; the answer about a frame does not expire while the frame still exists. Foreign keys cascade so cache dies with its media. Within a household, all users benefit from any prior user's analyzer work.
+1. **RESOLVED. Question caching policy.** Cache lives at the FRAME level, eternal, keyed by `(observation_id OR recording_id, question_hash, provider_id, model)`. Not per-household, not per-user, not per-question-string. Section 5.4 holds the authoritative spec. Rationale. Work is per-frame; the answer about a frame does not expire while the frame still exists. Foreign keys cascade so cache dies with its media. Within a household, all users benefit from any prior user's analyzer work.
 
 2. **RESOLVED. Redacted analyzer thumbnails persist for the life of the underlying media.** Stored alongside `vlm_frame_analysis` rows under `thumbnails/agent/<run_id>/<frame_idx>.jpg`. Cascade delete with media. Audit page can show the exact frame the model saw, including the redaction overlays, which is critical for trust + debug.
 
@@ -1030,7 +1030,7 @@ Resolved by product. Recorded here as the source of truth that supersedes earlie
 
 ### 18.1 Cloud VLM provider TOS
 
-OpenAI, Anthropic, and Google each have data-use clauses that vary. household footage may or may not be covered under "consumer" vs "enterprise" agreements. The agent increases the rate of cloud VLM calls compared to baseline perception.
+OpenAI, Anthropic, and Google each have data-use clauses that vary. Household footage may or may not be covered under "consumer" vs "enterprise" agreements. The agent increases the rate of cloud VLM calls compared to baseline perception.
 
 Consent posture (locked by product). Configuring a cloud Provider in Nurby is the user's consent surface. No first-use modal is added for the agent because the agent reuses the existing provider chain that the user already opted into during setup. Cloud exposure has the same shape as today's perception VLM calls; the agent just makes more of them.
 
@@ -1042,11 +1042,11 @@ Mitigation that we still ship. (a) the existing privacy redaction pipeline blurs
 
 ### 18.3 Cost ceiling is mandatory
 
-A chatty user can drive an unbounded number of agent runs. Without per-user per-day caps the worst-case household VLM bill is unbounded. Section 7 caps are not optional. they ship in the first migration.
+A chatty user can drive an unbounded number of agent runs. Without per-user per-day caps the worst-case household VLM bill is unbounded. Section 7 caps are not optional. They ship in the first migration.
 
 ### 18.4 Eval drift
 
-Fixture ground truth depends on the seeded DB state, which depends on the demo data scripts at scripts/seed_demo_data.py. When that script changes (which it does as new features land) the fixtures may silently rot. Mitigation. version the fixture set against the seed script version. CI fails if the seed version on disk does not match the fixture version's expected seed version. Each fixture file has a `fixture_state: small_household_v1` header (section 11.3) that names the required seed.
+Fixture ground truth depends on the seeded DB state, which depends on the demo data scripts at scripts/seed_demo_data.py. When that script changes (which it does as new features land) the fixtures may silently rot. Mitigation. Version the fixture set against the seed script version. CI fails if the seed version on disk does not match the fixture version's expected seed version. Each fixture file has a `fixture_state: small_household_v1` header (section 11.3) that names the required seed.
 
 ### 18.5 The agent will misuse the analyzer
 
@@ -1054,21 +1054,21 @@ Without guard rails, an LLM will call `analyze_clip_with_vlm` ten times on the s
 
 ### 18.6 Privacy zones can be stale
 
-`PrivacyZone` rows have a `stale_after_seconds` freshness gate (default 60s). The agent might be analyzing footage from yesterday whose privacy zones were last refreshed during recording. Decision. for analyzer calls, treat any non-`locked`, non-`manual` privacy zone whose `last_seen_at` is before the clip's `started_at - 60s` as still-active for the clip if the clip is within 24h of the row's last seen. Older. fall back to NudeNet + face blur only. Document this limitation in the audit log.
+`PrivacyZone` rows have a `stale_after_seconds` freshness gate (default 60s). The agent might be analyzing footage from yesterday whose privacy zones were last refreshed during recording. Decision. For analyzer calls, treat any non-`locked`, non-`manual` privacy zone whose `last_seen_at` is before the clip's `started_at - 60s` as still-active for the clip if the clip is within 24h of the row's last seen. Older. Fall back to NudeNet + face blur only. Document this limitation in the audit log.
 
 ### 18.7 Multi-user race on AgentRun
 
-Two household members can simultaneously ask similar questions. The driver dedupes only within the same user (section 13). A cross-user dedupe is possible but risks leaking one user's question text to another user's audit page. Decision. no cross-user dedupe in Phase 1.
+Two household members can simultaneously ask similar questions. The driver dedupes only within the same user (section 13). A cross-user dedupe is possible but risks leaking one user's question text to another user's audit page. Decision. No cross-user dedupe in Phase 1.
 
 ### 18.8 Ollama responses do not always honor JSON mode
 
-Local models (especially older moondream / llava versions) sometimes ignore the JSON-mode hint and emit a chat reply. The analyzer must parse defensively. on JSON parse failure, log the raw response, treat the analyzer call as `cannot_tell=true` with a `parse_failure` reason, and let the agent fall through to other evidence.
+Local models (especially older moondream / llava versions) sometimes ignore the JSON-mode hint and emit a chat reply. The analyzer must parse defensively. On JSON parse failure, log the raw response, treat the analyzer call as `cannot_tell=true` with a `parse_failure` reason, and let the agent fall through to other evidence.
 
 ---
 
 ## 19. Glossary
 
-**Agent.** The runtime entity that takes a user question and produces an answer by calling tools in a loop. In code. one execution of `services/agent/driver.run(question)`.
+**Agent.** The runtime entity that takes a user question and produces an answer by calling tools in a loop. In code. One execution of `services/agent/driver.run(question)`.
 
 **Tool.** A typed callable registered in the agent's tool registry with a JSON-schema-validated input and output. The LLM picks tools by name; the driver executes them and feeds the result back.
 

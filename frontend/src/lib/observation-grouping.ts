@@ -1,7 +1,7 @@
 /**
  * Timeline-level observation coalescer.
  *
- * Reality. when the same person enters a room three times in ten
+ * Reality. When the same person enters a room three times in ten
  * minutes, the perception pipeline produces three separate
  * Observation rows. The dashboard timeline used to render three
  * cards. This module collapses them into one rolling card with a
@@ -39,7 +39,7 @@ export function isObservationGroup(e: CoalesceEntry): e is ObservationGroup {
  * same group iff they have the same key AND are within ``windowMs`` of
  * each other AND are on the same camera.
  *
- * Priority. named persons > unknown faces > top objects > motion.
+ * Priority. Named persons > unknown faces > top objects > motion.
  * License plates are excluded from the object signature because they
  * are surfaced separately in the UI.
  */
