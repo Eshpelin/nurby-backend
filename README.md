@@ -24,6 +24,20 @@ Nurby is free, open-source software for recording and understanding your securit
 - **Automation that reaches the real world.** Rules can notify, email, call webhooks, sound physical alarms, and gate on a second AI confirmation before firing.
 - **Programmable.** A documented REST API, long-lived API keys, signed webhooks, and an MCP server let you build on top of it.
 
+## Real-world use cases
+
+What people actually run Nurby for.
+
+- **Front door and porch.** Know when a package is dropped, when a stranger lingers, or when a known face (a family member, a dog walker) arrives. Get an email with a clip and a link to the footage.
+- **Baby and elder care.** A gentle "still moving" check on a crib or a room, and passive check-ins that do not spam you with alerts. Audio triggers catch a baby cry or a smoke alarm.
+- **Pets and wildlife.** Recognize your own animals, log their activity, and trigger a deterrent (a siren or lights) when an unwanted animal shows up.
+- **Intrusion and loitering.** Draw a zone on the live feed and alert when someone stays too long, or when an unknown face appears after hours. Chain a verify step so a second AI confirmation fires the siren only when it is real.
+- **Find anything later.** Ask in plain language: "where was the dog last night", "show me the white van on the driveway this week", "anything unusual today". No scrubbing timelines.
+- **Small business and farm.** Multi-camera coverage, license-plate reads on vehicles, daily digests of who and what was seen, and event logging you can export.
+- **Build your own automations.** Every event can hit a webhook, so you can push alerts into your home automation, a chat app, a spreadsheet, or a tool like n8n. See [Automate with n8n](#automate-with-n8n).
+
+These map to the building blocks below: detection, faces and people, zones and tripwires, audio events, rules with real-world actions, and natural-language search.
+
 ## Get Nurby running on your computer
 
 New to this kind of software? This is the whole setup. You do not need to know Docker, Python, or databases. You copy four commands, wait once, and open a web page. It runs the same way on macOS, Windows, and Linux.
@@ -276,6 +290,16 @@ Prefer not to build on a low-power box? Every release publishes prebuilt
 images to the GitHub Container Registry, so you can `docker compose pull`
 and `docker compose up -d` instead of building. See
 [docs/releasing.md](docs/releasing.md).
+
+## Automate with n8n
+
+[n8n](https://n8n.io) is a free, self-hostable automation tool. Nurby plugs into it both ways with no custom code.
+
+**Nurby to n8n (react to events).** In n8n, add a Webhook node and copy its URL. In Nurby, add a webhook action to a rule, or a standing subscriber under Rules, and paste that URL. Now every matching alert arrives in n8n as JSON (camera, event, detections, and a `recording_url` link to the clip), and you can route it anywhere: a Slack or Telegram message, a Google Sheet, a smart-home action, a phone call.
+
+**n8n to Nurby (drive Nurby).** In n8n, add an HTTP Request node pointed at the Nurby API with an API key in the `Authorization: Bearer` header. Now an n8n workflow can fetch events, list recordings, query people, or create rules on a schedule or in response to anything else in your stack.
+
+Set a signing secret on the Nurby side and n8n can verify the `X-Nurby-Signature` HMAC so it only acts on genuine Nurby alerts. Full walkthrough in [docs/integrations/n8n.md](docs/integrations/n8n.md).
 
 ## Database migrations
 

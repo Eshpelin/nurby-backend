@@ -120,6 +120,23 @@ export function WebhookSubscriptions() {
 
       {open && (
         <div className="px-4 pb-4 space-y-3">
+          <div className="rounded-md border border-border bg-background/40 px-3 py-2.5 text-[11px] text-muted-foreground leading-relaxed">
+            <span className="font-medium text-foreground">Works with n8n, Zapier, Make, and Home Assistant.</span>{" "}
+            Paste a webhook URL from one of those tools below. Nurby will POST every
+            matching alert to it as JSON, including a link to the footage clip, so you can
+            forward alerts to chat, sheets, or smart-home actions without writing code.
+            {" "}
+            <a
+              href="https://github.com/Eshpelin/nurby/blob/main/docs/integrations/n8n.md"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent hover:underline"
+            >
+              n8n guide
+            </a>
+            .
+          </div>
+
           {loading && <div className="text-[11px] text-muted-foreground">Loading.</div>}
 
           {!loading && subs.length === 0 && (
