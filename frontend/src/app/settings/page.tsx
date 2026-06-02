@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import TelegramSection from "@/components/TelegramSection";
+import { SoftwareUpdateCard } from "@/components/SoftwareUpdateCard";
 
 const COMMON_TIMEZONES = [
   "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
@@ -554,6 +555,10 @@ export default function SettingsPage() {
   return (
     <div className="px-6 py-6 max-w-3xl">
       <h1 className="text-2xl font-semibold tracking-tight mb-6">Settings</h1>
+
+      <div className="mb-6">
+        <SoftwareUpdateCard />
+      </div>
 
       {/* ─── Status Cards ─── */}
       <div className="space-y-3">

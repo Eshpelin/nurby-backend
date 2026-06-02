@@ -201,6 +201,19 @@ python -m pytest -q
 
 The agentic Q&A surface has a separate 30-fixture eval suite (`tests/test_agent_eval.py`) run nightly in CI. See [docs/agent-eval.md](docs/agent-eval.md).
 
+## Updating
+
+Nurby checks GitHub for new releases and shows an "Update available"
+banner in Settings. To update, run one command on the host.
+
+```bash
+./scripts/update.sh
+```
+
+It pulls the latest code, rebuilds, and restarts. migrations run
+automatically on startup. An optional in-app one-click update button is
+available too. see [docs/updating.md](docs/updating.md).
+
 ## Database migrations
 
 ```bash

@@ -27,5 +27,6 @@ COPY services/recap.py services/recap.py
 COPY services/__init__.py services/__init__.py
 COPY alembic/ alembic/
 COPY alembic.ini .
+COPY VERSION .
 
 CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

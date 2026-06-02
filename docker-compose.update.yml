@@ -1,0 +1,47 @@
+# Optional one-click in-app updater. OPT-IN.
+#
+# Enabling this lets an admin update Nurby from the Settings page with a
+# button. It runs a small "updater" container that watches for an update
+# request and then runs scripts/update.sh on your behalf.
+#
+# SECURITY. the updater mounts the Docker socket, which is equivalent to
+# root on the host. Only enable it on a machine you control and trust.
+# It is off by default. nothing here runs unless you opt in.
+#
+# Enable with.
+#   docker compose -f docker-compose.yml -f docker-compose.update.yml up -d
+#
+# This also sets NURBY_SELF_UPDATE=1 on the API so the update button is
+# active and writes its request to the shared volume below.
+
+services:
+  api:
+    environment:
+      NURBY_SELF_UPDATE: "1"
+      NURBY_UPDATE_TRIGGER: /data/update.request
+    volumes:
+      - update_data:/data
+
+  updater:
+    image: docker:27-cli
+    restart: unless-stopped
+    working_dir: /repo
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/repo
+      - update_data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "apk add --no-cache git bash >/dev/null 2>&1 || true;
+       echo '[updater] watching for update requests';
+       while true; do
+         if [ -f /data/update.request ]; then
+           rm -f /data/update.request;
+           echo '[updater] update requested, running scripts/update.sh';
+           bash scripts/update.sh || echo '[updater] update failed';
+         fi;
+         sleep 5;
+       done"
+
+volumes:
+  update_data:

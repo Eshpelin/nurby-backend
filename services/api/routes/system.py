@@ -333,3 +333,96 @@ async def patch_settings(
 
     data = await _read_whitelisted_settings()
     return SystemSettingsResponse(**data)
+
+
+# ── Version + updates ──
+#
+# /system/version reports the running version and checks GitHub for a
+# newer release (cached). /system/update is the one-click trigger. it
+# only acts when the optional updater sidecar is enabled, otherwise it
+# returns the manual instruction so the surface stays safe by default.
+
+import os
+import time
+
+_GITHUB_REPO = os.environ.get("NURBY_GITHUB_REPO", "Eshpelin/nurby-backend")
+# A path on a shared volume the updater sidecar watches. Writing it asks
+# the host to update. Only meaningful when NURBY_SELF_UPDATE is enabled
+# and the updater service is running.
+_UPDATE_TRIGGER = os.environ.get("NURBY_UPDATE_TRIGGER", "/data/update.request")
+_GH_CACHE: dict[str, object] = {"at": 0.0, "latest": None, "url": None}
+
+
+@router.get("/system/version")
+async def get_version(_current_user: User = Depends(get_current_user)):
+    """Current version plus the latest GitHub release, if newer."""
+    import httpx
+
+    from shared.version import build_sha, current_version, is_newer
+
+    cur = current_version()
+    now = time.time()
+    error = None
+
+    if not _GH_CACHE["latest"] or now - float(_GH_CACHE["at"]) > 3600:
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(
+                    f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
+                    headers={"Accept": "application/vnd.github+json"},
+                )
+            if resp.status_code == 200:
+                j = resp.json()
+                _GH_CACHE["latest"] = (j.get("tag_name") or "").lstrip("v") or None
+                _GH_CACHE["url"] = j.get("html_url")
+                _GH_CACHE["at"] = now
+            elif resp.status_code == 404:
+                # No releases published yet. not an error worth surfacing.
+                _GH_CACHE["at"] = now
+            else:
+                error = "GitHub returned an unexpected status"
+        except Exception:
+            error = "Could not reach GitHub to check for updates"
+
+    latest = _GH_CACHE["latest"]
+    update_available = bool(latest) and is_newer(str(latest), cur)
+    self_update = os.environ.get("NURBY_SELF_UPDATE", "").lower() in ("1", "true", "yes")
+
+    return {
+        "current": cur,
+        "build": build_sha(),
+        "latest": latest,
+        "release_url": _GH_CACHE["url"],
+        "update_available": update_available,
+        "self_update_enabled": self_update,
+        "repo": _GITHUB_REPO,
+        "error": error,
+    }
+
+
+@router.post("/system/update")
+async def trigger_update(_current_user: User = Depends(require_admin)):
+    """Ask the host to update to the latest release. Admin only.
+
+    Works only when the optional updater sidecar is enabled
+    (NURBY_SELF_UPDATE=1 and the updater service running). Otherwise it
+    returns the manual command so nothing privileged happens by default.
+    """
+    self_update = os.environ.get("NURBY_SELF_UPDATE", "").lower() in ("1", "true", "yes")
+    if not self_update:
+        return {
+            "started": False,
+            "self_update_enabled": False,
+            "message": "One-click update is not enabled. On the host run. ./scripts/update.sh",
+        }
+    try:
+        os.makedirs(os.path.dirname(_UPDATE_TRIGGER), exist_ok=True)
+        with open(_UPDATE_TRIGGER, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except OSError as exc:
+        return {"started": False, "self_update_enabled": True, "message": f"Could not signal the updater. {exc}"}
+    return {
+        "started": True,
+        "self_update_enabled": True,
+        "message": "Update started. The stack will pull, rebuild, run migrations, and restart. This page will be briefly unavailable.",
+    }
