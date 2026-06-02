@@ -179,6 +179,21 @@ export function WebcamPublisherProvider({ children }: { children: React.ReactNod
         headers,
         body: blob,
       });
+      if (res.status === 404) {
+        // The camera was deleted (or the database was reset). Stop
+        // publishing and forget the resume intent so we don't resurrect
+        // a dead camera and spam the API on every reload.
+        const dead = sessionsRef.current.get(cameraId);
+        if (dead) {
+          clearInterval(dead.timer);
+          dead.stream.getTracks().forEach((t) => t.stop());
+          sessionsRef.current.delete(cameraId);
+        }
+        removeIntent(cameraId);
+        removePub(cameraId);
+        console.warn("[webcam] camera no longer exists, stopped publishing", cameraId);
+        return;
+      }
       if (!res.ok) {
         console.warn("[webcam] frame upload failed", cameraId, res.status, await res.text().catch(() => ""));
       }
@@ -187,7 +202,7 @@ export function WebcamPublisherProvider({ children }: { children: React.ReactNod
     } finally {
       session.uploading = false;
     }
-  }, []);
+  }, [removePub]);
 
   const startPublish = useCallback(
     async (opts: {
