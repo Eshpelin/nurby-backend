@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { CAMERA_PERSONAS, type PersonaPatch } from "@/lib/camera-personas";
 import CameraBrandHelp from "@/components/CameraBrandHelp";
+import { OllamaDeployPanel } from "@/components/OllamaDeployPanel";
 
 interface Provider {
   id: string;
@@ -103,6 +104,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const [providerName, setProviderName] = useState<string>(PROVIDER_PRESETS[0].name);
   const [providerApiKey, setProviderApiKey] = useState<string>("");
   const [providerModel, setProviderModel] = useState<string>(PROVIDER_PRESETS[0].default_model);
+  const [providerBaseUrl, setProviderBaseUrl] = useState<string>(PROVIDER_PRESETS[0].base_url);
   const [providerSubmitting, setProviderSubmitting] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
   // Connection-test state. After we create the provider row we hit the
@@ -129,11 +131,24 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
     [camPersonaId]
   );
 
-  // Auto-pick provider name + default model from preset.
+  // Auto-pick provider name + default model + base url from preset.
   useEffect(() => {
     setProviderName(PROVIDER_PRESETS[presetIdx].name);
     setProviderModel(PROVIDER_PRESETS[presetIdx].default_model);
+    setProviderBaseUrl(PROVIDER_PRESETS[presetIdx].base_url);
   }, [presetIdx]);
+
+  // The Ollama deploy endpoint auto-creates the provider. refresh the
+  // provider list and jump straight to the camera step.
+  async function onOllamaProvisioned() {
+    try {
+      const r = await authFetch("/api/providers");
+      if (r.ok) setProviders(await r.json());
+    } catch {
+      /* non-fatal. the provider was created server-side regardless */
+    }
+    setStep("camera");
+  }
 
   // Hydrate existing providers so we can skip step 2 if one already
   // exists.
@@ -158,7 +173,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
       const body: Record<string, unknown> = {
         name: providerName.trim() || preset.name,
         kind: preset.kind,
-        base_url: preset.base_url,
+        base_url: providerBaseUrl.trim() || preset.base_url,
         default_model: providerModel.trim() || preset.default_model,
         active: true,
       };
@@ -292,6 +307,9 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               setProviderApiKey={setProviderApiKey}
               providerModel={providerModel}
               setProviderModel={setProviderModel}
+              providerBaseUrl={providerBaseUrl}
+              setProviderBaseUrl={setProviderBaseUrl}
+              onProvisioned={onOllamaProvisioned}
               error={providerError}
               testMsg={providerTestMsg}
               submitting={providerSubmitting}
@@ -343,14 +361,6 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
           >
             Back
           </button>
-          {step === "welcome" && (
-            <button
-              onClick={() => setStep(providers.length > 0 ? "camera" : "provider")}
-              className="px-4 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90"
-            >
-              Get started
-            </button>
-          )}
           {step === "provider" && (
             <button
               onClick={async () => {
@@ -484,6 +494,9 @@ function ProviderStep({
   setProviderApiKey,
   providerModel,
   setProviderModel,
+  providerBaseUrl,
+  setProviderBaseUrl,
+  onProvisioned,
   error,
   testMsg,
   submitting,
@@ -499,6 +512,9 @@ function ProviderStep({
   setProviderApiKey: (s: string) => void;
   providerModel: string;
   setProviderModel: (s: string) => void;
+  providerBaseUrl: string;
+  setProviderBaseUrl: (s: string) => void;
+  onProvisioned: () => void;
   error: string | null;
   testMsg: string | null;
   submitting: boolean;
@@ -506,6 +522,7 @@ function ProviderStep({
   setSkipProvider: (b: boolean) => void;
 }) {
   const preset = presets[presetIdx];
+  const isOllama = preset.kind === "ollama";
   return (
     <div className="space-y-4">
       <div>
@@ -534,8 +551,17 @@ function ProviderStep({
         ))}
       </div>
 
+      {!skipProvider && isOllama && (
+        <OllamaDeployPanel onProvisioned={onProvisioned} />
+      )}
+
       {!skipProvider && (
         <div className="space-y-3">
+          {isOllama && (
+            <p className="text-[11px] text-muted-foreground -mb-1">
+              Or connect to an Ollama that is already running somewhere on your network.
+            </p>
+          )}
           <FieldRow label="Display name">
             <input
               type="text"
@@ -544,12 +570,20 @@ function ProviderStep({
               className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
             />
           </FieldRow>
-          <FieldRow label="Base URL" hint="Auto-filled from preset">
+          <FieldRow
+            label="Base URL"
+            hint={isOllama ? "Where Ollama is reachable. e.g. http://host.docker.internal:11434 from Docker." : "Auto-filled from preset"}
+          >
             <input
               type="text"
-              value={preset.base_url}
-              readOnly
-              className="w-full px-3 py-2 rounded-md bg-muted/30 border border-border text-sm font-mono opacity-70"
+              value={providerBaseUrl}
+              onChange={(e) => setProviderBaseUrl(e.target.value)}
+              readOnly={!isOllama}
+              className={`w-full px-3 py-2 rounded-md border border-border text-sm font-mono ${
+                isOllama
+                  ? "bg-background focus:outline-none focus:border-accent"
+                  : "bg-muted/30 opacity-70"
+              }`}
             />
           </FieldRow>
           <FieldRow label="Model" hint="The model name the provider uses by default. Override here if you want a different one.">
