@@ -30,7 +30,7 @@ That is it. The `release` workflow then:
 - The first time images are published, GHCR marks the packages private.
   Open each package on GitHub (Profile -> Packages) and set its
   visibility to **Public** so anyone can pull. You only do this once per
-  package:
+  package.
 - No secrets are needed. The workflow uses the built-in `GITHUB_TOKEN`.
 
 ## How users consume releases
@@ -51,6 +51,6 @@ The compose file still supports building from source for development, so
 ## Versioning notes
 
 - The running version is read from the `VERSION` file. Keep it in sync
-  with the Git tag you push:
+  with the Git tag you push.
 - CI bakes the commit SHA into the API image as `NURBY_BUILD_SHA`, shown
   by `GET /api/system/version` and the Settings update card.

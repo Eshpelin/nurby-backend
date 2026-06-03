@@ -4,7 +4,7 @@ Nurby pushes alerts to your own services and devices over HTTP. There
 are two ways to receive them:
 
 - Per-rule webhook action. Add a `webhook` or `api_call` action to a
-  rule. Fires only when that rule fires:
+  rule. Fires only when that rule fires.
 - Standing subscription. Register a URL once and receive every fired
   event (optionally filtered by rule or camera).
 

@@ -74,7 +74,7 @@ Drives a GPIO relay to fire a 12V siren or strobe:
 1. Run or flash the receiver and note the device IP.
 2. In Nurby, edit a rule and add a webhook action.
 3. Pick the device preset. Nurby pre-fills the action with the right URL
-   shape (`http://<ip>:<port>/alert`) and the standard payload:
+   shape (`http://<ip>:<port>/alert`) and the standard payload.
 4. Enter the device IP, and the same secret you set on the device.
 5. Save and fire a test event. The device should react.
 

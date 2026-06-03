@@ -27,7 +27,7 @@ logged-in browser session uses:
    token your session stores (the value sent as the
    `Authorization: Bearer <token>` header on API calls). Alternatively,
    any token minted by `shared.auth.create_access_token` for your user
-   works:
+   works.
 3. Treat it like a password. It grants read access to every camera your
    user can see, counted against your daily budget.
 
@@ -117,7 +117,7 @@ exposed in v1.6.
 ## Security notes
 
 - **Token-scoped to one user.** The launch token decodes to a single
-  Nurby user; every call runs as that user:
+  Nurby user; every call runs as that user.
 - **ACL respected.** Each tool funnels results through
   `accessible_camera_ids`, exactly as `/ask` does. No tool bypasses the
   household camera ACL.
@@ -134,8 +134,8 @@ exposed in v1.6.
 
 - **No write tools.** The verify action and any future write / action
   tools stay internal until there is a confirmation flow for external
-  clients. V1.6 is read-only by design:
+  clients. V1.6 is read-only by design.
 - **One token per server.** The token is read once at launch. Refreshing
-  it requires restarting the server. Launch a separate server per user:
+  it requires restarting the server. Launch a separate server per user.
 - **HTTP transport is best-effort.** The exact Streamable-HTTP app symbol
   has churned across MCP SDK versions. Stdio is the supported path.

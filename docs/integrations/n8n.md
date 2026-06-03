@@ -4,14 +4,14 @@
 
 ## 1. Send Nurby events into n8n
 
-Use this to react to alerts. send a Slack or Telegram message, append a row to a sheet, flip a smart plug, start a phone call:
+Use this to react to alerts. Send a Slack or Telegram message, append a row to a sheet, flip a smart plug, start a phone call:
 
 1. In n8n, create a new workflow and add a **Webhook** node. Set it to `POST` and copy the **Production URL** it gives you.
 2. In Nurby, open **Rules**. You have two choices.
    - Add a **webhook action** to a specific rule, and paste the n8n URL. Fires only for that rule.
    - Or open **Webhook subscribers** and add the n8n URL there. Receives every fired event.
-3. (Recommended) Set a **signing secret** on the Nurby side. n8n can then verify the `X-Nurby-Signature` header so it only acts on real Nurby alerts (see step 5).
-4. Fire a test event in Nurby. n8n receives JSON like this.
+3. (Recommended) Set a **signing secret** on the Nurby side. N8n can then verify the `X-Nurby-Signature` header so it only acts on real Nurby alerts (see step 5).
+4. Fire a test event in Nurby. N8n receives JSON like this.
 
 ```json
 {
@@ -45,13 +45,13 @@ return $input.all();
 
 ## 2. Drive Nurby from n8n
 
-Use this to have an n8n workflow read or change Nurby. on a schedule, or in response to anything else in your stack:
+Use this to have an n8n workflow read or change Nurby. On a schedule, or in response to anything else in your stack:
 
 1. In Nurby, open **Settings** and create an **API key**. Copy it once (it starts with `nrb_`).
 2. In n8n, add an **HTTP Request** node.
    - Method and URL, for example `GET https://your-host/api/events/history?limit=20`.
    - Add a header `Authorization` with value `Bearer nrb_your_key`.
-3. Now n8n can call any Nurby endpoint. some useful ones.
+3. Now n8n can call any Nurby endpoint. Some useful ones.
 
 | Goal | Request |
 |---|---|

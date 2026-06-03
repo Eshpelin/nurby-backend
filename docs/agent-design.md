@@ -446,7 +446,7 @@ Decision tree:
 2. Else if target is a Recording id, use `recordings[id].file_path` resolved via the same helper at services/api/routes/recordings.py `_resolve_recording_path`.
 3. Else if target is camera+time-range, find the Recording row(s) overlapping the window. If multiple, stitch (section 5.5).
 4. Compute clip duration `D`.
-5. Frame sampling:
+5. Frame sampling.
    - If `D <= 5s`. take 2 frames evenly spaced (1/3, 2/3).
    - If `5s < D <= 30s`. take `max_frames` frames evenly spaced.
    - If `D > 30s`. take 1 keyframe per `D/max_frames` seconds, BUT prefer frames with high motion (use existing Observation rows in the window as motion anchors. Each Observation marks a "something happened here" moment).
@@ -694,7 +694,7 @@ Algorithm (in driver, before passing the question to the LLM, AND inside `query_
 
 1. Get household tz. Fall back to UTC if unset.
 2. Get `now` in household tz.
-3. Map phrases:
+3. Map phrases.
    - "today" -> [today 00:00, now]
    - "yesterday" -> [yesterday 00:00, yesterday 23:59:59]
    - "this morning" -> [today 06:00, today 12:00]
