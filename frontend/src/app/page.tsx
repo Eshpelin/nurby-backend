@@ -756,6 +756,13 @@ function CameraSidebarCard({
   const ptzCapable = camera.stream_type === "rtsp";
   const streamName = extractStreamName(camera.stream_url);
   const iframeSrc = `${WEBRTC_URL}/${streamName}/`;
+  // A remote-file camera (the demo, or any http(s) clip) is not muxed into
+  // MediaMTX, so the WebRTC path would be empty and the tile black. The
+  // browser can play the URL directly, so render a looping <video>. This
+  // also means the demo shows footage in a second, independent of the
+  // ingestion poll + connect cycle.
+  const isRemoteFile =
+    camera.stream_type === "file" && /^https?:\/\//.test(camera.stream_url);
 
   // Webcam publisher state for this tile. If this tab owns the capture
   // we render the local MediaStream directly in a <video> element.
@@ -803,6 +810,8 @@ function CameraSidebarCard({
                 <line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             </div>
+          ) : isRemoteFile ? (
+            <video src={camera.stream_url} autoPlay muted loop playsInline className="absolute inset-0 w-full h-full object-cover" />
           ) : isWebcam && localStream ? (
             <video ref={webcamVideoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-cover" />
           ) : camera.status !== "offline" ? (
@@ -866,6 +875,15 @@ function CameraSidebarCard({
               </Link>
             )}
           </div>
+        ) : isRemoteFile ? (
+          <video
+            src={camera.stream_url}
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="absolute inset-0 w-full h-full object-contain"
+          />
         ) : isWebcam && localStream ? (
           <video
             ref={webcamVideoRef}
