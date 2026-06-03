@@ -76,10 +76,11 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const [providerTestMsg, setProviderTestMsg] = useState<string | null>(null);
   const [providerForceAdvance, setProviderForceAdvance] = useState(false);
   const [createdProviderId, setCreatedProviderId] = useState<string | null>(null);
-  // Default to skipping. A VLM only adds scene captions and Ask. YOLO
-  // detection, faces, people and rules all run locally without it, so the
-  // honest default for a 3-click setup is "Next" straight past this step.
-  const [skipProvider, setSkipProvider] = useState(true);
+  // The step leads with local Ollama auto-deploy (no key, fully private).
+  // cloudMode reveals the secondary path for a hosted provider. The pure
+  // skip is always available in the footer since detection, faces and
+  // rules work without any VLM.
+  const [cloudMode, setCloudMode] = useState(false);
 
 
   const preset = PROVIDER_PRESETS[presetIdx];
@@ -229,8 +230,13 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               error={providerError}
               testMsg={providerTestMsg}
               submitting={providerSubmitting}
-              skipProvider={skipProvider}
-              setSkipProvider={setSkipProvider}
+              cloudMode={cloudMode}
+              setCloudMode={(b) => {
+                setCloudMode(b);
+                // Default the cloud picker to OpenAI, not Ollama, since the
+                // panel above already owns the local path.
+                if (b && presetIdx === 0) setPresetIdx(1);
+              }}
             />
           )}
           {step === "done" && (
@@ -260,13 +266,17 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               Skip for now
             </button>
           )}
-          {step === "provider" && (
+          {step === "provider" && !cloudMode && (
+            <button
+              onClick={() => setStep("done")}
+              className="px-4 py-1.5 text-xs rounded-md border border-border hover:bg-muted text-muted-foreground"
+            >
+              Skip for now
+            </button>
+          )}
+          {step === "provider" && cloudMode && (
             <button
               onClick={async () => {
-                if (skipProvider) {
-                  setStep("done");
-                  return;
-                }
                 // Second click after a failed test = proceed anyway.
                 if (providerForceAdvance) {
                   setStep("done");
@@ -290,9 +300,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               disabled={providerSubmitting}
               className="px-4 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90 disabled:opacity-50"
             >
-              {skipProvider
-                ? "Skip & finish"
-                : providerSubmitting
+              {providerSubmitting
                 ? "Adding."
                 : providerForceAdvance
                 ? "Continue anyway"
@@ -338,8 +346,8 @@ function ProviderStep({
   error,
   testMsg,
   submitting,
-  skipProvider,
-  setSkipProvider,
+  cloudMode,
+  setCloudMode,
 }: {
   presets: typeof PROVIDER_PRESETS;
   presetIdx: number;
@@ -356,11 +364,12 @@ function ProviderStep({
   error: string | null;
   testMsg: string | null;
   submitting: boolean;
-  skipProvider: boolean;
-  setSkipProvider: (b: boolean) => void;
+  cloudMode: boolean;
+  setCloudMode: (b: boolean) => void;
 }) {
   const preset = presets[presetIdx];
-  const isOllama = preset.kind === "ollama";
+  // Cloud-only preset picker. The local path is owned by OllamaDeployPanel.
+  const cloudPresets = presets.filter((p) => p.kind !== "ollama");
   return (
     <div className="space-y-4">
       <div>
@@ -373,37 +382,55 @@ function ProviderStep({
           Nurby questions. Skip it now and add one anytime from Settings.
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {presets.map((p, i) => (
-          <button
-            key={p.kind}
-            type="button"
-            onClick={() => setPresetIdx(i)}
-            className={`text-left p-3 rounded-lg border transition-colors ${
-              presetIdx === i && !skipProvider
-                ? "border-accent bg-accent/10"
-                : "border-border hover:border-muted-foreground"
-            }`}
-          >
-            <div className="font-medium text-sm">{p.name}</div>
-            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-              {p.hint}
-            </p>
-          </button>
-        ))}
+      {/* Lead with local AI. The panel auto-detects a reachable Ollama
+          (local or on the Docker host), reuses an installed model, or
+          pulls a RAM-appropriate one with progress. No key, fully local. */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium">Set up local AI</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">recommended</span>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Runs on your own hardware via Ollama. Free, private, no API key.
+        </p>
+        <OllamaDeployPanel onProvisioned={onProvisioned} />
       </div>
 
-      {!skipProvider && isOllama && (
-        <OllamaDeployPanel onProvisioned={onProvisioned} />
-      )}
+      {/* Secondary path. a hosted provider for users without local hardware. */}
+      <div className="pt-1 border-t border-border">
+        <button
+          type="button"
+          onClick={() => setCloudMode(!cloudMode)}
+          className="text-xs text-muted-foreground hover:text-foreground underline mt-3"
+        >
+          {cloudMode ? "Hide cloud providers" : "Or connect a cloud provider (OpenAI, Claude, Gemini)"}
+        </button>
+      </div>
 
-      {!skipProvider && (
+      {cloudMode && (
         <div className="space-y-3">
-          {isOllama && (
-            <p className="text-[11px] text-muted-foreground -mb-1">
-              Or connect to an Ollama that is already running somewhere on your network.
-            </p>
-          )}
+          <div className="grid grid-cols-2 gap-2">
+            {cloudPresets.map((p) => {
+              const i = presets.indexOf(p);
+              return (
+                <button
+                  key={p.kind}
+                  type="button"
+                  onClick={() => setPresetIdx(i)}
+                  className={`text-left p-3 rounded-lg border transition-colors ${
+                    presetIdx === i
+                      ? "border-accent bg-accent/10"
+                      : "border-border hover:border-muted-foreground"
+                  }`}
+                >
+                  <div className="font-medium text-sm">{p.name}</div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                    {p.hint}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
           <FieldRow label="Display name">
             <input
               type="text"
@@ -412,20 +439,13 @@ function ProviderStep({
               className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
             />
           </FieldRow>
-          <FieldRow
-            label="Base URL"
-            hint={isOllama ? "Where Ollama is reachable. E.g. http://host.docker.internal:11434 from Docker." : "Auto-filled from preset"}
-          >
+          <FieldRow label="Base URL" hint="Auto-filled from preset">
             <input
               type="text"
               value={providerBaseUrl}
               onChange={(e) => setProviderBaseUrl(e.target.value)}
-              readOnly={!isOllama}
-              className={`w-full px-3 py-2 rounded-md border border-border text-sm font-mono ${
-                isOllama
-                  ? "bg-background focus:outline-none focus:border-accent"
-                  : "bg-muted/30 opacity-70"
-              }`}
+              readOnly
+              className="w-full px-3 py-2 rounded-md border border-border text-sm font-mono bg-muted/30 opacity-70"
             />
           </FieldRow>
           <FieldRow label="Model" hint="The model name the provider uses by default. Override here if you want a different one.">
@@ -448,33 +468,14 @@ function ProviderStep({
               />
             </FieldRow>
           )}
-          {preset.keyRequired ? (
-            <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300/90 leading-relaxed">
-              Cloud providers bill per call. Nurby caps Ask-Nurby spend with a
-              per-user daily budget (default $5/day, adjustable in Settings), and
-              the perception pipeline only calls the model on real motion, so
-              idle cameras cost nothing.
-            </div>
-          ) : (
-            <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-300/90 leading-relaxed">
-              Local models are free and private. Nothing leaves your network. This
-              model captions what cameras see. For Ask-Nurby you&apos;ll also want a
-              tool-capable local model (e.g. qwen2.5:3b) which you can deploy from
-              Settings → Local AI.
-            </div>
-          )}
+          <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300/90 leading-relaxed">
+            Cloud providers bill per call. Nurby caps Ask-Nurby spend with a
+            per-user daily budget (default $5/day, adjustable in Settings), and
+            the perception pipeline only calls the model on real motion, so
+            idle cameras cost nothing.
+          </div>
         </div>
       )}
-
-      <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-        <input
-          type="checkbox"
-          checked={skipProvider}
-          onChange={(e) => setSkipProvider(e.target.checked)}
-          className="accent-accent"
-        />
-        Skip this. I&apos;ll connect a provider later.
-      </label>
 
       {error && <div className="text-xs text-danger">{error}</div>}
       {testMsg && (
