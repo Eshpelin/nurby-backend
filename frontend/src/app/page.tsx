@@ -2065,22 +2065,6 @@ function DashboardContent() {
                     className="w-full px-2.5 py-2 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity">
                     Add a camera
                   </button>
-                  <button onClick={() => { setModalInitialType("usb"); setModalOpen(true); }}
-                    className="w-full px-2.5 py-2 text-xs rounded-md border border-accent/50 text-accent hover:bg-accent/10 transition-colors">
-                    Add a webcam
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const r = await authFetch("/api/cameras/demo", { method: "POST" });
-                        if (r.ok) fetchCameras();
-                      } catch { /* silent */ }
-                    }}
-                    className="w-full px-2.5 py-2 text-xs rounded-md border border-border text-muted-foreground hover:bg-muted transition-colors"
-                    title="No camera? Add a demo camera that streams sample footage."
-                  >
-                    Try a demo camera
-                  </button>
                 </div>
                 <div className="mt-3 pt-3 border-t border-border/50 text-[10px] text-muted-foreground leading-relaxed">
                   <div className="font-medium text-foreground/70 mb-1">Options</div>
@@ -2480,11 +2464,18 @@ function DashboardContent() {
                     The timeline fills in as motion, faces, and objects are detected. Add any RTSP feed, discover ONVIF cameras on your network, or use this device as a test source.
                   </p>
                   <div className="flex items-center justify-center gap-2">
-                    <button onClick={() => setModalOpen(true)}
+                    <button onClick={async () => {
+                      try { const r = await authFetch("/api/cameras/demo", { method: "POST" }); if (r.ok) fetchCameras(); } catch { /* silent */ }
+                    }}
+                      className="px-3 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90"
+                      title="No camera? Stream looping sample footage to try Nurby.">
+                      Try a demo camera
+                    </button>
+                    <button onClick={() => { setModalInitialType(undefined); setModalOpen(true); }}
                       className="px-3 py-1.5 text-xs rounded-md bg-foreground text-background font-medium hover:opacity-90">
                       Add a camera
                     </button>
-                    <button onClick={() => setModalOpen(true)}
+                    <button onClick={() => { setModalInitialType("usb"); setModalOpen(true); }}
                       className="px-3 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
                       Use webcam
                     </button>
