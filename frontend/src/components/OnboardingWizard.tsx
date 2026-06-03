@@ -20,7 +20,7 @@ interface Props {
   onComplete: () => void;
 }
 
-type Step = "welcome" | "provider" | "camera" | "summary" | "done";
+type Step = "camera" | "provider" | "done";
 
 const PROVIDER_PRESETS = [
   {
@@ -59,20 +59,19 @@ const PROVIDER_PRESETS = [
 
 
 /**
- * Multi-step modal that walks a fresh user through:
- *   1. welcome
- *   2. pick / create a VLM provider
- *   3. add their first camera with a persona preset
- *   4. confirm summary mode
- *   5. done
+ * Three-step first-run modal, ordered for the fastest path to a live feed:
+ *   1. camera  (demo camera is the default. one click and you're watching)
+ *   2. provider (optional VLM. detection, faces and rules work without it,
+ *      so this step defaults to a pure Next)
+ *   3. done
  *
- * Each step is skippable. Completing the wizard sets a localStorage
- * flag so it does not pop up again. The dashboard decides when to
- * mount this (see /app/page.tsx).
+ * Every step is skippable. Completing the wizard sets a localStorage flag
+ * so it does not pop up again. The dashboard decides when to mount this
+ * (see /app/page.tsx).
  */
 export function OnboardingWizard({ onClose, onComplete }: Props) {
   const { authFetch } = useAuth();
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step>("camera");
   const [providers, setProviders] = useState<Provider[]>([]);
 
   // Persist dismissal both locally (fast path) and server-side (so it
@@ -108,7 +107,10 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   const [providerTestMsg, setProviderTestMsg] = useState<string | null>(null);
   const [providerForceAdvance, setProviderForceAdvance] = useState(false);
   const [createdProviderId, setCreatedProviderId] = useState<string | null>(null);
-  const [skipProvider, setSkipProvider] = useState(false);
+  // Default to skipping. A VLM only adds scene captions and Ask. YOLO
+  // detection, faces, people and rules all run locally without it, so the
+  // honest default for a 3-click setup is "Next" straight past this step.
+  const [skipProvider, setSkipProvider] = useState(true);
 
 
   const preset = PROVIDER_PRESETS[presetIdx];
@@ -121,7 +123,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
   }, [presetIdx]);
 
   // The Ollama deploy endpoint auto-creates the provider. Refresh the
-  // provider list and jump straight to the camera step.
+  // provider list and finish, since this is the last meaningful step.
   async function onOllamaProvisioned() {
     try {
       const r = await authFetch("/api/providers");
@@ -129,7 +131,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
     } catch {
       /* non-fatal. The provider was created server-side regardless */
     }
-    setStep("camera");
+    setStep("done");
   }
 
   // Hydrate existing providers so we can skip step 2 if one already
@@ -226,7 +228,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               Set up Nurby
             </h2>
             <span className="text-xs text-muted-foreground">
-              Step {stepNumber(step)} of 4
+              Step {stepNumber(step)} of 3
             </span>
           </div>
           <button
@@ -238,11 +240,8 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-5">
-          {step === "welcome" && (
-            <WelcomeStep
-              onNext={() => setStep(providers.length > 0 ? "camera" : "provider")}
-              hasProvider={providers.length > 0}
-            />
+          {step === "camera" && (
+            <CameraStep onAdded={() => setStep("provider")} />
           )}
           {step === "provider" && (
             <ProviderStep
@@ -265,12 +264,6 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               setSkipProvider={setSkipProvider}
             />
           )}
-          {step === "camera" && (
-            <CameraStep onAdded={() => setStep("summary")} />
-          )}
-          {step === "summary" && (
-            <SummaryStep providerName={providers[0]?.name || providerName} />
-          )}
           {step === "done" && (
             <DoneStep onClose={() => {
               markDismissed();
@@ -282,26 +275,32 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
         <div className="px-5 py-3 border-t border-border flex items-center justify-between">
           <button
             onClick={() => {
-              if (step === "provider") setStep("welcome");
-              else if (step === "camera") setStep(providers.length > 0 ? "welcome" : "provider");
-              else if (step === "summary") setStep("camera");
+              if (step === "provider") setStep("camera");
             }}
             className={`px-3 py-1.5 text-xs rounded-md border border-border hover:bg-muted ${
-              step === "welcome" || step === "done" ? "invisible" : ""
+              step === "camera" || step === "done" ? "invisible" : ""
             }`}
           >
             Back
           </button>
+          {step === "camera" && (
+            <button
+              onClick={() => setStep("provider")}
+              className="px-4 py-1.5 text-xs rounded-md border border-border hover:bg-muted text-muted-foreground"
+            >
+              Skip for now
+            </button>
+          )}
           {step === "provider" && (
             <button
               onClick={async () => {
                 if (skipProvider) {
-                  setStep("camera");
+                  setStep("done");
                   return;
                 }
                 // Second click after a failed test = proceed anyway.
                 if (providerForceAdvance) {
-                  setStep("camera");
+                  setStep("done");
                   return;
                 }
                 // Create the row if not already created, then test it.
@@ -313,7 +312,7 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
                 }
                 const ok = await testProvider(pid);
                 if (ok) {
-                  setStep("camera");
+                  setStep("done");
                 } else {
                   // Allow the next click to advance past the failure.
                   setProviderForceAdvance(true);
@@ -323,28 +322,12 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
               className="px-4 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90 disabled:opacity-50"
             >
               {skipProvider
-                ? "Skip"
+                ? "Skip & finish"
                 : providerSubmitting
                 ? "Adding."
                 : providerForceAdvance
                 ? "Continue anyway"
                 : "Add & test"}
-            </button>
-          )}
-          {step === "camera" && (
-            <button
-              onClick={() => setStep("summary")}
-              className="px-4 py-1.5 text-xs rounded-md border border-border hover:bg-muted text-muted-foreground"
-            >
-              Skip for now
-            </button>
-          )}
-          {step === "summary" && (
-            <button
-              onClick={() => setStep("done")}
-              className="px-4 py-1.5 text-xs rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90"
-            >
-              Finish setup
             </button>
           )}
           {step === "done" && (
@@ -365,46 +348,9 @@ export function OnboardingWizard({ onClose, onComplete }: Props) {
 }
 
 function stepNumber(s: Step): number {
-  if (s === "welcome") return 1;
+  if (s === "camera") return 1;
   if (s === "provider") return 2;
-  if (s === "camera") return 3;
-  return 4;
-}
-
-function WelcomeStep({
-  onNext,
-  hasProvider,
-}: {
-  onNext: () => void;
-  hasProvider: boolean;
-}) {
-  return (
-    <div className="space-y-4">
-      <h3 className="text-xl font-semibold">Welcome to Nurby</h3>
-      <p className="text-sm text-muted-foreground leading-relaxed">
-        Five minutes to a working camera. We&apos;ll connect a vision
-        model, add your first camera with a sensible preset, and pick
-        a recap mode. You can change anything later from Settings.
-      </p>
-      <ul className="text-xs text-muted-foreground space-y-1 pl-4">
-        <li>· Local Ollama works fully offline. No data leaves your network.</li>
-        <li>· Cloud providers (OpenAI, Claude, Gemini) need API keys.</li>
-        <li>· Each camera can use a different model and language.</li>
-      </ul>
-      {hasProvider && (
-        <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-md border border-border">
-          You already have a provider configured. We&apos;ll skip step 2.
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={onNext}
-        className="w-full mt-4 px-4 py-2 text-sm rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90"
-      >
-        Get started
-      </button>
-    </div>
-  );
+  return 3;
 }
 
 function ProviderStep({
@@ -449,9 +395,13 @@ function ProviderStep({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold mb-1">Pick a vision model</h3>
-        <p className="text-xs text-muted-foreground">
-          The VLM describes what cameras see. You can connect more later.
+        <h3 className="text-base font-semibold mb-1">
+          Add a vision model <span className="text-muted-foreground font-normal">(optional)</span>
+        </h3>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Detection, faces, people and rules already work without this. A
+          vision model adds plain-language scene captions and lets you Ask
+          Nurby questions. Skip it now and add one anytime from Settings.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -639,26 +589,6 @@ function CameraStep({ onAdded }: { onAdded: () => void }) {
           <AddCameraModal embedded onSuccess={onAdded} onClose={() => setMode("demo")} />
         </div>
       )}
-    </div>
-  );
-}
-
-function SummaryStep({ providerName }: { providerName: string }) {
-  return (
-    <div className="space-y-4">
-      <h3 className="text-base font-semibold">Almost there</h3>
-      <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/15 p-3 space-y-1 text-xs">
-        <div className="font-medium text-emerald-300 uppercase tracking-wider text-[10px] mb-1">
-          What&apos;s configured
-        </div>
-        <div>· Vision model: {providerName || "(add one later in Settings)"}</div>
-        <div>· Camera: added</div>
-      </div>
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        Live captions and recap cards appear automatically as the perception
-        worker processes frames. Add more cameras or tune settings anytime
-        from the dashboard.
-      </p>
     </div>
   );
 }
