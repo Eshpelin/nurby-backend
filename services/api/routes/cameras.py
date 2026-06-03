@@ -283,6 +283,18 @@ async def create_demo_camera(_current_user: User = Depends(require_admin), db: A
         "NURBY_DEMO_VIDEO_URL",
         "https://nurby.ai/static/SecurityCamCompilation.mp4",
     )
+    # Idempotent. If a demo camera already exists (magic run twice, or the
+    # dashboard demo button clicked again), reuse it instead of stacking
+    # duplicate rows.
+    existing = await db.execute(
+        select(Camera).where(
+            Camera.stream_type == "file", Camera.stream_url == demo_url
+        )
+    )
+    found = existing.scalars().first()
+    if found is not None:
+        return _camera_to_response(found)
+
     max_result = await db.execute(select(Camera.display_order))
     orders = [o for (o,) in max_result.all()]
     camera = Camera(

@@ -2,7 +2,7 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import create_access_token, get_current_user, hash_password, verify_password
@@ -63,6 +63,11 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
     if any user already exists it returns 409 so the caller falls back to
     the normal login screen.
     """
+    # Serialize concurrent first-run requests. Without this, two tabs or a
+    # double-fired client effect could both pass the count check and create
+    # two owners. The lock is transaction-scoped and released on commit.
+    await db.execute(text("SELECT pg_advisory_xact_lock(481566)"))
+
     count = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
     if count > 0:
         raise HTTPException(
