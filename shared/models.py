@@ -87,7 +87,7 @@ class Camera(Base):
     timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Audio transcription config (Phase 1)
     audio_capture_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    audio_transcribe_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    audio_transcribe_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     audio_store_raw: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     transcript_store: Mapped[str] = mapped_column(String(16), default="full", nullable=False)  # full, redacted, summary_only
     audio_language: Mapped[str] = mapped_column(String(8), default="en", nullable=False)
