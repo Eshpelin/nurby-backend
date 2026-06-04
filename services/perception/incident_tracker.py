@@ -45,6 +45,18 @@ INCIDENT_SUMMARY_PROMPT = (
 # ---- signature -----------------------------------------------------------
 
 
+# Subjects worth tracking as discrete incidents. everything else (furniture,
+# appliances, tableware, plants) is ambient and rolls into motion instead of
+# becoming a "Clock seen 4x" card. Mirrors the frontend INTERESTING_OBJECTS.
+INTERESTING_INCIDENT_LABELS = {
+    "person",
+    "car", "truck", "bus", "motorcycle", "bicycle", "van",
+    "dog", "cat", "bird", "horse",
+    "backpack", "handbag", "suitcase", "package", "box",
+    "knife", "gun", "fire",
+}
+
+
 def compute_signature(
     person_detections: dict | None,
     object_detections: dict | None,
@@ -69,11 +81,18 @@ def compute_signature(
     if faces:
         return "unknown", "unknown"
     objs = (object_detections or {}).get("objects") or []
+    # Only meaningful subjects form an "object" incident. a clock or couch
+    # seen N times is noise, not an event.
     labels = sorted(
-        {d.get("label") for d in objs if d.get("label") and d.get("label") != "license_plate"}
+        {
+            d.get("label")
+            for d in objs
+            if d.get("label") in INTERESTING_INCIDENT_LABELS
+        }
     )
     if labels:
         return "object", ",".join(labels[:3])
+    # Inert-only or empty scene. group as ambient motion, not a subject.
     return "motion", "motion"
 
 

@@ -635,6 +635,10 @@ class PerceptionPipeline:
         )
 
         # Step 5. Queue VLM call async (non-blocking)
+        from services.perception.incident_tracker import INTERESTING_INCIDENT_LABELS
+        has_subject = bool(faces) or any(
+            d.get("label") in INTERESTING_INCIDENT_LABELS for d in detections
+        )
         vlm_triggered = True
         if cam and cam.vlm_trigger == "on_object":
             trigger_labels = cam.vlm_trigger_objects or []
@@ -643,6 +647,12 @@ class PerceptionPipeline:
                 vlm_triggered = bool(detected_labels & set(trigger_labels))
             else:
                 vlm_triggered = len(detections) > 0
+        else:
+            # Default. only describe scenes with a real subject (person,
+            # vehicle, animal, package). Captioning empty rooms and inert
+            # objects wastes a slow local model and starves the frames that
+            # matter, so meaningful scenes end up with no description.
+            vlm_triggered = has_subject
 
         if vlm_triggered and self._should_call_vlm(camera_id, cam) and observation_id:
             import time as _time

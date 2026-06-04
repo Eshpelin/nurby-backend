@@ -1318,6 +1318,9 @@ function DashboardContent() {
 
   // Hourly digest bucket expand state
   const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set());
+  // Busy hours a user has explicitly collapsed. busy hours are open by
+  // default, so we track the opt-out rather than the opt-in.
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -2552,7 +2555,14 @@ function DashboardContent() {
               <div className="space-y-3">
                 {hourGroups.map(({ key: bucketKey, entries: dateEntries }) => {
                   const d = searchActive ? null : bucketDigest(dateEntries);
-                  const isExpanded = searchActive || expandedBuckets.has(bucketKey);
+                  // Hours with real activity are expanded by default. the
+                  // timeline should show, not hide behind a "peek". Quiet
+                  // hours stay collapsed and peekable. A user can still
+                  // collapse a busy hour, tracked in collapsedBuckets.
+                  const isExpanded =
+                    searchActive ||
+                    expandedBuckets.has(bucketKey) ||
+                    (!!d && !d.quiet && !collapsedBuckets.has(bucketKey));
                   return (
                   <div key={bucketKey}>
                     {!searchActive && d && d.quiet && (
@@ -2578,10 +2588,17 @@ function DashboardContent() {
                     {!searchActive && d && !d.quiet && (
                       <button
                         onClick={() => {
-                          setExpandedBuckets((prev) => {
+                          setCollapsedBuckets((prev) => {
                             const next = new Set(prev);
-                            if (next.has(bucketKey)) next.delete(bucketKey); else next.add(bucketKey);
+                            // isExpanded true means open. clicking collapses,
+                            // so add to collapsedBuckets (and clear any
+                            // explicit expand).
+                            if (isExpanded) next.add(bucketKey); else next.delete(bucketKey);
                             return next;
+                          });
+                          setExpandedBuckets((prev) => {
+                            if (!prev.has(bucketKey)) return prev;
+                            const next = new Set(prev); next.delete(bucketKey); return next;
                           });
                         }}
                         className={`w-full text-left rounded-lg border p-3 mb-1.5 transition-colors ${isExpanded ? "border-accent/50 bg-card" : "border-border bg-card/50 hover:border-accent/40 hover:bg-card"}`}
