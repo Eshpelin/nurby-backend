@@ -135,18 +135,32 @@ async def identify_vehicles(db, camera_id, detections: list, ts) -> tuple[dict |
     return vehicle_detections, new_jobs
 
 
+# Cap concurrent vehicle-description VLM calls. a burst of new plates must
+# not spawn unbounded calls and starve the live VLM lane. Tasks are also
+# tracked so they are not garbage-collected mid-flight.
+_DESC_SEMAPHORE = asyncio.Semaphore(2)
+_desc_tasks: set = set()
+
+
 def schedule_descriptions(jobs: list, frame: np.ndarray) -> None:
     """Fire-and-forget VLM descriptions for new vehicles. crops now (the
     frame may be reused), describes in the background so the keyframe path
-    is never blocked."""
+    is never blocked. Concurrency is bounded by a semaphore."""
     for vehicle_id, bbox in jobs:
         crop = _crop(frame, bbox)
         if crop is None or crop.size == 0:
             continue
         try:
-            asyncio.create_task(_describe_vehicle(vehicle_id, crop))
+            task = asyncio.create_task(_describe_vehicle_guarded(vehicle_id, crop))
+            _desc_tasks.add(task)
+            task.add_done_callback(_desc_tasks.discard)
         except RuntimeError:
             pass  # no running loop (sync context). skip description
+
+
+async def _describe_vehicle_guarded(vehicle_id, crop: np.ndarray) -> None:
+    async with _DESC_SEMAPHORE:
+        await _describe_vehicle(vehicle_id, crop)
 
 
 def _crop(frame: np.ndarray, bbox: list) -> np.ndarray | None:

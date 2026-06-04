@@ -47,6 +47,7 @@ from shared.models import (
     Journey,
     Observation,
     Provider,
+    Vehicle,
 )
 
 logger = logging.getLogger("nurby.perception.daily_digest")
@@ -435,6 +436,25 @@ async def _collect_facts(
         for c in conv_rows:
             if c.summary_text:
                 events.append({"ts": None, "when": "", "text": f"Conversation. {c.summary_text.strip()}"})
+
+        # Vehicles identified in the window (by plate). describe them by
+        # what they are plus the plate, e.g. "Red Nissan (ABC123) seen".
+        veh_rows = (
+            await db.execute(
+                select(Vehicle).where(Vehicle.last_seen_at >= window_start)
+            )
+        ).scalars().all()
+        for v in veh_rows:
+            first = v.first_seen_at
+            if first and first < window_start:
+                first = window_start
+            iso = first.isoformat() if first else None
+            label = (v.description or "").strip() or v.display_name
+            plate = f" ({v.license_plate})" if v.license_plate and v.license_plate not in label else ""
+            events.append({
+                "ts": iso, "when": _fmt_clock(iso, tz),
+                "text": f"{label}{plate} seen",
+            })
 
         events.sort(key=lambda e: e.get("ts") or "")
         facts["notable_events"] = events[:25]

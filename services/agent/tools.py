@@ -35,7 +35,7 @@ from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy import String as SAString
 
 from services.agent.access import accessible_camera_ids
-from shared.models import Camera, Event, Journey, Observation, Person, Rule
+from shared.models import Camera, Event, Journey, Observation, Person, Rule, Vehicle
 from shared.person_alias import alias_names, display_name_for
 
 logger = logging.getLogger("nurby.agent.tools")
@@ -2270,6 +2270,74 @@ async def analyze_frame(
         }
 
 
+_GET_VEHICLES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "plate": {
+            "type": "string",
+            "description": "Filter to vehicles whose license plate contains this text (case-insensitive).",
+        },
+        "query": {
+            "type": "string",
+            "description": "Filter to vehicles whose description/make/model/color/type contains this, e.g. 'red', 'nissan', 'truck', 'forklift'.",
+        },
+        "hours": {
+            "type": "integer",
+            "description": "Only vehicles seen within the last N hours. Default 168 (7 days). Use 720 for 30 days.",
+        },
+        "limit": {"type": "integer", "description": "Max vehicles to return. Default 20."},
+    },
+    "additionalProperties": False,
+}
+
+
+async def get_vehicles(
+    ctx: dict,
+    *,
+    plate: str | None = None,
+    query: str | None = None,
+    hours: int = 168,
+    limit: int = 20,
+) -> dict:
+    """Vehicles identified by license plate, with description + first/last
+    seen. Best tool for 'when did the red Nissan arrive', 'what was the
+    plate of the truck', 'which vehicles came by today'. Each vehicle is one
+    plate-keyed identity. cheap, one indexed pass over the vehicles table."""
+    db = ctx["db"]
+    since = datetime.now(timezone.utc) - timedelta(hours=max(1, hours))
+    stmt = select(Vehicle).where(Vehicle.last_seen_at >= since).order_by(Vehicle.last_seen_at.desc())
+    rows = (await db.execute(stmt)).scalars().all()
+
+    pl = (plate or "").strip().upper()
+    q = (query or "").strip().lower()
+    out: list[dict] = []
+    for v in rows:
+        if pl and pl not in (v.license_plate or "").upper():
+            continue
+        if q:
+            hay = " ".join(
+                str(x or "") for x in (v.description, v.make, v.model, v.color, v.vehicle_type, v.display_name)
+            ).lower()
+            if q not in hay:
+                continue
+        out.append({
+            "id": str(v.id),
+            "name": v.display_name,
+            "license_plate": v.license_plate,
+            "type": v.vehicle_type,
+            "color": v.color,
+            "make": v.make,
+            "model": v.model,
+            "description": v.description,
+            "first_seen_at": v.first_seen_at.isoformat() if v.first_seen_at else None,
+            "last_seen_at": v.last_seen_at.isoformat() if v.last_seen_at else None,
+            "sighting_count": v.sighting_count,
+        })
+        if len(out) >= max(1, limit):
+            break
+    return {"vehicles": out, "count": len(out)}
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
@@ -2409,6 +2477,22 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "fn": summarize_window,
         "side_effect": "read",
         "cost_class": "medium",
+    },
+    {
+        "name": "get_vehicles",
+        "description": (
+            "Vehicles identified by license plate, each with a short "
+            "description (e.g. 'Red Nissan sedan'), the plate, and "
+            "first/last-seen timestamps. Best tool for 'when did the red "
+            "Nissan arrive', 'what was the plate of that truck', 'which "
+            "vehicles came by today'. Filter by plate or by free text "
+            "(color/make/model/type). WINDOW defaults to 168h (7 days); "
+            "widen with hours=720. Cheap."
+        ),
+        "input_schema": _GET_VEHICLES_SCHEMA,
+        "fn": get_vehicles,
+        "side_effect": "read",
+        "cost_class": "cheap",
     },
     {
         "name": "query_relationships",
