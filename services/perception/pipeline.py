@@ -20,6 +20,7 @@ from services.perception.detector import ObjectDetector
 from services.perception.faces import FaceRecognizer
 from services.perception.reid import BodyReID
 from services.perception.plates import detect_plates
+from services.perception.vehicles import identify_vehicles, schedule_descriptions, VEHICLE_LABELS
 from services.perception.vlm import VLMClient, get_active_provider
 from services.perception.vlm_queue import VLMQueue, VLMJob
 from services.search.embeddings import generate_embedding, get_embedding_provider
@@ -440,6 +441,22 @@ class PerceptionPipeline:
                 except Exception:
                     logger.exception("Plate detection failed for camera %s", camera_id)
 
+        # Step 1c. Vehicle identity. upsert a Vehicle per plated vehicle and
+        # build vehicle_detections for the observation. Descriptions render
+        # in the background so they never block the keyframe path.
+        vehicle_detections = None
+        if detections and any(d.get("label") in VEHICLE_LABELS for d in detections):
+            try:
+                async with async_session() as vdb:
+                    vehicle_detections, vehicle_jobs = await identify_vehicles(
+                        vdb, uuid.UUID(camera_id), detections, timestamp
+                    )
+                    await vdb.commit()
+                if vehicle_jobs:
+                    schedule_descriptions(vehicle_jobs, frame)
+            except Exception:
+                logger.exception("Vehicle identification failed for camera %s", camera_id)
+
         # Signal recording trigger if camera uses on_object or clip mode
         if cam and cam.recording_mode in ("on_object", "clip") and detections:
             trigger_labels = cam.recording_trigger_objects or []
@@ -610,6 +627,7 @@ class PerceptionPipeline:
             timestamp=timestamp,
             detections=detections,
             person_detections=person_detections,
+            vehicle_detections=vehicle_detections,
             vlm_description=None,  # VLM patches this async
             vlm_provider=None,
             confidence=None,
@@ -812,6 +830,7 @@ class PerceptionPipeline:
         timestamp: datetime,
         detections: list[dict],
         person_detections: dict | None = None,
+        vehicle_detections: dict | None = None,
         vlm_description: str | None = None,
         vlm_provider: str | None = None,
         confidence: float | None = None,
@@ -921,6 +940,7 @@ class PerceptionPipeline:
                     started_at=timestamp,
                     object_detections=object_detections,
                     person_detections=person_detections,
+                    vehicle_detections=vehicle_detections,
                     vlm_description=vlm_description,
                     vlm_provider=vlm_provider,
                     confidence=confidence,

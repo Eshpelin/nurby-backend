@@ -294,6 +294,47 @@ class BodyClusterSample(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Vehicle(Base):
+    """A tracked vehicle identity, the vehicle analogue of Person.
+
+    Identity is keyed by ``identity_key``. the license plate when one was
+    read (exact), otherwise a normalized appearance description such as
+    "red forklift" (approximate, for plateless vehicles). The perception
+    pipeline upserts a Vehicle per detected vehicle and links each sighting
+    through ``Observation.vehicle_detections`` (mirrors person_detections),
+    so sightings are queried from observations exactly like persons.
+    """
+
+    __tablename__ = "vehicles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Stable dedupe key. plate text (uppercased, spaces stripped) or
+    # "type:description" for plateless vehicles. Unique so the pipeline can
+    # upsert without races.
+    identity_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    nickname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    license_plate: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    vehicle_type: Mapped[str | None] = mapped_column(String(32), nullable=True)  # car, truck, bus, motorcycle, van, forklift
+    make: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # VLM one-liner. "Red Nissan sedan with tinted windows". Generated once
+    # per vehicle so it does not re-run every frame.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description_status: Mapped[str] = mapped_column(String(16), default="pending")  # pending, done, failed
+    photo_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    is_starred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # True until a human confirms/renames it. auto-created plate/appearance
+    # vehicles start provisional so the UI can offer them as suggestions.
+    is_provisional: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    first_camera_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sighting_count: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Observation(Base):
     __tablename__ = "observations"
 
@@ -303,6 +344,12 @@ class Observation(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     object_detections: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     person_detections: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Vehicle sightings in this frame. mirrors person_detections. shape.
+    # {"vehicles": [{"bbox": [...], "label": "car", "plate_text": str|None,
+    #   "vehicle_id": uuid|None, "identity_key": str, "confidence": float}],
+    #  "count": int}. Drives the Vehicles tab the same way person_detections
+    # drives People.
+    vehicle_detections: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     vlm_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     vlm_provider: Mapped[str | None] = mapped_column(String(128), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

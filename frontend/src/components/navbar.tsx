@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { label: "Ask Nurby", href: "/ask" },
   { label: "Recordings", href: "/recordings" },
   { label: "People", href: "/people" },
+  { label: "Vehicles", href: "/vehicles" },
   { label: "Rules", href: "/rules" },
   { label: "Settings", href: "/settings" },
 ];
