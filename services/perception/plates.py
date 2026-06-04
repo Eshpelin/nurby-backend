@@ -29,7 +29,12 @@ def _get_reader():
     """Lazy-load EasyOCR reader. Cached so it only loads once."""
     try:
         import easyocr
-        reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        # Models are baked into the image (~/.EasyOCR/model). download_enabled
+        # False keeps it fully offline. EasyOCR's auto-download fails TLS here
+        # and on locked-down hosts, so never reach for the network at runtime.
+        reader = easyocr.Reader(
+            ["en"], gpu=False, verbose=False, download_enabled=False
+        )
         logger.info("EasyOCR reader initialized for plate detection")
         return reader
     except ImportError:

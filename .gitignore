@@ -43,9 +43,12 @@ clips/
 # Database
 *.db
 
-# ML models
+# ML models. vendored into images at build time via scripts/fetch-models.sh,
+# never committed (hundreds of MB). a clean checkout runs the script first.
 *.pt
 *.onnx
+*.pth
+services/perception/models/
 
 # Dev runtime
 dev/logs/

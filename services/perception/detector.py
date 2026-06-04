@@ -9,6 +9,7 @@ multiple models can be merged using configurable strategies.
 
 import asyncio
 import logging
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -95,8 +96,20 @@ class ObjectDetector:
 
         try:
             from ultralytics import YOLO
-            logger.info("Loading YOLO model '%s'", model_name)
-            model = YOLO(model_name)
+            # Prefer a weight file baked into the image. ultralytics' own
+            # downloader fails github TLS on many hosts, and offline/locked-down
+            # deploys have no network at all, so we ship the default weights in
+            # the build and resolve a bare filename against NURBY_MODELS_DIR
+            # before falling back to ultralytics' (network) auto-download.
+            resolved = model_name
+            if not os.path.isabs(model_name) and os.sep not in model_name:
+                baked = os.path.join(
+                    os.environ.get("NURBY_MODELS_DIR", "/app/models"), model_name
+                )
+                if os.path.exists(baked):
+                    resolved = baked
+            logger.info("Loading YOLO model '%s' (from %s)", model_name, resolved)
+            model = YOLO(resolved)
             _model_cache[model_name] = model
             logger.info("YOLO model '%s' loaded and cached", model_name)
             return model

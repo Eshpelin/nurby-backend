@@ -28,12 +28,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN --mount=type=cache,target=/root/.cache/pip pip install .
 
-# Pre-bake the default YOLO weights into the image. Without this, the
-# first detection downloads yolov8n.pt from GitHub at runtime, which
-# fails on offline or locked-down hosts and adds first-frame latency.
-# WORKDIR is /app and the detector runs from /app, so a bare filename
-# resolves to this cached file. no network needed at runtime.
-RUN PYTHONHTTPSVERIFY=0 python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" || echo "prebake skipped (downloads at first runtime use)"
+# Bake the default YOLO weights into the image from the build context.
+# ultralytics' own auto-download fails github TLS inside both the build
+# sandbox and the runtime container (cert chain to objects.githubusercontent
+# .com is not verifiable there), and offline/locked-down hosts have no
+# network at all. The weights are vendored in the repo and copied in here,
+# so detection works with zero network. detector.py resolves a bare model
+# filename against NURBY_MODELS_DIR (default /app/models) before any
+# network fallback.
+ENV NURBY_MODELS_DIR=/app/models
+COPY services/perception/models/yolov8n.pt /app/models/yolov8n.pt
 
 # Face recognition engine. faces.py uses InsightFace (buffalo_l ArcFace)
 # over onnxruntime, but these are not in pyproject, so face recognition
@@ -42,14 +46,21 @@ RUN PYTHONHTTPSVERIFY=0 python -c "from ultralytics import YOLO; YOLO('yolov8n.p
 # first use needs no network. without the pre-bake the model downloads at
 # runtime and fails on offline / locked-down hosts.
 RUN --mount=type=cache,target=/root/.cache/pip pip install insightface onnxruntime
-RUN PYTHONHTTPSVERIFY=0 python -c "from insightface.app import FaceAnalysis; a=FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']); a.prepare(ctx_id=0, det_size=(640, 640))" || echo "prebake skipped (downloads at first runtime use)"
+# Bake the buffalo_l model pack from the build context. InsightFace's
+# auto-download pulls from github release-assets, which fails TLS in this
+# environment (and on offline hosts). FaceAnalysis(name='buffalo_l') reads
+# from ~/.insightface/models/buffalo_l, so the vendored onnx files land there.
+COPY services/perception/models/insightface/ /root/.insightface/models/
 
 # License-plate OCR engine. plates.py uses EasyOCR but it was not in
 # pyproject, so plate reading (and the Vehicles feature) was disabled in
 # the image. Install it and pre-download the detection + recognition
 # models so first read needs no network.
 RUN --mount=type=cache,target=/root/.cache/pip pip install easyocr
-RUN PYTHONHTTPSVERIFY=0 python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=False)" || echo "prebake skipped (downloads at first runtime use)"
+# Bake the EasyOCR detector (CRAFT) + english_g2 recognizer from the build
+# context. EasyOCR otherwise downloads them from github release-assets, which
+# fails TLS here and on offline hosts. Reader() reads ~/.EasyOCR/model.
+COPY services/perception/models/easyocr/ /root/.EasyOCR/model/
 
 COPY shared/ shared/
 COPY services/__init__.py services/__init__.py

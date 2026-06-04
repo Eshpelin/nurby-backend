@@ -41,6 +41,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Perception bakes YOLO/InsightFace/EasyOCR weights from the build
+      # context (their auto-downloaders fail TLS in the build sandbox). The
+      # binaries are gitignored, so fetch them on the runner before building.
+      - name: Fetch perception model weights
+        if: matrix.name == 'perception'
+        run: bash scripts/fetch-models.sh
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR

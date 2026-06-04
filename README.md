@@ -70,7 +70,15 @@ cp .env.example .env
 
 This makes a `.env` file from the template. The defaults are fine for trying it on your own machine. You do not need to edit anything yet.
 
-### Step 4. Start it
+### Step 4. Fetch the AI models
+
+```bash
+bash scripts/fetch-models.sh
+```
+
+This downloads the detection, face, and license-plate models once (about 430 MB) so the perception service can bake them into its image. They are baked in rather than pulled at runtime so Nurby works offline and starts instantly, and so it runs on locked-down networks where the upstream model hosts are not reachable. Re-running is safe and skips anything already downloaded.
+
+### Step 5. Start it
 
 ```bash
 docker compose up --build
@@ -78,7 +86,7 @@ docker compose up --build
 
 The first time, this downloads and assembles everything. It can take **5 to 15 minutes** and print a lot of text. That is expected, and only happens once. Later starts take seconds. When it settles and stops scrolling, Nurby is running. Leave this terminal window open while you use it.
 
-### Step 5. Open Nurby
+### Step 6. Open Nurby
 
 Open your web browser and go to **[http://localhost:4747](http://localhost:4747)**.
 
