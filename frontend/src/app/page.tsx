@@ -919,8 +919,13 @@ function CameraSidebarCard({
           </div>
         )}
 
-        {/* Detection bounding box overlay */}
-        {camera.status !== "offline" && (
+        {/* Detection bounding box overlay. Skipped for remote-file cameras
+            (the demo). the browser plays the clip on its own clock while the
+            perception worker decodes the same file independently, so the
+            "latest" box would land on the wrong frame. Detections for these
+            stay frame-accurate in the timeline (the thumbnail is the exact
+            analyzed frame). Near-live cameras (rtsp/webrtc) keep the overlay. */}
+        {camera.status !== "offline" && !isRemoteFile && (
           <DetectionOverlay cameraId={camera.id} visible={overlayVisible} frameWidth={frameW} frameHeight={frameH} />
         )}
 
