@@ -283,6 +283,21 @@ class RuleEngine:
                 return any(d["label"] == label for d in detections)
             return len(detections) > 0
 
+        elif trigger_type == "vehicle_detected":
+            # Vehicle identity trigger. fires on a specific plate, any
+            # plate-identified vehicle, or any vehicle at all. Plate match is
+            # case-insensitive substring so "ABC" matches "ABC123".
+            vd = data.get("vehicle_detections") or {}
+            vehicles = vd.get("vehicles", []) if isinstance(vd, dict) else []
+            if not vehicles:
+                return False
+            want_plate = (pattern.get("plate") or "").strip().upper()
+            if want_plate:
+                return any(want_plate in (v.get("plate_text") or "").upper() for v in vehicles)
+            if pattern.get("identified_only"):
+                return any(v.get("vehicle_id") for v in vehicles)
+            return True
+
         elif trigger_type == "face_detected":
             faces = data.get("person_detections", {})
             return faces is not None and faces.get("count", 0) > 0

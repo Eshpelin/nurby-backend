@@ -242,3 +242,42 @@ def test_line_cross_legacy_events(monkeypatch):
         "line_cross_events": [{"zone_name": "other", "direction": "in"}]
     }))
     assert rec.call_count == 1
+
+
+# ── vehicle_detected ──────────────────────────────────────────────
+
+def test_vehicle_detected_specific_plate(monkeypatch):
+    rule = FakeRule(name="r", trigger_pattern={"type": "vehicle_detected", "plate": "ABC"})
+    eng, rec = install_engine(monkeypatch, [rule])
+    # Plate contains "ABC" -> fires.
+    asyncio.run(eng.evaluate({
+        "vehicle_detections": {"vehicles": [{"plate_text": "ABC123", "vehicle_id": "v1"}], "count": 1},
+    }))
+    # Different plate -> no fire.
+    asyncio.run(eng.evaluate({
+        "vehicle_detections": {"vehicles": [{"plate_text": "XYZ999", "vehicle_id": "v2"}], "count": 1},
+    }))
+    assert rec.call_count == 1
+
+
+def test_vehicle_detected_identified_only(monkeypatch):
+    rule = FakeRule(name="r", trigger_pattern={"type": "vehicle_detected", "identified_only": True})
+    eng, rec = install_engine(monkeypatch, [rule])
+    # Has a vehicle_id -> fires.
+    asyncio.run(eng.evaluate({
+        "vehicle_detections": {"vehicles": [{"plate_text": "ABC123", "vehicle_id": "v1"}], "count": 1},
+    }))
+    # Plateless (no vehicle_id) -> no fire.
+    asyncio.run(eng.evaluate({
+        "vehicle_detections": {"vehicles": [{"plate_text": None, "vehicle_id": None}], "count": 1},
+    }))
+    assert rec.call_count == 1
+
+
+def test_vehicle_detected_any(monkeypatch):
+    rule = FakeRule(name="r", trigger_pattern={"type": "vehicle_detected"})
+    eng, rec = install_engine(monkeypatch, [rule])
+    asyncio.run(eng.evaluate({"vehicle_detections": {"vehicles": [{"label": "car"}], "count": 1}}))
+    asyncio.run(eng.evaluate({"vehicle_detections": {"vehicles": [], "count": 0}}))
+    asyncio.run(eng.evaluate({}))  # no vehicle_detections key
+    assert rec.call_count == 1

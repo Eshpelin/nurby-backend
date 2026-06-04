@@ -137,7 +137,8 @@ export function hydrateFromRule(rule: Rule): RuleFormState {
   base.formEnabled = r.enabled;
 
   base.formTriggerType = (tp.type as string) || "any";
-  base.formTriggerLabel = (tp.label as string) || "";
+  // formTriggerLabel doubles as the object label and the vehicle plate text.
+  base.formTriggerLabel = (tp.label as string) || (tp.plate as string) || "";
   base.formTriggerPersonId = (tp.person_id as string) || "";
   base.formTriggerAudioLabel = (tp.label as string) || "baby_cry";
   base.formTriggerAudioMinScore =

@@ -128,6 +128,23 @@ export function TriggerSection(props: TriggerSectionProps) {
         />
       )}
 
+      {formTriggerType === "vehicle_detected" && (
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground block">License plate</label>
+          <input
+            value={formTriggerLabel}
+            onChange={(e) => setFormTriggerLabel(e.target.value.toUpperCase())}
+            placeholder="ABC123  (leave blank for any vehicle)"
+            className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm font-mono"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Matches when a plate containing this text is read. Leave blank to fire on any
+            vehicle that has been read. Plate reading runs automatically on cars, trucks,
+            buses, and vans.
+          </p>
+        </div>
+      )}
+
       {formTriggerType === "face_recognized" && (
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground block">Person</label>

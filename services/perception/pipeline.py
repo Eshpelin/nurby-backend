@@ -739,6 +739,7 @@ class PerceptionPipeline:
                 "count": len(detections),
             },
             "person_detections": person_detections,
+            "vehicle_detections": vehicle_detections,
             "loitering_events": loitering_events,
             "line_cross_events": line_cross_events,
             "tracks": [

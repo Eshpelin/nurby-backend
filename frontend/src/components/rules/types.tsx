@@ -151,6 +151,7 @@ export const Icon = {
 
 export const TRIGGER_TYPES: TriggerType[] = [
   { value: "object_detected", label: "Object detected", icon: Icon.box,       desc: "Person, car, dog, package, or any YOLO class.", accent: "green",  group: "vision" },
+  { value: "vehicle_detected", label: "Vehicle / plate", icon: Icon.box,      desc: "A specific license plate, or any plate-identified vehicle.", accent: "amber", group: "vision" },
   { value: "face_detected",   label: "Face detected",   icon: Icon.user,      desc: "Any face visible in frame, known or not.",       accent: "blue",   group: "faces" },
   { value: "face_recognized", label: "Known face",      icon: Icon.userCheck, desc: "A specific person in your library.",              accent: "blue",   group: "faces" },
   { value: "face_unknown",    label: "Unknown face",    icon: Icon.userQ,     desc: "Someone not yet matched to a person.",            accent: "amber",  group: "faces" },
@@ -351,6 +352,12 @@ export function describeTrigger(pattern: Record<string, unknown>): string {
   if (t === "object_detected") {
     const label = pattern.label as string | undefined;
     return label ? `When "${label}" detected` : "When any object detected";
+  }
+  if (t === "vehicle_detected") {
+    const plate = pattern.plate as string | undefined;
+    if (plate) return `When plate "${plate}" is seen`;
+    if (pattern.identified_only) return "When a plate-identified vehicle is seen";
+    return "When any vehicle is seen";
   }
   if (t === "face_detected") return "When any face detected";
   if (t === "face_recognized") {

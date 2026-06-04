@@ -181,6 +181,7 @@ export function RuleBuilder({
     const s = state;
     const p: Record<string, unknown> = { type: s.formTriggerType };
     if (s.formTriggerType === "object_detected" && s.formTriggerLabel) p.label = s.formTriggerLabel;
+    if (s.formTriggerType === "vehicle_detected" && s.formTriggerLabel.trim()) p.plate = s.formTriggerLabel.trim();
     if (s.formTriggerType === "face_recognized" && s.formTriggerPersonId) p.person_id = s.formTriggerPersonId;
     if (s.formTriggerType === "motion") p.min_score = 0.08;
     if (s.formTriggerType === "audio_event") {
@@ -238,6 +239,7 @@ export function RuleBuilder({
     const s = state;
     const trigger_pattern: Record<string, unknown> = { type: s.formTriggerType };
     if (s.formTriggerType === "object_detected" && s.formTriggerLabel) trigger_pattern.label = s.formTriggerLabel;
+    if (s.formTriggerType === "vehicle_detected" && s.formTriggerLabel.trim()) trigger_pattern.plate = s.formTriggerLabel.trim();
     if (s.formTriggerType === "face_recognized" && s.formTriggerPersonId) trigger_pattern.person_id = s.formTriggerPersonId;
     if (s.formTriggerType === "motion") {
       const sensitivityMap: Record<string, number> = { very_high: 0.01, high: 0.03, medium: 0.08, low: 0.2 };
