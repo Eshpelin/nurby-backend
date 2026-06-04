@@ -31,9 +31,12 @@ ROLE=$(echo "$BOOT" | j "['user']['role']")
 
 AUTH="Authorization: Bearer $TOKEN"
 
-# 3. Bootstrap again now conflicts (one owner only).
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/api/auth/bootstrap")
-[ "$CODE" = "409" ] && ok "second bootstrap is 409" || bad "second bootstrap expected 409, got $CODE"
+# 3. Bootstrap again. an UNCLAIMED provisional install re-adopts the same
+#    owner (no lockout, no duplicate), so it returns 201 with the same id.
+ID1=$(echo "$BOOT" | j "['user']['id']")
+BOOT2=$(curl -fsS -X POST "$API/api/auth/bootstrap")
+ID2=$(echo "$BOOT2" | j "['user']['id']")
+[ -n "$ID2" ] && [ "$ID1" = "$ID2" ] && ok "second bootstrap re-adopts same owner" || bad "re-adopt failed. $ID1 vs $ID2"
 
 # 4. Demo camera. created, and idempotent on repeat.
 CAM1=$(curl -fsS -X POST -H "$AUTH" "$API/api/cameras/demo")
