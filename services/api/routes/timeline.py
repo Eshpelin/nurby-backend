@@ -15,7 +15,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +24,31 @@ from shared.auth import get_current_user
 from shared.database import get_db
 from shared.models import Observation, Transcript, User
 
+
+class SummarizeWindowBody(BaseModel):
+    window_start: datetime
+    window_end: datetime
+
 router = APIRouter()
+
+
+@router.post("/summarize")
+async def summarize_window(
+    body: SummarizeWindowBody,
+    _current_user: User = Depends(get_current_user),
+):
+    """Narrative VLM recap of a specific time window (one timeline hour).
+
+    Reuses the morning-brief pipeline so the result reads like the daily
+    brief. on-demand, not persisted. Returns {summary, notable_events}.
+    """
+    if body.window_end <= body.window_start:
+        raise HTTPException(status_code=400, detail="window_end must be after window_start")
+    span_hours = (body.window_end - body.window_start).total_seconds() / 3600
+    if span_hours > 26:
+        raise HTTPException(status_code=400, detail="Window too large (max 26 hours)")
+    from services.perception.daily_digest import narrate_window
+    return await narrate_window(body.window_start, body.window_end)
 
 
 @router.get("")

@@ -1321,6 +1321,29 @@ function DashboardContent() {
   // Busy hours a user has explicitly collapsed. busy hours are open by
   // default, so we track the opt-out rather than the opt-in.
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
+  // On-demand VLM recap per hour bucket. keyed by the hour-start ISO.
+  const [hourSummaries, setHourSummaries] = useState<Record<string, { loading: boolean; text?: string; error?: string }>>({});
+
+  const summarizeHour = useCallback(async (bucketKey: string) => {
+    setHourSummaries((p) => ({ ...p, [bucketKey]: { loading: true } }));
+    try {
+      const start = new Date(bucketKey);
+      const end = new Date(start.getTime() + 3600000);
+      const res = await authFetch("/api/timeline/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ window_start: start.toISOString(), window_end: end.toISOString() }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setHourSummaries((p) => ({ ...p, [bucketKey]: { loading: false, text: (d.summary as string) || "Nothing notable happened in this hour." } }));
+      } else {
+        setHourSummaries((p) => ({ ...p, [bucketKey]: { loading: false, error: "Could not summarize this hour." } }));
+      }
+    } catch {
+      setHourSummaries((p) => ({ ...p, [bucketKey]: { loading: false, error: "Network error." } }));
+    }
+  }, [authFetch]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -2683,6 +2706,24 @@ function DashboardContent() {
                     )}
                     {isExpanded && (
                     <div className="space-y-1.5 pl-2 border-l border-border/50">
+                      {!searchActive && (() => {
+                        const hs = hourSummaries[bucketKey];
+                        if (hs?.text) return (
+                          <p className="text-[11px] text-amber-200/90 bg-amber-500/[0.06] border border-amber-500/20 rounded-md px-2.5 py-1.5 leading-snug mb-1">
+                            <span className="opacity-70">✨ </span>{hs.text}
+                          </p>
+                        );
+                        if (hs?.error) return <div className="text-[11px] text-red-400 mb-1">{hs.error}</div>;
+                        return (
+                          <button
+                            onClick={() => summarizeHour(bucketKey)}
+                            disabled={hs?.loading}
+                            className="text-[11px] text-accent hover:underline disabled:opacity-50 mb-1"
+                          >
+                            {hs?.loading ? "Summarizing this hour." : "✨ Summarize this hour"}
+                          </button>
+                        );
+                      })()}
                       {dateEntries.map((entry) => {
                         const cam = cameraMap[entry.camera_id];
                         const isActive = activeEntry === entry.id;

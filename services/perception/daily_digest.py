@@ -153,6 +153,38 @@ class DailyDigestScheduler:
 # ---- build pipeline ------------------------------------------------------
 
 
+async def narrate_window(window_start: datetime, window_end: datetime) -> dict:
+    """On-demand narrative recap for an arbitrary window, NOT persisted.
+
+    Reuses the morning-brief pipeline (notable events + narrative prompt)
+    so a per-hour 'summarize this' reads like the daily brief. Returns
+    {summary, notable_events}. summary is None when no VLM provider exists.
+    """
+    facts = await _collect_facts(window_start, window_end)
+    provider = await _resolve_provider()
+    summary: str | None = None
+    if provider is not None:
+        prompt = _build_prompt(facts, window_start, window_end)
+        max_out = resolve_output_cap(getattr(provider, "max_output_tokens", None)) or 400
+        try:
+            summary = await call_text(
+                provider=provider,
+                system_prompt=DAILY_SYSTEM_PROMPT,
+                user_prompt=prompt,
+                max_tokens=max_out,
+            )
+            if summary:
+                summary = summary.strip()
+        except Exception:
+            logger.exception("window narration VLM call failed")
+    return {
+        "summary": summary,
+        "notable_events": facts.get("notable_events") or [],
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+    }
+
+
 async def build_daily_digest(
     window_start: datetime,
     window_end: datetime,
