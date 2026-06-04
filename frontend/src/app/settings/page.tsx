@@ -1083,6 +1083,11 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+          {dailyDigestEnabled && (
+            <div className="pt-1">
+              <GenerateDigestButton />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1473,6 +1478,46 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Generate a morning brief on demand. lives in Settings (not the dashboard)
+// so the dashboard only ever shows a real brief. Self-contained state.
+function GenerateDigestButton() {
+  const { authFetch } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await authFetch("/api/daily-digest/run", { method: "POST" });
+      if (res.ok) {
+        const d = await res.json().catch(() => null);
+        setMsg(d ? "Brief generated. it now shows on the dashboard." : "Generated.");
+      } else {
+        setMsg("Could not generate a brief right now.");
+      }
+    } catch {
+      setMsg("Network error generating the brief.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="px-3 py-1.5 text-xs rounded-md border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 transition-colors"
+      >
+        {busy ? "Generating." : "Generate a brief now"}
+      </button>
+      {msg && <span className="text-[11px] text-muted-foreground">{msg}</span>}
     </div>
   );
 }

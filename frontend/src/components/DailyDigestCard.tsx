@@ -86,23 +86,11 @@ export function DailyDigestCard() {
   };
 
   if (loading) return null;
-  if (!digest) {
-    return (
-      <div className="rounded-lg border border-dashed border-border bg-card/30 p-3 flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">
-          No morning brief yet. The scheduler runs at your configured hour.
-        </span>
-        <button
-          type="button"
-          onClick={runNow}
-          disabled={busy}
-          className="px-2 py-1 rounded border border-accent/40 text-accent hover:bg-accent/10 disabled:opacity-50"
-        >
-          {busy ? "Generating." : "Generate now"}
-        </button>
-      </div>
-    );
-  }
+  // No brief yet. show nothing rather than a placeholder. The morning brief
+  // is configured in Settings → Morning digest (on by default at 7am), and
+  // a real brief replaces this empty render once the scheduler runs or a
+  // user generates one from Settings. Keeps the dashboard clean when empty.
+  if (!digest) return null;
 
   const f = digest.facts || {};
   const bullets = buildBullets(f);
