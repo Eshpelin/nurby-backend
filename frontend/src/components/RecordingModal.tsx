@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useAuth } from "@/lib/auth";
 
 interface RecordingLike {
   id: string;
@@ -40,6 +41,8 @@ function fmtSize(b: number | null | undefined): string {
 }
 
 export function RecordingModal({ recording, cameraName, onClose }: Props) {
+  const { token } = useAuth();
+  const tq = token ? `?token=${token}` : "";
   useEffect(() => {
     if (!recording) return;
     const onKey = (e: KeyboardEvent) => {
@@ -103,11 +106,11 @@ export function RecordingModal({ recording, cameraName, onClose }: Props) {
             controls
             autoPlay
             className="w-full max-h-[60vh] rounded bg-black"
-            src={`/api/recordings/${recording.id}/stream`}
+            src={`/api/recordings/${recording.id}/stream${tq}`}
           />
           <div className="flex items-center justify-end">
             <a
-              href={`/api/recordings/${recording.id}/download`}
+              href={`/api/recordings/${recording.id}/download${tq}`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity"
             >

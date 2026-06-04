@@ -46,7 +46,7 @@ function formatDateTime(iso: string): string {
 const PAGE_SIZE = 24;
 
 export default function RecordingsPage() {
-  const { authFetch } = useAuth();
+  const { authFetch, token } = useAuth();
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [loading, setLoading] = useState(true);
@@ -368,7 +368,7 @@ export default function RecordingsPage() {
                 controls
                 autoPlay
                 className="w-full max-h-[60vh] rounded bg-black"
-                src={`/api/recordings/${expandedRec.id}/stream`}
+                src={`/api/recordings/${expandedRec.id}/stream${token ? `?token=${token}` : ""}`}
               />
               {confirmDeleteId === expandedRec.id ? (
                 <div className="flex flex-wrap items-center gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2">
@@ -396,7 +396,7 @@ export default function RecordingsPage() {
               ) : (
                 <div className="flex items-center justify-between gap-2">
                   <a
-                    href={`/api/recordings/${expandedRec.id}/download`}
+                    href={`/api/recordings/${expandedRec.id}/download${token ? `?token=${token}` : ""}`}
                     download
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity"
                   >
