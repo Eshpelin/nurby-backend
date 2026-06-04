@@ -1000,10 +1000,40 @@ function AddOrPairModal({
 
         {step === 1 && (
           <>
-            <p className="text-xs text-muted-foreground mb-4">
-              Telegram alerts use a bot you own. Open Telegram, DM @BotFather, send /newbot,
-              follow the prompts, then paste the bot token here. Takes about 30 seconds.
+            <p className="text-xs text-muted-foreground mb-3">
+              Telegram alerts are sent by a bot you create. it is free and takes about a
+              minute. You will make a bot, then choose where it sends. a private chat, a
+              group, or a channel.
             </p>
+            <div className="rounded-md border border-border bg-background/50 p-3 mb-4 space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Step 1. Create your bot and get its token
+              </div>
+              <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal pl-4">
+                <li>
+                  Open{" "}
+                  <a
+                    href="https://t.me/BotFather"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent hover:underline font-medium"
+                  >
+                    @BotFather
+                  </a>{" "}
+                  in Telegram (the official bot maker) and press <span className="font-medium">Start</span>.
+                </li>
+                <li>
+                  Send <span className="font-mono text-foreground">/newbot</span>. It asks for a
+                  name (e.g. <span className="text-foreground">Home Alerts</span>) and a username
+                  ending in <span className="font-mono text-foreground">bot</span>.
+                </li>
+                <li>
+                  BotFather replies with a <span className="font-medium text-foreground">token</span> that
+                  looks like <span className="font-mono text-foreground">123456789:ABCdef...</span>. Copy it.
+                </li>
+                <li>Paste the token below. Nurby checks it instantly.</li>
+              </ol>
+            </div>
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground block mb-1">
@@ -1065,8 +1095,14 @@ function AddOrPairModal({
 
         {step === 2 && (
           <>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              Step 2. Choose where this bot sends alerts
+            </div>
             <p className="text-xs text-muted-foreground mb-3">
-              Now add the bot to where you want alerts.
+              A bot can only message places it has been added to, so pick a destination
+              and connect it. Pairing tells Nurby the exact chat to send to. you can add
+              more destinations later (e.g. Family, Security) and choose which one each
+              rule alerts.
             </p>
             <div className="flex gap-1 mb-3">
               <button
@@ -1122,17 +1158,36 @@ function AddOrPairModal({
             )}
 
             {pairTab === "group" && pair && pairChannel && (
-              <div className="text-xs text-muted-foreground space-y-2">
-                <p>
-                  Add{" "}
-                  <span className="font-mono text-foreground">
-                    @{pairChannel.bot_username || "bot"}
-                  </span>{" "}
-                  to your group, then send this in the group.
-                </p>
-                <div className="rounded-md bg-background border border-border px-3 py-2 font-mono text-xs select-all">
-                  /pair {pair.nonce}
+              <div className="text-xs text-muted-foreground space-y-2.5">
+                <ol className="list-decimal pl-4 space-y-1.5">
+                  <li>
+                    Open the group or channel where you want alerts (or create a new one).
+                  </li>
+                  <li>
+                    Add{" "}
+                    <span className="font-mono text-foreground">@{pairChannel.bot_username || "your bot"}</span>{" "}
+                    as a member. In a group, Add member. In a{" "}
+                    <span className="text-foreground">channel</span>, add it as an{" "}
+                    <span className="text-foreground font-medium">Administrator</span> with the
+                    &ldquo;Post messages&rdquo; permission (channels only accept posts from admins).
+                  </li>
+                  <li>
+                    Send this exact message in that group or channel so Nurby learns which chat it is.
+                  </li>
+                </ol>
+                <div className="rounded-md bg-background border border-border px-3 py-2 font-mono text-xs select-all flex items-center justify-between gap-2">
+                  <span>/pair {pair.nonce}</span>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard?.writeText(`/pair ${pair.nonce}`)}
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-muted text-muted-foreground"
+                  >
+                    Copy
+                  </button>
                 </div>
+                <p className="text-[11px] text-muted-foreground/80">
+                  As soon as the bot sees that message, this dialog flips to Paired. no need to refresh.
+                </p>
               </div>
             )}
 
