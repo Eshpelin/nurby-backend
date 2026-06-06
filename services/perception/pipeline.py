@@ -187,16 +187,6 @@ class PerceptionPipeline:
             logger.exception("refiner provider lookup failed")
         return None
 
-    # Adaptive pacing. Keep the live VLM queue shallow so the model always
-    # works a fresh frame instead of grinding through a stale backlog. A
-    # normal-priority frame is skipped while the VLM is still behind, and the
-    # minimum gap between enqueues self-tunes to the VLM's measured per-call
-    # latency (if it can only do one frame every 3s, we stop enqueuing more
-    # often than that). High-priority frames (unknown face, rule trigger)
-    # bypass the gap but still respect a hard backlog ceiling.
-    _PACE_NORMAL_BACKLOG_CAP = 2
-    _PACE_HIGH_BACKLOG_CAP = 6
-
     def _vlm_pacing_signals(self, camera_id: str) -> tuple[float, int]:
         """(measured avg latency seconds, current backlog depth) for a camera,
         from the in-memory VLM stats. (0, 0) before any data exists."""
@@ -215,28 +205,22 @@ class PerceptionPipeline:
     def _should_call_vlm(self, camera_id: str, cam: Camera | None,
                          priority: str = "normal") -> bool:
         """Adaptive gate. enqueue a frame only if doing so keeps the live VLM
-        queue fresh and within its measured throughput."""
+        queue fresh and within its measured throughput. Pure decision lives in
+        ``vlm_pacing.should_enqueue``. this just gathers the live signals."""
         import time as _time
+
+        from services.perception.vlm_pacing import should_enqueue
         avg_latency, backlog = self._vlm_pacing_signals(camera_id)
-
-        if priority == "high":
-            # Urgent frames jump the cadence but never flood the queue.
-            return backlog < self._PACE_HIGH_BACKLOG_CAP
-
-        # The VLM is behind. dropping this normal frame keeps the next one it
-        # processes recent instead of stale.
-        if backlog >= self._PACE_NORMAL_BACKLOG_CAP:
-            return False
-
-        # Never enqueue faster than the VLM actually processes. The configured
-        # vlm_interval is a floor; the learned latency raises it when the model
-        # is slow. Before any latency data, this is just the configured floor.
-        base = cam.vlm_interval if cam else 0
-        interval = max(base, avg_latency)
-        if interval <= 0:
-            return True
         last = self._vlm_last_call.get(camera_id, 0)
-        return (_time.monotonic() - last) >= interval
+        # Never been called -> treat as long ago so the first frame passes.
+        since = (_time.monotonic() - last) if last else 1e9
+        return should_enqueue(
+            priority,
+            avg_latency=avg_latency,
+            backlog=backlog,
+            base_interval=(cam.vlm_interval if cam else 0),
+            seconds_since_last=since,
+        )
 
     def _vlm_priority_for_frame(
         self,
