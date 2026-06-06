@@ -12,6 +12,35 @@ Privacy first. Provider agnostic. CPU friendly. Yours to run and modify.
 Stranger at the door 2am    ->  Email you + record a clip + sound an ESP32 buzzer
 ```
 
+## Screenshots
+
+A dark, dense, keyboard-friendly UI. Live camera tiles, a narrative morning brief, recognized people and vehicles, a plain-language rule builder, and one settings page that covers local AI, privacy blur, retention, and digests.
+
+### Dashboard. live tiles, narrative brief, and a detection timeline
+A morning recap written like a housemate, a "watching" row of recognized people, live camera tiles, and a running timeline of detections you can ask questions about.
+
+![Nurby dashboard](docs/screenshots/dashboard.png)
+
+### People. faces grouped into named identities
+Every recognized person, with relationships, last-seen, follow toggles, and per-person privacy controls. Unknown faces cluster into suggestions you can name in one click.
+
+![People page](docs/screenshots/people.png)
+
+### Vehicles. identified by plate, with enter and leave history
+Each vehicle keyed by license plate, with a vision-model description ("Red Nissan Altima with tinted windows"), sighting counts, and traceable footage.
+
+![Vehicles page](docs/screenshots/vehicles.png)
+
+### Rules. plain-language automation
+Card-based triggers, conditions, and a chain of real-world actions. Every rule reads back as a sentence so you always know exactly what it does.
+
+![Rules page](docs/screenshots/rules.png)
+
+### Settings. one-click local AI and deep control
+Deploy a local vision model through Ollama with a RAM-aware picker, or bring your own provider. Per-person privacy blur, nudity blur, retention policy, and the morning digest all live here.
+
+![Settings page](docs/screenshots/settings.png)
+
 ## What is Nurby?
 
 Nurby is free, open-source software for recording and understanding your security cameras on your own server. It is a self-hosted network video recorder (NVR) and AI surveillance platform. It ingests RTSP and ONVIF IP cameras, detects objects and recognizes faces locally, captions scenes with a vision-language model, and lets you ask questions about your footage in plain language. Everything runs on hardware you control with Docker, so with a local model no video ever leaves your network. People use it as a private home-security camera system, a small-business CCTV setup, and a programmable surveillance platform with a REST API, webhooks, and physical alarm integrations.
