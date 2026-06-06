@@ -156,27 +156,51 @@ async def main():
         await db.execute(delete(Vehicle))
         await db.commit()
 
+        # Demo feeds. one clip rich in distinct frontal faces (people walking
+        # toward camera) and one rich in vehicles, so the People and Vehicles
+        # pages both have real material. scene_mode=indoor keeps face
+        # clustering on (outdoor skips it to avoid passerby flooding).
+        FACE_URL = "https://videos.pexels.com/video-files/6784527/6784527-uhd_3840_2160_24fps.mp4"
+        VEH_URL = "https://videos.pexels.com/video-files/854100/854100-hd_1920_1080_25fps.mp4"
+        # name -> (location, url)
+        CAM_FEEDS = {
+            "Front Door": ("Entrance", FACE_URL),
+            "Living Room": ("Indoor", FACE_URL),
+            "Driveway": ("Front", VEH_URL),
+            "Backyard": ("Garden", VEH_URL),
+        }
+
         demo = (await db.execute(select(Camera))).scalars().first()
-        DEMO_URL = "https://nurby.ai/static/SecurityCamCompilation.mp4"
         if demo is None:
-            demo = Camera(name="Front Door", stream_url=DEMO_URL, stream_type="file")
+            demo = Camera(name="Front Door", stream_url=FACE_URL, stream_type="file")
             db.add(demo)
             await db.flush()
         else:
             demo.name = "Front Door"
-            demo.location_label = "Porch"
-            demo.status = "live"
+        demo.location_label = CAM_FEEDS["Front Door"][0]
+        demo.stream_url = CAM_FEEDS["Front Door"][1]
+        demo.stream_type = "file"
+        demo.scene_mode = "indoor"
+        demo.detect_faces = True
+        demo.detect_objects = True
+        demo.status = "live"
         cams = [demo]
-        for nm, loc in [("Backyard", "Garden"), ("Living Room", "Indoor"),
-                        ("Driveway", "Front")]:
-            existing = (await db.execute(select(Camera).where(Camera.name == nm))).scalars().first()
-            if existing:
-                cams.append(existing)
+        for nm, (loc, url) in CAM_FEEDS.items():
+            if nm == "Front Door":
                 continue
-            c = Camera(name=nm, location_label=loc, stream_url=DEMO_URL,
-                       stream_type="file", status="live", detect_objects=True,
-                       detect_faces=True, recording_enabled=True, recording_mode="motion")
-            db.add(c)
+            c = (await db.execute(select(Camera).where(Camera.name == nm))).scalars().first()
+            if c is None:
+                c = Camera(name=nm)
+                db.add(c)
+            c.location_label = loc
+            c.stream_url = url
+            c.stream_type = "file"
+            c.scene_mode = "indoor"
+            c.status = "live"
+            c.detect_objects = True
+            c.detect_faces = True
+            c.recording_enabled = True
+            c.recording_mode = "motion"
             cams.append(c)
         await db.flush()
         cam_id = {c.name: c.id for c in cams}

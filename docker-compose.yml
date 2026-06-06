@@ -155,6 +155,11 @@ services:
       # cannot pass AVFoundation or v4l2 devices into a Linux container. Run
       # `python -m services.ingestion.host_bridge_main` on the host instead.
       DISABLE_WEBCAM_BRIDGE: "1"
+      # Some hosted demo clips (e.g. stock-video CDNs) reject requests with
+      # no User-Agent. OpenCV's FFmpeg backend forwards these capture options
+      # to ffmpeg, so a browser-like UA lets those URLs stream. Harmless for
+      # real RTSP/ONVIF cameras.
+      OPENCV_FFMPEG_CAPTURE_OPTIONS: "user_agent;Mozilla/5.0"
     volumes:
       - recordings:/data/recordings
       - thumbnails:/data/thumbnails
@@ -180,6 +185,8 @@ services:
       # Reach the bundled Ollama service the same way the API does, so VLM
       # captions resolve the provider base_url on the compose network.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      # Browser-like UA so hosted demo clips on stock-video CDNs stream.
+      OPENCV_FFMPEG_CAPTURE_OPTIONS: "user_agent;Mozilla/5.0"
     volumes:
       - recordings:/data/recordings
       - thumbnails:/data/thumbnails
