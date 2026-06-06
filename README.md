@@ -16,31 +16,31 @@ Stranger at the door 2am    ->  Email you + record a clip + sound an ESP32 buzze
 
 A dark, dense, keyboard-friendly UI. Live camera tiles, a narrative morning brief, recognized people and vehicles, a plain-language rule builder, and one settings page that covers local AI, privacy blur, retention, and digests.
 
-### Dashboard
+### Dashboard: live tiles, a narrative brief, and a detection timeline
 
 A morning recap written like a housemate, a watching row of recognized people, live camera tiles, and a running timeline of detections you can ask questions about.
 
 ![Nurby dashboard](docs/screenshots/dashboard.png)
 
-### People
+### People: faces grouped into named identities
 
 Every recognized person, with relationships, last-seen, follow toggles, and per-person privacy controls. Unknown faces cluster into suggestions you can name in one click.
 
 ![People page](docs/screenshots/people.png)
 
-### Vehicles
+### Vehicles: identified by plate, with enter and leave history
 
 Every vehicle keyed by its license plate, with a vision-model description of what was actually seen, sighting counts, and traceable footage.
 
 ![Vehicles page](docs/screenshots/vehicles.png)
 
-### Rules
+### Rules: plain-language automation
 
 Card-based triggers, conditions, and a chain of real-world actions. Every rule reads back as a plain sentence so you always know exactly what it does.
 
 ![Rules page](docs/screenshots/rules.png)
 
-### Settings
+### Settings: one-click local AI and deep control
 
 Deploy a local vision model through Ollama with a RAM-aware picker, or bring your own provider. Per-person privacy blur, nudity blur, retention policy, and the morning digest all live here.
 
