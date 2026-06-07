@@ -130,6 +130,9 @@ export default function DependantDetailPage() {
         )}
       </section>
 
+      {/* Smart search (premium) */}
+      {ent?.can?.search && <SearchPanel linkId={linkId} />}
+
       {/* Alerts */}
       {dependant && (
         <AlertToggles linkId={linkId} initial={dependant.alert_prefs} />
@@ -288,6 +291,74 @@ function UpsellPanel({ ent }: { ent: Dependant["entitlements"] }) {
       <p className="text-[11px] text-muted-foreground mt-3">
         Paid plans are not yet available. These will unlock when billing launches.
       </p>
+    </section>
+  );
+}
+
+function SearchPanel({ linkId }: { linkId: string }) {
+  const { authFetch } = useAuth();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<
+    { observation_id: string; at: string; zone: string | null; caption: string | null }[]
+  >([]);
+  const [searched, setSearched] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const res = await authFetch(`/api/guardian/links/${linkId}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, limit: 20 }),
+      });
+      if (res.ok) {
+        setResults((await res.json()).results || []);
+        setSearched(true);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="mt-6">
+      <h2 className="text-sm font-medium text-muted-foreground mb-2">Ask about their day</h2>
+      <div className="flex gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && run()}
+          placeholder="outdoor, lunch, classroom..."
+          className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+        />
+        <button
+          onClick={run}
+          disabled={busy}
+          className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition-colors disabled:opacity-50"
+        >
+          {busy ? "..." : "Search"}
+        </button>
+      </div>
+      {searched && (
+        <div className="mt-3 rounded-lg border border-border bg-card divide-y divide-border">
+          {results.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-muted-foreground">No matches.</div>
+          ) : (
+            results.map((r) => (
+              <div key={r.observation_id} className="px-4 py-2.5 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-foreground">{r.zone || "Seen"}</span>
+                  <span className="text-muted-foreground text-xs">{timeAgo(r.at)}</span>
+                </div>
+                {r.caption && (
+                  <div className="text-xs text-muted-foreground mt-1">{r.caption}</div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </section>
   );
 }
