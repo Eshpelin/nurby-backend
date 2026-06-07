@@ -164,6 +164,29 @@ async def test_recap_requires_premium(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_live_requires_entitlement(monkeypatch):
+    owner = _user()
+    link = _link(owner.id, live_presence=False, live_video=False)
+    person = SimpleNamespace(id=link.person_id, display_name="Ahmed", nickname=None)
+    db = FakeDB([link, person])
+    with pytest.raises(g.HTTPException) as ei:
+        await g.link_live(link.id, request=None, user=owner, db=db)
+    assert ei.value.status_code == 402
+
+
+@pytest.mark.asyncio
+async def test_search_requires_premium(monkeypatch):
+    owner = _user()
+    link = _link(owner.id, premium=False)
+    person = SimpleNamespace(id=link.person_id, display_name="Ahmed", nickname=None)
+    db = FakeDB([link, person])
+    body = SimpleNamespace(query="dog", limit=10)
+    with pytest.raises(g.HTTPException) as ei:
+        await g.link_search(link.id, body=body, request=None, user=owner, db=db)
+    assert ei.value.status_code == 402
+
+
+@pytest.mark.asyncio
 async def test_alerts_patch_sanitizes(monkeypatch):
     owner = _user()
     link = _link(owner.id)

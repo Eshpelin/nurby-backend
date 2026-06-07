@@ -30,6 +30,7 @@ from shared.config import settings
 from shared.database import get_db
 from shared.models import (
     ApprovedPickup,
+    Camera,
     Facility,
     GuardianAccessLog,
     GuardianLink,
@@ -51,6 +52,11 @@ from shared.schemas import (
 )
 
 router = APIRouter()
+
+
+class GuardianSearchRequest(BaseModel):
+    query: str = Field(default="", max_length=200)
+    limit: int = Field(default=20, ge=1, le=50)
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -245,7 +251,6 @@ async def link_timeline(
             .limit(limit)
         )
     ).scalars().all()
-    from shared.models import Camera
 
     items = []
     for obs in rows:
@@ -261,7 +266,7 @@ async def link_timeline(
     await _log(db, link, "timeline", request, {"count": len(items)})
     return {
         "items": items,
-        "delayed": cutoff < datetime.now(timezone.utc),
+        "delayed": ent.effective_delay_seconds(link, delay) > 0,
         "as_of": cutoff.isoformat(),
     }
 
@@ -344,6 +349,101 @@ async def link_recap(
         "text": person.recap_cached_status,
         "generated_at": person.recap_cached_at.isoformat() if person.recap_cached_at else None,
         "stale": person.recap_stale,
+    }
+
+
+@router.get("/links/{link_id}/live")
+async def link_live(
+    link_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Real-time view. Requires live_presence (no-delay status) or live_video
+    (a fresh blurred frame). 402 when neither is held."""
+    link = await _load_link(db, link_id)
+    _ensure_owner_or_admin(link, user)
+    _ensure_active(link)
+    if not (link.live_presence or link.live_video):
+        raise HTTPException(status_code=402, detail="Live access is a paid feature")
+    person = await db.get(Person, link.person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Dependant not found")
+    delay = await _free_delay(db)
+    status = await presence_mod.dependant_status(db, link, person, free_delay_seconds=delay)
+    img = None
+    if link.live_video:
+        img = await presence_mod.latest_image(db, link, person, free_delay_seconds=delay)
+    await _log(db, link, "live", request)
+    return {
+        **status,
+        "live_presence": link.live_presence,
+        "live_video": link.live_video,
+        "image_available": img is not None,
+        "image_url": f"/api/guardian/links/{link_id}/image" if img is not None else None,
+    }
+
+
+@router.post("/links/{link_id}/search")
+async def link_search(
+    link_id: uuid.UUID,
+    body: GuardianSearchRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Premium dependant-scoped search. Matches the query against captions of
+    observations that contain the bound dependant, clamped to the link cutoff.
+    Only ever searches the bound person's sightings."""
+    link = await _load_link(db, link_id)
+    _ensure_owner_or_admin(link, user)
+    _ensure_active(link)
+    if not ent.can_view(link, ent.CAP_SEARCH):
+        raise HTTPException(status_code=402, detail="Smart search is a premium feature")
+    person = await db.get(Person, link.person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Dependant not found")
+
+    from datetime import timedelta
+
+    from sqlalchemy import String as SAString
+    from sqlalchemy import cast
+
+    delay = await _free_delay(db)
+    cutoff = ent.cutoff_time(link, delay)
+    person_needle = f'%"person_id": "{person.id}"%'
+    q = (
+        select(Observation)
+        .where(Observation.started_at <= cutoff)
+        .where(
+            Observation.started_at
+            >= cutoff - timedelta(days=presence_mod.PRESENCE_LOOKBACK_DAYS)
+        )
+        .where(cast(Observation.person_detections, SAString).ilike(person_needle))
+    )
+    text = (body.query or "").strip()
+    if text:
+        q = q.where(Observation.vlm_description.ilike(f"%{text}%"))
+    rows = (
+        await db.execute(q.order_by(Observation.started_at.desc()).limit(body.limit))
+    ).scalars().all()
+
+    results = []
+    for obs in rows:
+        cam = await db.get(Camera, obs.camera_id)
+        results.append(
+            {
+                "observation_id": str(obs.id),
+                "at": obs.started_at.isoformat(),
+                "zone": (cam.location_label or cam.name) if cam else None,
+                "caption": obs.vlm_description,
+            }
+        )
+    await _log(db, link, "search", request, {"query": text, "count": len(results)})
+    return {
+        "query": text,
+        "results": results,
+        "delayed": ent.effective_delay_seconds(link, delay) > 0,
     }
 
 
