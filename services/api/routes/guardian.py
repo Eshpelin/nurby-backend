@@ -799,30 +799,54 @@ async def list_links(
     return (await db.execute(q)).scalars().all()
 
 
-@router.post("/links", response_model=GuardianLinkResponse, status_code=201)
+@router.post("/links", status_code=201)
 async def create_link(
     body: GuardianLinkCreate,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Bind a guardian user to an existing person. The facility grants; the
-    guardian never self-grants. Promotes the bound user to role 'guardian' if
-    they were a plain viewer."""
+    guardian never self-grants.
+
+    Invite flow: if only ``guardian_email`` is given and no account exists yet,
+    a guardian account is created with a one-time temporary password returned
+    once to the admin to hand to the parent (who then sets their own password).
+    """
+    import secrets as _secrets
+
+    from shared.auth import hash_password
+
     person = await db.get(Person, body.person_id)
     if person is None:
         raise HTTPException(status_code=404, detail="Person not found")
 
     guardian: User | None = None
+    temp_password: str | None = None
+    guardian_created = False
     if body.guardian_user_id is not None:
         guardian = await db.get(User, body.guardian_user_id)
     elif body.guardian_email is not None:
+        email = body.guardian_email.lower().strip()
         guardian = (
-            await db.execute(select(User).where(User.email == body.guardian_email.lower()))
+            await db.execute(select(User).where(User.email == email))
         ).scalar_one_or_none()
+        if guardian is None:
+            # Invite: create the guardian account with a temp password.
+            temp_password = _secrets.token_urlsafe(9)
+            guardian = User(
+                email=email,
+                display_name=None,
+                password_hash=hash_password(temp_password),
+                role="guardian",
+                is_active=True,
+            )
+            db.add(guardian)
+            await db.flush()
+            guardian_created = True
     if guardian is None:
         raise HTTPException(
-            status_code=404,
-            detail="Guardian user not found. Create the account first.",
+            status_code=400,
+            detail="Provide guardian_user_id or guardian_email.",
         )
 
     facility = (
@@ -868,7 +892,28 @@ async def create_link(
         guardian.role = "guardian"
     await db.commit()
     await db.refresh(link)
-    return link
+    return {
+        "id": str(link.id),
+        "facility_id": str(link.facility_id),
+        "person_id": str(link.person_id),
+        "guardian_user_id": str(link.guardian_user_id),
+        "relationship_label": link.relationship_label,
+        "tier": link.tier,
+        "alert_prefs": link.alert_prefs,
+        "notify_channels": link.notify_channels,
+        "premium": link.premium,
+        "live_presence": link.live_presence,
+        "live_video": link.live_video,
+        "audio": link.audio,
+        "is_primary_parent": link.is_primary_parent,
+        "reveal_min_confidence": link.reveal_min_confidence,
+        "granted_at": link.granted_at.isoformat() if link.granted_at else None,
+        "expires_at": link.expires_at.isoformat() if link.expires_at else None,
+        "revoked_at": None,
+        "guardian_created": guardian_created,
+        "guardian_email": guardian.email,
+        "temp_password": temp_password,
+    }
 
 
 @router.patch("/links/{link_id}", response_model=GuardianLinkResponse)
