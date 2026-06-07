@@ -274,6 +274,7 @@ SETTINGS_WHITELIST: tuple[str, ...] = (
     "guardian_max_cameras_per_person",
     "guardian_pickup_detection_enabled",
     "guardian_pickup_window_seconds",
+    "guardian_image_blur_radius",
 )
 
 

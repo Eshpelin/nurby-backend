@@ -853,6 +853,7 @@ class SystemSettingsResponse(BaseModel):
     guardian_max_cameras_per_person: int = 12
     guardian_pickup_detection_enabled: bool = True
     guardian_pickup_window_seconds: int = 120
+    guardian_image_blur_radius: int = 12
 
 
 class SystemSettingsUpdate(BaseModel):
@@ -883,6 +884,7 @@ class SystemSettingsUpdate(BaseModel):
     guardian_max_cameras_per_person: int | None = Field(default=None, ge=1, le=1000)
     guardian_pickup_detection_enabled: bool | None = None
     guardian_pickup_window_seconds: int | None = Field(default=None, ge=10, le=1800)
+    guardian_image_blur_radius: int | None = Field(default=None, ge=1, le=100)
 
 
 # -- User schemas --

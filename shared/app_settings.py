@@ -139,6 +139,9 @@ DEFAULTS: dict[str, Any] = {
     # registry). When off, departures fire a plain "departed" alert.
     "guardian_pickup_detection_enabled": True,
     "guardian_pickup_window_seconds": 120,
+    # Gaussian blur radius applied to every image served to a guardian, so no
+    # non-dependant face is identifiable. Higher = more private, less legible.
+    "guardian_image_blur_radius": 12,
 }
 
 

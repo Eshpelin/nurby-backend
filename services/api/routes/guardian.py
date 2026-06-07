@@ -16,7 +16,6 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -319,11 +318,22 @@ async def link_image(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image file not found on disk")
 
+    # Privacy spine: blur so no non-dependant face is identifiable. Fail safe.
+    from fastapi import Response
+
+    from services.guardian.imaging import blur_image_file
+
+    radius = int(await get_setting("guardian_image_blur_radius", 12))
+    try:
+        blurred = blur_image_file(path, radius)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not process image")
+
     # Stamp the throttle and log the view.
     link.last_image_served_at = datetime.now(timezone.utc)
     await db.commit()
     await _log(db, link, "image", request, {"observation_id": img["observation_id"]})
-    return FileResponse(path, media_type="image/jpeg")
+    return Response(content=blurred, media_type="image/jpeg")
 
 
 @router.get("/links/{link_id}/recap")
