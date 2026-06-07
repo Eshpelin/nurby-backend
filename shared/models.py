@@ -1394,6 +1394,34 @@ class ApprovedPickup(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class GuardianEvent(Base):
+    """A guardian-facing event about a dependant (arrived, departed, picked_up,
+    entered/left zone). Persisted when the fan-out fires so the panel can show a
+    real day-timeline and a pickup-moment card, not just raw sightings.
+
+    Keyed by person (the event is about the dependant); each of that person's
+    guardians sees it filtered by their own delay/prefs at read time.
+    """
+
+    __tablename__ = "guardian_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # arrived | departed | picked_up | entered_zone | left_zone | not_seen
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), default="info", nullable=False)
+    zone: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    camera_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    observation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # For pickups: was the escort on the approved list, and who.
+    pickup_matched: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pickup_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class GuardianAccessLog(Base):
     """Append-only audit of every guardian view. Visible to the facility.
 

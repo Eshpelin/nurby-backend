@@ -175,6 +175,12 @@ async def guardian_me(
                 "person_id": str(link.person_id),
                 "display_name": (person.nickname or person.display_name) if person else None,
                 "relationship_label": link.relationship_label,
+                "has_photo": bool(person and person.photo_path),
+                "photo_url": (
+                    f"/api/guardian/links/{link.id}/photo"
+                    if person and person.photo_path
+                    else None
+                ),
                 "active": ent.is_active(link),
                 "expires_at": link.expires_at.isoformat() if link.expires_at else None,
                 "alert_prefs": link.alert_prefs or ent.DEFAULT_ALERT_PREFS,
@@ -533,6 +539,86 @@ async def link_search(
         "results": results,
         "delayed": ent.effective_delay_seconds(link, delay) > 0,
     }
+
+
+@router.get("/links/{link_id}/events")
+async def link_events(
+    link_id: uuid.UUID,
+    request: Request,
+    limit: int = Query(default=30, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The dependant's real day-timeline: arrival, pickup, zone events. Clamped
+    to the link cutoff and filtered to the alerts the guardian opted into."""
+    link = await _load_link(db, link_id)
+    _ensure_owner_or_admin(link, user)
+    _ensure_active(link)
+    if not ent.can_view(link, ent.CAP_TIMELINE):
+        raise HTTPException(status_code=403, detail="This tier cannot view a timeline")
+    person = await db.get(Person, link.person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Dependant not found")
+    from shared.models import GuardianEvent
+
+    delay = await _free_delay(db)
+    cutoff = ent.cutoff_time(link, delay)
+    rows = (
+        await db.execute(
+            select(GuardianEvent)
+            .where(GuardianEvent.person_id == person.id)
+            .where(GuardianEvent.at <= cutoff)
+            .order_by(GuardianEvent.at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    items = [
+        {
+            "id": str(e.id),
+            "kind": e.kind,
+            "message": e.message,
+            "severity": e.severity,
+            "zone": e.zone,
+            "at": e.at.isoformat(),
+            "pickup_matched": e.pickup_matched,
+            "pickup_name": e.pickup_name,
+        }
+        for e in rows
+        if ent.alert_enabled(link, e.kind)
+    ]
+    last_pickup = next((i for i in items if i["kind"] == "picked_up"), None)
+    await _log(db, link, "timeline", request, {"events": len(items)})
+    return {
+        "items": items,
+        "last_pickup": last_pickup,
+        "delayed": ent.effective_delay_seconds(link, delay) > 0,
+    }
+
+
+@router.get("/links/{link_id}/photo")
+async def link_photo(
+    link_id: uuid.UUID,
+    request: Request,
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the dependant's enrolled photo (a consented identity/recognition
+    aid). Token-auth so <img> tags work. Sharp, since it is the guardian's own
+    bound dependant; non-dependant live frames stay blurred elsewhere."""
+    user = await _user_from_token_or_header(token, request, db)
+    link = await _load_link(db, link_id)
+    _ensure_owner_or_admin(link, user)
+    person = await db.get(Person, link.person_id)
+    if person is None or not person.photo_path:
+        raise HTTPException(status_code=404, detail="No photo")
+    path = os.path.abspath(person.photo_path)
+    # Photos live under the thumbnails store in this deploy.
+    allowed = os.path.abspath(settings.thumbnails_path)
+    if not (path.startswith(allowed + os.sep) or path == allowed):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Photo not found on disk")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.get("/links/{link_id}/trends")

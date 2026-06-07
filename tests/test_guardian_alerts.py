@@ -141,8 +141,11 @@ async def test_emit_records_notification_and_recipients():
     out = await alerts.emit(db, person, "arrived", links, zone="Gate", now=NOW)
     assert len(out["recipients"]) == 1  # one opted out
     assert out["notification_id"] is not None
-    assert len(db.added) == 1
-    assert db.added[0].message == "Ahmed arrived at Gate."
+    # one Notification + one GuardianEvent persisted
+    messages = [getattr(o, "message", None) for o in db.added]
+    assert "Ahmed arrived at Gate." in messages
+    kinds = [getattr(o, "kind", None) for o in db.added]
+    assert "arrived" in kinds
 
 
 @pytest.mark.asyncio

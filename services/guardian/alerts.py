@@ -138,6 +138,28 @@ async def emit(
         observation_id=observation_id,
     )
     db.add(notif)
+
+    # Persist the guardian-facing event so the panel can show a real
+    # day-timeline + pickup-moment card (not just raw sightings).
+    try:
+        from shared.models import GuardianEvent
+
+        db.add(
+            GuardianEvent(
+                person_id=person.id,
+                kind=kind,
+                message=message,
+                severity=severity,
+                zone=zone,
+                camera_id=camera_id,
+                observation_id=observation_id,
+                pickup_matched=matched,
+                pickup_name=(pickup or {}).get("approved_name"),
+            )
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     await db.commit()
     await db.refresh(notif)
 
