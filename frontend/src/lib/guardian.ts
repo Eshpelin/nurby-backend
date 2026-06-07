@@ -17,9 +17,45 @@ export interface Dependant {
   relationship_label: string | null;
   active: boolean;
   expires_at: string | null;
+  has_photo: boolean;
+  photo_url: string | null;
   alert_prefs: Record<string, boolean>;
   notify_channels: Record<string, boolean>;
   entitlements: Entitlements;
+}
+
+export interface GuardianEvent {
+  id: string;
+  kind: string;
+  message: string;
+  severity: string;
+  zone: string | null;
+  at: string;
+  pickup_matched: boolean | null;
+  pickup_name: string | null;
+}
+
+export const EVENT_META: Record<string, { label: string; dot: string }> = {
+  arrived: { label: "Arrived", dot: "bg-emerald-500" },
+  departed: { label: "Left", dot: "bg-zinc-400" },
+  picked_up: { label: "Picked up", dot: "bg-emerald-500" },
+  entered_zone: { label: "Entered", dot: "bg-sky-500" },
+  left_zone: { label: "Left zone", dot: "bg-zinc-400" },
+  not_seen: { label: "Not seen", dot: "bg-amber-500" },
+};
+
+export function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yest = new Date(today);
+  yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+export function clockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 export const NOTIFY_CHANNELS: { key: string; label: string }[] = [

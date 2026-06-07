@@ -4,30 +4,39 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { DependantAvatar } from "@/components/guardian-avatar";
 import {
   ALERT_KINDS,
+  clockTime,
+  dayLabel,
   Dependant,
   DependantStatus,
+  EVENT_META,
+  GuardianEvent,
   NOTIFY_CHANNELS,
   stateColor,
   timeAgo,
 } from "@/lib/guardian";
-
-interface TimelineItem {
-  observation_id: string;
-  at: string;
-  zone: string | null;
-  camera_name: string | null;
-}
 
 export default function DependantDetailPage() {
   const { linkId } = useParams<{ linkId: string }>();
   const { authFetch } = useAuth();
   const [dependant, setDependant] = useState<Dependant | null>(null);
   const [status, setStatus] = useState<DependantStatus | null>(null);
-  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [events, setEvents] = useState<GuardianEvent[]>([]);
+  const [lastPickup, setLastPickup] = useState<GuardianEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showTrust, setShowTrust] = useState(false);
+
+  // Show the "what you can and cannot see" screen once, on first open.
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem("guardian_trust_ack")) setShowTrust(true);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -42,8 +51,12 @@ export default function DependantDetailPage() {
       const sRes = await authFetch(`/api/guardian/links/${linkId}/status`);
       if (sRes.ok) setStatus(await sRes.json());
       else if (sRes.status === 410) setError("This guardian link is no longer active.");
-      const tRes = await authFetch(`/api/guardian/links/${linkId}/timeline`);
-      if (tRes.ok) setTimeline((await tRes.json()).items || []);
+      const eRes = await authFetch(`/api/guardian/links/${linkId}/events`);
+      if (eRes.ok) {
+        const data = await eRes.json();
+        setEvents(data.items || []);
+        setLastPickup(data.last_pickup || null);
+      }
     } catch {
       setError("Could not load this dependant.");
     } finally {
@@ -77,16 +90,23 @@ export default function DependantDetailPage() {
 
       {/* Status header */}
       <div className="mt-4 rounded-lg border border-border bg-card p-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {dependant?.display_name || status?.display_name || "Dependant"}
-          </h1>
-          <span className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <DependantAvatar
+              photoUrl={dependant?.photo_url ?? null}
+              name={dependant?.display_name || status?.display_name || null}
+              size={52}
+            />
+            <h1 className="text-2xl font-semibold tracking-tight truncate">
+              {dependant?.display_name || status?.display_name || "Dependant"}
+            </h1>
+          </div>
+          <span className="flex items-center gap-2 shrink-0">
             <span className={`h-2.5 w-2.5 rounded-full ${c.dot}`} />
             <span className={`text-sm ${c.text}`}>{c.label}</span>
           </span>
         </div>
-        <div className="mt-3 text-sm">
+        <div className="mt-3 text-sm flex items-center gap-2 flex-wrap">
           {st === "unknown" ? (
             <span className="text-muted-foreground">No recent sighting. Nothing to show yet.</span>
           ) : (
@@ -101,54 +121,62 @@ export default function DependantDetailPage() {
               </span>
             </span>
           )}
+          {status?.delayed && <AsOfChip />}
         </div>
-        {status?.delayed && (
-          <div className="mt-3 inline-block rounded-md bg-amber-950/40 px-2.5 py-1 text-[11px] text-amber-300">
-            Free plan. Showing where they were about 30 minutes ago.
-          </div>
-        )}
       </div>
+
+      {/* Pickup moment. The highest-value event gets its own warm card. */}
+      {lastPickup && <PickupMomentCard event={lastPickup} />}
 
       {/* Image */}
       <ImagePanel linkId={linkId} canView={!!ent?.can?.image} />
 
-      {/* Timeline */}
-      <section className="mt-6">
-        <h2 className="text-sm font-medium text-muted-foreground mb-2">Today</h2>
-        {timeline.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-            No sightings to show yet.
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border bg-card divide-y divide-border">
-            {timeline.map((it) => (
-              <div key={it.observation_id} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                <span>{it.zone || it.camera_name || "Seen"}</span>
-                <span className="text-muted-foreground">{timeAgo(it.at)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      {/* Day-timeline. real arrival/pickup/zone events, grouped by day. */}
+      <EventTimeline events={events} />
+
+      {/* Weekly trends (premium) */}
+      {ent?.premium && <TrendsPanel linkId={linkId} />}
 
       {/* Smart search (premium) */}
       {ent?.can?.search && <SearchPanel linkId={linkId} />}
 
-      {/* Alerts */}
+      {/* Notifications: what alerts, and how they reach you. */}
       {dependant && (
-        <AlertToggles linkId={linkId} initial={dependant.alert_prefs} />
-      )}
-
-      {/* Delivery channels */}
-      {dependant && (
-        <ChannelToggles
-          linkId={linkId}
-          initial={dependant.notify_channels || { telegram: true, email: true, in_app: true }}
-        />
+        <section className="mt-6">
+          <h2 className="text-sm font-medium text-muted-foreground mb-2">Notifications</h2>
+          <AlertToggles linkId={linkId} initial={dependant.alert_prefs} />
+          <div className="h-3" />
+          <ChannelToggles
+            linkId={linkId}
+            initial={dependant.notify_channels || { telegram: true, email: true, in_app: true }}
+          />
+        </section>
       )}
 
       {/* Premium upsell */}
       {ent && <UpsellPanel ent={ent} />}
+
+      <div className="mt-8 text-center">
+        <button
+          onClick={() => setShowTrust(true)}
+          className="text-xs text-muted-foreground hover:text-foreground underline"
+        >
+          What can I see, and what stays private?
+        </button>
+      </div>
+
+      {showTrust && (
+        <TrustModal
+          onClose={() => {
+            try {
+              localStorage.setItem("guardian_trust_ack", "1");
+            } catch {
+              // ignore
+            }
+            setShowTrust(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -158,6 +186,14 @@ function ImagePanel({ linkId, canView }: { linkId: string; canView: boolean }) {
   const [src, setSrc] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0); // seconds until next free image
+
+  // Live countdown for the throttle.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
 
   const fetchImage = useCallback(async () => {
     setLoading(true);
@@ -171,8 +207,8 @@ function ImagePanel({ linkId, canView }: { linkId: string; canView: boolean }) {
         setSrc(URL.createObjectURL(blob));
       } else if (res.status === 429) {
         const wait = res.headers.get("Retry-After");
-        const mins = wait ? Math.ceil(parseInt(wait, 10) / 60) : 60;
-        setMsg(`Free plan allows one image per hour. Next image in about ${mins} min.`);
+        setCooldown(wait ? parseInt(wait, 10) : 3600);
+        setMsg(null);
       } else if (res.status === 404) {
         setMsg("No recent image available.");
       } else {
@@ -187,21 +223,35 @@ function ImagePanel({ linkId, canView }: { linkId: string; canView: boolean }) {
 
   if (!canView) return null;
 
+  const mm = Math.floor(cooldown / 60);
+  const ss = String(cooldown % 60).padStart(2, "0");
+
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-medium text-muted-foreground">Latest image</h2>
         <button
           onClick={fetchImage}
-          disabled={loading}
+          disabled={loading || cooldown > 0}
           className="px-3 py-1 rounded-md border border-border text-xs hover:bg-muted transition-colors disabled:opacity-50"
         >
-          {loading ? "Loading..." : src ? "Refresh" : "Show image"}
+          {loading ? "Loading..." : cooldown > 0 ? `${mm}:${ss}` : src ? "Refresh" : "Show image"}
         </button>
       </div>
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="Latest sighting" className="w-full rounded-lg border border-border" />
+      ) : cooldown > 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm">
+          <div className="text-muted-foreground">
+            Free plan allows one image per hour. Next image in{" "}
+            <span className="text-foreground tabular-nums">
+              {mm}:{ss}
+            </span>
+            .
+          </div>
+          <div className="text-[11px] text-emerald-400 mt-1">Upgrade for unlimited images.</div>
+        </div>
       ) : (
         <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
           {msg || "Tap Show image to load the most recent blurred snapshot."}
@@ -239,10 +289,10 @@ function AlertToggles({
   };
 
   return (
-    <section className="mt-6">
-      <h2 className="text-sm font-medium text-muted-foreground mb-2">
-        Alerts {saving && <span className="text-xs">saving...</span>}
-      </h2>
+    <div>
+      <div className="text-xs text-muted-foreground mb-1.5">
+        What to tell me {saving && <span>saving...</span>}
+      </div>
       <div className="rounded-lg border border-border bg-card divide-y divide-border">
         {ALERT_KINDS.map((a) => (
           <label
@@ -266,7 +316,7 @@ function AlertToggles({
           </label>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -298,10 +348,10 @@ function ChannelToggles({
   };
 
   return (
-    <section className="mt-6">
-      <h2 className="text-sm font-medium text-muted-foreground mb-2">
-        How you get alerts {saving && <span className="text-xs">saving...</span>}
-      </h2>
+    <div>
+      <div className="text-xs text-muted-foreground mb-1.5">
+        How to reach me {saving && <span>saving...</span>}
+      </div>
       <div className="rounded-lg border border-border bg-card divide-y divide-border">
         {NOTIFY_CHANNELS.map((ch) => (
           <label
@@ -328,7 +378,7 @@ function ChannelToggles({
       <p className="text-[11px] text-muted-foreground mt-2">
         Telegram needs a paired bot. Email goes to your account address. In-app always shows here.
       </p>
-    </section>
+    </div>
   );
 }
 
@@ -431,6 +481,177 @@ function SearchPanel({ linkId }: { linkId: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+function AsOfChip() {
+  return (
+    <span className="inline-flex items-center rounded-md bg-amber-950/40 px-2 py-0.5 text-[11px] text-amber-300">
+      as of ~30 min ago
+    </span>
+  );
+}
+
+function PickupMomentCard({ event }: { event: GuardianEvent }) {
+  const matched = event.pickup_matched;
+  return (
+    <div
+      className={`mt-4 rounded-lg border p-5 ${
+        matched === false
+          ? "border-amber-800 bg-amber-950/20"
+          : "border-emerald-800 bg-emerald-950/20"
+      }`}
+    >
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+        <span className={`h-2 w-2 rounded-full ${matched === false ? "bg-amber-500" : "bg-emerald-500"}`} />
+        {matched === false ? "Unrecognized pickup" : "Picked up"}
+      </div>
+      <div className="mt-1.5 text-lg font-medium">{event.message}</div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {clockTime(event.at)} · {dayLabel(event.at)}
+      </div>
+    </div>
+  );
+}
+
+function EventTimeline({ events }: { events: GuardianEvent[] }) {
+  // Group by day, newest first.
+  const groups: { day: string; items: GuardianEvent[] }[] = [];
+  for (const e of events) {
+    const day = dayLabel(e.at);
+    const g = groups.find((x) => x.day === day);
+    if (g) g.items.push(e);
+    else groups.push({ day, items: [e] });
+  }
+
+  return (
+    <section className="mt-6">
+      <h2 className="text-sm font-medium text-muted-foreground mb-2">Their day</h2>
+      {events.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+          No events yet. Arrival, pickup, and zone moments will appear here.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((g) => (
+            <div key={g.day}>
+              <div className="text-xs text-muted-foreground mb-1.5">{g.day}</div>
+              <div className="relative pl-4 border-l border-border space-y-3">
+                {g.items.map((e) => {
+                  const meta = EVENT_META[e.kind] || { label: e.kind, dot: "bg-zinc-500" };
+                  return (
+                    <div key={e.id} className="relative">
+                      <span
+                        className={`absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ${meta.dot} ring-2 ring-background`}
+                      />
+                      <div className="text-sm">{e.message}</div>
+                      <div className="text-[11px] text-muted-foreground">{clockTime(e.at)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface TrendDay {
+  date: string;
+  sightings: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  zones: string[];
+}
+
+function TrendsPanel({ linkId }: { linkId: string }) {
+  const { authFetch } = useAuth();
+  const [data, setData] = useState<{ days_seen: number; total_sightings: number; days: TrendDay[] } | null>(
+    null
+  );
+
+  const load = useCallback(async () => {
+    try {
+      const r = await authFetch(`/api/guardian/links/${linkId}/trends`);
+      if (r.ok) setData(await r.json());
+    } catch {
+      // ignore
+    }
+  }, [authFetch, linkId]);
+
+  useEffect(() => {
+    // load() only setStates after the awaited fetch resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
+
+  if (!data || data.days.length === 0) return null;
+
+  return (
+    <section className="mt-6">
+      <h2 className="text-sm font-medium text-muted-foreground mb-2">This week</h2>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="flex gap-6 text-sm">
+          <div>
+            <div className="text-xl font-semibold">{data.days_seen}</div>
+            <div className="text-xs text-muted-foreground">days seen</div>
+          </div>
+          <div>
+            <div className="text-xl font-semibold">{data.total_sightings}</div>
+            <div className="text-xs text-muted-foreground">sightings</div>
+          </div>
+        </div>
+        <div className="mt-3 space-y-1">
+          {data.days.map((d) => (
+            <div key={d.date} className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                {new Date(d.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}
+              </span>
+              <span>
+                {d.first_seen ? clockTime(d.first_seen) : "-"} to{" "}
+                {d.last_seen ? clockTime(d.last_seen) : "-"}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2">
+          Gentle wellbeing signals, not judgments.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function TrustModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="max-w-md w-full rounded-lg border border-border bg-card p-6">
+        <h2 className="text-lg font-semibold">What you can see</h2>
+        <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+          <li>Whether your dependant is present, and where, in plain words.</li>
+          <li>Arrival, pickup, and zone moments as they happen.</li>
+          <li>Recent images, blurred so no one is identifiable by face.</li>
+        </ul>
+        <h2 className="text-lg font-semibold mt-4">What stays private</h2>
+        <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+          <li>Every other person stays blurred and anonymous. Always.</li>
+          <li>You only ever see the people you are bound to.</li>
+          <li>Free plans are delayed by about 30 minutes.</li>
+          <li>Every view you make is logged and visible to the facility.</li>
+        </ul>
+        <p className="mt-4 text-xs text-muted-foreground">
+          This is an awareness aid, not a guarantee of safety.
+        </p>
+        <button
+          onClick={onClose}
+          className="mt-5 w-full rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-2 transition-colors"
+        >
+          I understand
+        </button>
+      </div>
+    </div>
   );
 }
 

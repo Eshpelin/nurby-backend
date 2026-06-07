@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import { DependantAvatar } from "@/components/guardian-avatar";
 import { Dependant, DependantStatus, stateColor, timeAgo } from "@/lib/guardian";
 
 // The 10-second check. One calm status card per dependant. Most sessions end
@@ -129,17 +130,22 @@ function DependantCard({
       className="block rounded-lg border border-border bg-card p-5 hover:border-zinc-600 transition-colors"
     >
       <div className="flex items-center justify-between">
-        <div className="font-medium">{dependant.display_name}</div>
-        <span className="flex items-center gap-1.5 text-xs">
+        <div className="flex items-center gap-3 min-w-0">
+          <DependantAvatar photoUrl={dependant.photo_url} name={dependant.display_name} size={40} />
+          <div className="min-w-0">
+            <div className="font-medium truncate">{dependant.display_name}</div>
+            {dependant.relationship_label && (
+              <div className="text-xs text-muted-foreground capitalize">
+                {dependant.relationship_label}
+              </div>
+            )}
+          </div>
+        </div>
+        <span className="flex items-center gap-1.5 text-xs shrink-0">
           <span className={`h-2 w-2 rounded-full ${c.dot}`} />
           <span className={c.text}>{c.label}</span>
         </span>
       </div>
-      {dependant.relationship_label && (
-        <div className="text-xs text-muted-foreground mt-0.5 capitalize">
-          {dependant.relationship_label}
-        </div>
-      )}
       <div className="mt-4 text-sm">
         {st === "unknown" ? (
           <span className="text-muted-foreground">No recent sighting.</span>
