@@ -554,7 +554,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(50), default="viewer")  # admin, viewer
+    role: Mapped[str] = mapped_column(String(50), default="viewer")  # admin, viewer, guardian
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Auto-created first-run owner that has not set real credentials yet.
     # The app drops a new user straight in via /auth/bootstrap, then nags
@@ -1279,3 +1279,139 @@ class WebhookSubscription(Base):
     last_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_status: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Guardian by Nurby (docs/guardian-portal-product-brief.md section 24).
+# A thin permission-and-view layer over the existing engine. These rows bind
+# an existing User (role "guardian") to an existing Person, attach
+# entitlements + alert prefs, register approved pickups, and log every view.
+# No detection/identity/AI logic is forked here; presence, alerts, recaps,
+# and search all delegate to existing Nurby subsystems.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class Facility(Base):
+    """The operator that owns cameras and grants guardian access.
+
+    For a single-household self-host deploy, one default Facility is
+    auto-created and every Person/Camera implicitly belongs to it. The model
+    exists so the daycare/multi-tenant story is a config change, not a
+    schema migration.
+    """
+
+    __tablename__ = "facilities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)  # IANA, null = system default
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Facility-level overrides of the system guardian settings. Null = inherit.
+    reveal_min_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_cameras_per_person: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GuardianLink(Base):
+    """Binding of a guardian (User) to a dependant (Person). The spine.
+
+    The privacy guarantee rests on this row. The facility grants and revokes;
+    the guardian never self-grants. Each link is independently tiered,
+    entitled, alert-configured, expirable, and revocable.
+    """
+
+    __tablename__ = "guardian_links"
+    __table_args__ = (
+        UniqueConstraint("guardian_user_id", "person_id", name="uq_guardian_person"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guardian_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    relationship_label: Mapped[str | None] = mapped_column(String(64), nullable=True)  # mother, father, grandparent, carer
+    # full | summary | alerts_only  (see brief section 11)
+    tier: Mapped[str] = mapped_column(String(16), default="full", nullable=False)
+    # Per-link alert opt-ins within the facility-allowed set. booleans keyed by
+    # alert kind: arrived, departed, picked_up, entered_zone, left_zone, not_seen.
+    alert_prefs: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Entitlement flags (brief section 24.11). No billing yet; an admin toggles
+    # these and they gate exactly as paid features will.
+    premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # recap + smart search
+    live_presence: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # removes 30-min delay
+    live_video: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # blurred live clips, lifts image cap
+    audio: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # audio-derived signals
+    # At least one primary parent paid unlocks free extra guardians on this person.
+    is_primary_parent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Stricter-only per-link reveal override. May raise the floor, never lower it.
+    reveal_min_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    granted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Last time an image was served to this guardian, for the 1/hour free throttle.
+    last_image_served_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ApprovedPickup(Base):
+    """A person or vehicle approved to pick up a dependant.
+
+    Verified pickup checks a departure event against this registry. A match
+    yields "picked up by X"; a non-match yields a yellow "unrecognized pickup".
+    """
+
+    __tablename__ = "approved_pickups"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), default="person", nullable=False)  # person | vehicle
+    # When the approved pickup is a known Person in the system, link it so the
+    # face engine confirms identity. Null for free-text/vehicle entries.
+    linked_person_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    vehicle_plate: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    photo_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GuardianAccessLog(Base):
+    """Append-only audit of every guardian view. Visible to the facility.
+
+    Transparency is a feature (brief section 12). Every status check, image
+    fetch, timeline view, live session, recap, and search is logged.
+    """
+
+    __tablename__ = "guardian_access_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    guardian_link_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("guardian_links.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guardian_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # status | image | timeline | live | recap | search | alerts_change
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
