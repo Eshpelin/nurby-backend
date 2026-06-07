@@ -133,6 +133,12 @@ DEFAULTS: dict[str, Any] = {
     # Safety governor. A single dependant cannot be followed across more than
     # this many cameras. Facility may override. Hitting it is logged.
     "guardian_max_cameras_per_person": 12,
+    # Auto pickup-escort detection. On a dependant's departure, look back over
+    # this window on the departure camera for a co-present person or vehicle
+    # and treat them as the escort (verified against the approved-pickup
+    # registry). When off, departures fire a plain "departed" alert.
+    "guardian_pickup_detection_enabled": True,
+    "guardian_pickup_window_seconds": 120,
 }
 
 

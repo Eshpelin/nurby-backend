@@ -36,6 +36,49 @@ def _coerce_uuid(value) -> uuid.UUID | None:
         return None
 
 
+async def _resolve_departure(db, person, active_links, cam_uuid):
+    """Decide whether a departure is a verified pickup.
+
+    Returns (kind, pickup_dict) when an escort is detected ("picked_up"), or
+    None to fall through to a plain "departed". Pickup detection is gated by a
+    system setting; off => always plain departed.
+    """
+    from shared.app_settings import get_setting
+
+    try:
+        if not await get_setting("guardian_pickup_detection_enabled", True):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    if cam_uuid is None:
+        return None
+
+    from datetime import datetime, timezone
+
+    from services.guardian import alerts as _alerts
+    from services.guardian import pickup as pickup_mod
+    from shared.models import ApprovedPickup
+
+    window = int(await get_setting("guardian_pickup_window_seconds", 120))
+    escort = await pickup_mod.detect_escort(
+        db, person.id, cam_uuid, datetime.now(timezone.utc), window
+    )
+    if not escort.get("has_escort"):
+        return None
+
+    pickups = (
+        await db.execute(
+            select(ApprovedPickup).where(ApprovedPickup.person_id == person.id)
+        )
+    ).scalars().all()
+    verdict = _alerts.verify_pickup(
+        pickups,
+        detected_person_id=escort.get("escort_person_id"),
+        detected_plate=escort.get("escort_plate"),
+    )
+    return "picked_up", verdict
+
+
 async def notify_journey_event(
     kind: str,
     subject_kind: str | None,
@@ -75,6 +118,18 @@ async def notify_journey_event(
                 cam = await db.get(Camera, cam_uuid)
                 if cam is not None:
                     zone = cam.location_label or cam.name
+
+            # On departure, try to infer who they left with and upgrade the
+            # alert to a verified "picked_up" when an escort is found.
+            if kind == "departed":
+                resolved = await _resolve_departure(db, person, active, cam_uuid)
+                if resolved is not None:
+                    emit_kind, pickup = resolved
+                    return await alerts_mod.emit(
+                        db, person, emit_kind, active,
+                        zone=zone, camera_id=cam_uuid, pickup=pickup,
+                    )
+
             return await alerts_mod.emit(
                 db, person, kind, active, zone=zone, camera_id=cam_uuid
             )
