@@ -267,6 +267,11 @@ SETTINGS_WHITELIST: tuple[str, ...] = (
     "vlm_enrichment_enabled",
     "vlm_enrichment_budget_minutes_per_hour",
     "vehicle_appearance_match_min_similarity",
+    "guardian_enabled",
+    "guardian_free_delay_seconds",
+    "guardian_free_image_interval_seconds",
+    "guardian_reveal_min_confidence",
+    "guardian_max_cameras_per_person",
 )
 
 

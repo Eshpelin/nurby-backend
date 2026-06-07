@@ -72,6 +72,7 @@ COPY services/api/ services/api/
 COPY services/events/ services/events/
 COPY services/discovery/ services/discovery/
 COPY services/notify/ services/notify/
+COPY services/guardian/ services/guardian/
 COPY services/recap.py services/recap.py
 COPY integrations/ integrations/
 

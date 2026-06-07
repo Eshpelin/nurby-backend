@@ -116,6 +116,23 @@ DEFAULTS: dict[str, Any] = {
     # the cosine similarity is at least this, and the vehicle type agrees.
     # Higher = stricter (fewer false matches, more duplicate identities).
     "vehicle_appearance_match_min_similarity": 0.90,
+    # ── Guardian by Nurby (docs/guardian-portal-product-brief.md s.24) ───
+    # Master switch for the guardian panel + guardian API.
+    "guardian_enabled": True,
+    # Free-tier data is always delayed by this much. A non-paid guardian
+    # only ever sees state at or before (now - delay). live_presence
+    # entitlement removes the delay per link.
+    "guardian_free_delay_seconds": 1800,
+    # Free tier may be served at most one image per this interval per
+    # dependant. live_video entitlement lifts the cap.
+    "guardian_free_image_interval_seconds": 3600,
+    # Default face-reveal confidence floor. The bound dependant is only
+    # revealed (unblurred) above this. Facility and per-camera overrides may
+    # raise it; a per-link override may only raise it further. Never lowered.
+    "guardian_reveal_min_confidence": 0.90,
+    # Safety governor. A single dependant cannot be followed across more than
+    # this many cameras. Facility may override. Hitting it is logged.
+    "guardian_max_cameras_per_person": 12,
 }
 
 

@@ -50,11 +50,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import uuid
 from typing import Any
 
 from services.agent.budget import check_budget
 from services.agent.tools import TOOL_REGISTRY, get_tool
+from services.guardian.mcp_tools import GUARDIAN_MCP_TOOLS, get_guardian_tool
 from shared.auth import decode_access_token
 from shared.database import async_session
 from shared.models import User
@@ -102,7 +102,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             "description": t["description"],
             "input_schema": t["input_schema"],
         }
-        for t in read_tools()
+        for t in (read_tools() + GUARDIAN_MCP_TOOLS)
     ]
 
 
@@ -169,8 +169,10 @@ async def dispatch_tool_call(
             return {"ok": False, "error": str(exc), "kind": "auth"}
 
         # (e) tool lookup + read-only guard happens before budget so an
-        # unknown-tool call fails fast with the right error.
-        tool = get_tool(name)
+        # unknown-tool call fails fast with the right error. Guardian-scoped
+        # tools live in a separate registry; they self-scope to the user's
+        # links so they need no camera ACL.
+        tool = get_tool(name) or get_guardian_tool(name)
         if tool is None:
             return {
                 "ok": False,

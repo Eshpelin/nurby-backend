@@ -35,6 +35,7 @@ COPY services/search/ services/search/
 COPY services/digest/ services/digest/
 COPY services/discovery/ services/discovery/
 COPY services/agent/ services/agent/
+COPY services/guardian/ services/guardian/
 COPY services/recap.py services/recap.py
 COPY services/__init__.py services/__init__.py
 # Device alert presets. routes/devices.py imports integrations.devices.

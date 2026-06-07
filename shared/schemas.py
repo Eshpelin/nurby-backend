@@ -846,6 +846,11 @@ class SystemSettingsResponse(BaseModel):
     vlm_enrichment_enabled: bool = True
     vlm_enrichment_budget_minutes_per_hour: int = 20
     vehicle_appearance_match_min_similarity: float = 0.90
+    guardian_enabled: bool = True
+    guardian_free_delay_seconds: int = 1800
+    guardian_free_image_interval_seconds: int = 3600
+    guardian_reveal_min_confidence: float = 0.90
+    guardian_max_cameras_per_person: int = 12
 
 
 class SystemSettingsUpdate(BaseModel):
@@ -869,6 +874,11 @@ class SystemSettingsUpdate(BaseModel):
     vlm_enrichment_enabled: bool | None = None
     vlm_enrichment_budget_minutes_per_hour: int | None = Field(default=None, ge=0, le=600)
     vehicle_appearance_match_min_similarity: float | None = Field(default=None, ge=0.5, le=1.0)
+    guardian_enabled: bool | None = None
+    guardian_free_delay_seconds: int | None = Field(default=None, ge=0, le=24 * 3600)
+    guardian_free_image_interval_seconds: int | None = Field(default=None, ge=0, le=24 * 3600)
+    guardian_reveal_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
+    guardian_max_cameras_per_person: int | None = Field(default=None, ge=1, le=1000)
 
 
 # -- User schemas --
@@ -1227,4 +1237,123 @@ class AgentDailyUsageResponse(BaseModel):
     run_count: int
     updated_at: datetime
 
+    model_config = {"from_attributes": True}
+
+
+# ── Guardian by Nurby schemas ──
+
+class FacilityCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9-]+$")
+    timezone: str | None = Field(default=None, max_length=64)
+    reveal_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
+    max_cameras_per_person: int | None = Field(default=None, ge=1, le=1000)
+
+
+class FacilityUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    timezone: str | None = Field(default=None, max_length=64)
+    reveal_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
+    max_cameras_per_person: int | None = Field(default=None, ge=1, le=1000)
+
+
+class FacilityResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    timezone: str | None
+    is_default: bool
+    reveal_min_confidence: float | None
+    max_cameras_per_person: int | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class GuardianLinkCreate(BaseModel):
+    # Bind an existing guardian user (by id or email) to an existing person.
+    person_id: uuid.UUID
+    guardian_user_id: uuid.UUID | None = None
+    guardian_email: str | None = Field(default=None, max_length=255)
+    facility_id: uuid.UUID | None = None  # defaults to the default facility
+    relationship_label: str | None = Field(default=None, max_length=64)
+    tier: str = Field(default="full", pattern=r"^(full|summary|alerts_only)$")
+    alert_prefs: dict | None = None
+    premium: bool = False
+    live_presence: bool = False
+    live_video: bool = False
+    audio: bool = False
+    is_primary_parent: bool = False
+    reveal_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
+    expires_at: datetime | None = None
+
+
+class GuardianLinkUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    relationship_label: str | None = Field(default=None, max_length=64)
+    tier: str | None = Field(default=None, pattern=r"^(full|summary|alerts_only)$")
+    alert_prefs: dict | None = None
+    premium: bool | None = None
+    live_presence: bool | None = None
+    live_video: bool | None = None
+    audio: bool | None = None
+    is_primary_parent: bool | None = None
+    reveal_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
+    expires_at: datetime | None = None
+
+
+class GuardianAlertPrefsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    alert_prefs: dict
+
+
+class GuardianLinkResponse(BaseModel):
+    id: uuid.UUID
+    facility_id: uuid.UUID
+    person_id: uuid.UUID
+    guardian_user_id: uuid.UUID
+    relationship_label: str | None
+    tier: str
+    alert_prefs: dict | None
+    premium: bool
+    live_presence: bool
+    live_video: bool
+    audio: bool
+    is_primary_parent: bool
+    reveal_min_confidence: float | None
+    granted_at: datetime
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    model_config = {"from_attributes": True}
+
+
+class ApprovedPickupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    kind: str = Field(default="person", pattern=r"^(person|vehicle)$")
+    linked_person_id: uuid.UUID | None = None
+    vehicle_plate: str | None = Field(default=None, max_length=32)
+
+
+class ApprovedPickupResponse(BaseModel):
+    id: uuid.UUID
+    person_id: uuid.UUID
+    name: str
+    kind: str
+    linked_person_id: uuid.UUID | None
+    vehicle_plate: str | None
+    photo_path: str | None
+    active: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class GuardianAccessLogResponse(BaseModel):
+    id: uuid.UUID
+    guardian_link_id: uuid.UUID
+    guardian_user_id: uuid.UUID
+    person_id: uuid.UUID
+    action: str
+    at: datetime
+    ip: str | None
+    detail: dict | None
     model_config = {"from_attributes": True}

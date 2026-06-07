@@ -22,6 +22,7 @@ COPY services/search/ services/search/
 COPY services/events/ services/events/
 COPY services/notify/ services/notify/
 COPY services/mcp/ services/mcp/
+COPY services/guardian/ services/guardian/
 COPY services/__init__.py services/__init__.py
 
 CMD ["python", "-m", "services.mcp.server"]

@@ -140,7 +140,25 @@ async def assign_journey(
         asyncio.create_task(_broadcast("journey_opened", new_journey))
     except RuntimeError:
         pass
+    # Guardian arrival alert. Fire-and-forget, fully isolated.
+    _fire_guardian_event(
+        "arrived", new_journey.subject_kind, new_journey.subject_key, camera.id
+    )
     return new_journey.id
+
+
+def _fire_guardian_event(kind: str, subject_kind, subject_key, camera_id) -> None:
+    """Best-effort fan-out to Guardian. Never raises into the pipeline."""
+    try:
+        from services.guardian.lifecycle import notify_journey_event
+
+        asyncio.create_task(
+            notify_journey_event(kind, subject_kind, subject_key, camera_id)
+        )
+    except RuntimeError:
+        pass  # no running loop (sync context); skip
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _segment(incident: Incident, camera: Camera) -> dict:
@@ -277,6 +295,12 @@ class JourneyFinalizer:
             j.ended_at = ended_at
             await db.commit()
             await db.refresh(j)
+
+        # Guardian departure alert. Fire-and-forget after the row is closed.
+        _dep_cam = None
+        if j.segments:
+            _dep_cam = j.segments[-1].get("camera_id") or j.segments[0].get("camera_id")
+        _fire_guardian_event("departed", j.subject_kind, j.subject_key, _dep_cam)
 
         # Skip summary for short / single-camera journeys. The
         # incident summary covers those well enough.

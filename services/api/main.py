@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from shared.config import settings
-from services.api.routes import admin_stats, agent, api_keys, audio, auth, body_clusters, cameras, conversations, daily_digest, detection_models, devices, digests, events, incidents, invites, journeys, notifications, observations, ollama_deploy, persons, privacy_zones, providers, recordings, rules, search, summaries, system, telegram, timeline, transcripts, users, vehicles, webhook_subscriptions
+from services.api.routes import admin_stats, agent, api_keys, audio, auth, body_clusters, cameras, conversations, daily_digest, detection_models, devices, digests, events, guardian, incidents, invites, journeys, notifications, observations, ollama_deploy, persons, privacy_zones, providers, recordings, rules, search, summaries, system, telegram, timeline, transcripts, users, vehicles, webhook_subscriptions
 from services.digest.scheduler import run_digest_loop
 from services.api.ws import router as ws_router
 
@@ -120,6 +120,7 @@ app.include_router(api_keys.router, prefix="/api/api-keys", tags=["api-keys"])
 app.include_router(webhook_subscriptions.router, prefix="/api/webhook-subscriptions", tags=["webhooks"])
 app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
 app.include_router(invites.router, prefix="/api/invites", tags=["invites"])
+app.include_router(guardian.router, prefix="/api/guardian", tags=["guardian"])
 app.include_router(system.router, prefix="/api", tags=["system"])
 app.include_router(cameras.router, prefix="/api/cameras", tags=["cameras"])
 app.include_router(detection_models.router, prefix="/api/detection-models", tags=["detection-models"])
