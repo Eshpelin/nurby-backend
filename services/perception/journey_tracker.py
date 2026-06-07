@@ -103,6 +103,12 @@ async def assign_journey(
     ).scalars().first()
 
     if existing is not None:
+        # Detect a zone transition: the subject moved to a different camera
+        # than their last segment. Fire left_zone(prev) + entered_zone(new).
+        prev_segs = list(existing.segments or [])
+        prev_cam = prev_segs[-1].get("camera_id") if prev_segs else None
+        is_zone_change = prev_cam is not None and prev_cam != str(camera.id)
+
         _append_segment(existing, incident, camera)
         existing.last_seen_at = max(
             existing.last_seen_at, incident.last_seen_at
@@ -119,6 +125,13 @@ async def assign_journey(
             )
         except RuntimeError:
             pass
+        if is_zone_change:
+            _fire_guardian_event(
+                "left_zone", existing.subject_kind, existing.subject_key, prev_cam
+            )
+            _fire_guardian_event(
+                "entered_zone", existing.subject_kind, existing.subject_key, camera.id
+            )
         return existing.id
 
     new_segment = _segment(incident, camera)

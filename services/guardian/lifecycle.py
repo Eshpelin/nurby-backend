@@ -91,7 +91,7 @@ async def notify_journey_event(
     No-ops silently when the person is unknown or has no active guardian links.
     Returns the emit result (for tests) or None.
     """
-    if kind not in ("arrived", "departed"):
+    if kind not in ("arrived", "departed", "entered_zone", "left_zone"):
         return None
     if subject_kind != "person" or not subject_key:
         return None

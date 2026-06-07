@@ -46,6 +46,31 @@ async def test_skips_unknown_kind():
 
 
 @pytest.mark.asyncio
+async def test_zone_kinds_emit(monkeypatch):
+    person = _person()
+    link = _link(person.id)
+    db = MagicMock()
+    pres = MagicMock()
+    pres.scalars.return_value.first.return_value = person
+    lres = MagicMock()
+    lres.scalars.return_value.all.return_value = [link]
+    db.execute = AsyncMock(side_effect=[pres, lres])
+    db.get = AsyncMock(return_value=SimpleNamespace(location_label="Playground", name="Cam"))
+    _patch_session(monkeypatch, db)
+
+    captured = {}
+
+    async def fake_emit(_db, p, kind, links, **kw):
+        captured["kind"] = kind
+        return {"ok": True}
+
+    monkeypatch.setattr(lifecycle.alerts_mod, "emit", fake_emit)
+    out = await lifecycle.notify_journey_event("entered_zone", "person", "Ahmed", uuid.uuid4())
+    assert out == {"ok": True}
+    assert captured["kind"] == "entered_zone"
+
+
+@pytest.mark.asyncio
 async def test_emits_for_person_with_active_link(monkeypatch):
     person = _person()
     link = _link(person.id)
