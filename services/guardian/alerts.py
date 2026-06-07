@@ -130,18 +130,50 @@ async def emit(
         approved_name=(pickup or {}).get("approved_name"),
         pickup_matched=matched,
     )
+    severity = severity_for(kind, matched)
     notif = Notification(
         message=message,
-        severity=severity_for(kind, matched),
+        severity=severity,
         camera_id=camera_id,
         observation_id=observation_id,
     )
     db.add(notif)
     await db.commit()
     await db.refresh(notif)
+
+    # Live in-app update. Best-effort.
+    try:
+        from services.api.ws import broadcast
+
+        await broadcast(
+            {
+                "type": "notification",
+                "id": str(notif.id),
+                "message": message,
+                "severity": severity,
+                "camera_id": str(camera_id) if camera_id else None,
+                "guardian": True,
+            }
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Per-guardian push (Telegram + email). Best-effort, isolated from the
+    # caller. Skipped silently in unit tests whose db does not support it.
+    delivery = {"telegram_sent": 0, "email_sent": 0, "guardians": 0}
+    try:
+        from services.guardian.delivery import deliver_to_guardians
+
+        delivery = await deliver_to_guardians(
+            db, recipients, message=message, subject=f"Nurby. {display}"
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "recipients": [str(getattr(link, "id")) for link in recipients],
         "notification_id": str(notif.id),
         "message": message,
-        "severity": notif.severity,
+        "severity": severity,
+        "delivery": delivery,
     }
