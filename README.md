@@ -72,6 +72,39 @@ What people actually run Nurby for:
 
 These map to the building blocks below: detection, faces and people, zones and tripwires, audio events, rules with real-world actions, and natural-language search.
 
+## Guardian by Nurby
+
+Guardian by Nurby turns the same engine into a calm, privacy-first way for a family to follow one specific person inside a facility, and nobody else. A daycare, a preschool, a coaching center, or an eldercare home runs Nurby on its own cameras. Each parent or adult child gets a Guardian Panel that answers the three questions they actually have. Did they arrive safely. Are they okay right now. Who did they leave with.
+
+It is a thin permission and view layer on top of everything Nurby already does. It forks no detection, identity, or AI logic, so every improvement to the core engine is inherited automatically.
+
+**What a guardian sees**
+
+- **Presence.** A 10-second check. "Ahmed is at school, Classroom B, seen 30 seconds ago." Calm green, amber, or grey state. It never invents a location.
+- **Safe arrival and verified pickup.** A push the moment they arrive and the moment they leave. Pickup is checked against an approved-pickup registry of people and vehicles, so you get "picked up by you" or a yellow "left with someone not on the approved list."
+- **A real day timeline.** Arrival, pickup, and zone moments as they happen, grouped by day, with a dedicated pickup-moment card.
+- **Blurred images.** The most recent snapshot, with every face blurred so no one is identifiable. The dependant's own enrolled photo is shown separately as a recognition aid.
+- **Premium depth.** Live presence with the delay removed, short clips, audio signals, a daily recap, gentle weekly trends, and natural-language search scoped to their own dependant.
+
+**Privacy is the spine, not a feature**
+
+- **Blur everyone but the bound person.** Every image served to a guardian is blurred. The system fails safe: it would rather over-blur the target than ever reveal the wrong person.
+- **Default-deny.** A guardian only ever sees the one person they are bound to. Everyone else stays an anonymous, blurred body.
+- **The facility grants, the guardian never self-grants.** Links carry a tier, an expiry, and an instant revoke for custody changes.
+- **Free data is delayed 30 minutes.** Real-time presence is a paid entitlement. Audio and live video are separate paid permissions, off by default.
+- **Every view is logged** to a facility-visible audit trail. Transparency is the point.
+
+**How it is sold (no billing in v1)**
+
+Facilities provide a free trust-building base of presence, arrival, and pickup. Parents upgrade for depth. Entitlements are modeled as flags an admin toggles today, and they behave exactly as paid features will when billing lands later. Multi-child and multi-parent are free, and extra guardians (a grandparent, a carer) are free as long as one parent on that dependant is paid.
+
+**Who runs it**
+
+- **Daycares, preschools, coaching centers.** The beachhead. Safe arrival plus verified pickup is the wedge.
+- **Eldercare and assisted living.** The same "follow one person" engine, with adult children as the guardians, surfacing presence, time out of room, and wellbeing signals.
+
+Guardians sign in and land on the Guardian Panel at `/guardian`. A facility admin manages grants, the approved-pickup registry, alert policy, and the audit log under `/guardian/admin`, and can invite a parent by email in one step. Guardians can also ask "is my child at school right now" from any MCP client through guardian-scoped, read-only tools that honor the same delay and blur.
+
 ## Get Nurby running on your computer
 
 New to this kind of software? This is the whole setup. You do not need to know Docker, Python, or databases. You copy four commands, wait once, and open a web page. It runs the same way on macOS, Windows, and Linux.
