@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
@@ -9,15 +9,19 @@ import { useTheme } from "@/lib/theme";
 import { NotificationItem, NotificationsDropdown } from "./notifications";
 import { SecureAccountModal } from "./SecureAccountModal";
 
+// Each item lists the roles allowed to see it. Operator surfaces are
+// admin/viewer only; Guardian is visible to everyone (a guardian-role user
+// sees ONLY this). This is a UX guard; the API enforces access independently.
+const OPERATOR = ["admin", "viewer"];
 const NAV_ITEMS = [
-  { label: "Dashboard", href: "/" },
-  { label: "Ask Nurby", href: "/ask" },
-  { label: "Recordings", href: "/recordings" },
-  { label: "People", href: "/people" },
-  { label: "Guardian", href: "/guardian" },
-  { label: "Vehicles", href: "/vehicles" },
-  { label: "Rules", href: "/rules" },
-  { label: "Settings", href: "/settings" },
+  { label: "Dashboard", href: "/", roles: OPERATOR },
+  { label: "Ask Nurby", href: "/ask", roles: OPERATOR },
+  { label: "Recordings", href: "/recordings", roles: OPERATOR },
+  { label: "People", href: "/people", roles: OPERATOR },
+  { label: "Guardian", href: "/guardian", roles: ["admin", "viewer", "guardian"] },
+  { label: "Vehicles", href: "/vehicles", roles: OPERATOR },
+  { label: "Rules", href: "/rules", roles: OPERATOR },
+  { label: "Settings", href: "/settings", roles: OPERATOR },
 ];
 
 interface ProviderInfo {
@@ -80,7 +84,18 @@ function getInitials(name: string | null | undefined): string {
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, logout, authFetch} = useAuth();
+  const role = user?.role ?? "viewer";
+  const isGuardian = role === "guardian";
+
+  // A guardian-role user has no business on operator surfaces. Keep them on
+  // their panel. The API already denies the data; this is the UX guard.
+  useEffect(() => {
+    if (isGuardian && !pathname.startsWith("/guardian")) {
+      router.replace("/guardian");
+    }
+  }, [isGuardian, pathname, router]);
   const { resolvedTheme, setTheme } = useTheme();
   const [provider, setProvider] = useState<ProviderInfo | null>(null);
   const [vlmHealth, setVlmHealth] = useState<{
@@ -173,15 +188,18 @@ export function Navbar() {
   }, [fetchNotifications]);
 
   useEffect(() => {
-    fetchProvider();
+    // Guardians do not see the operator VLM-health badge.
+    if (!isGuardian) fetchProvider();
     fetchUnreadCount();
-    const providerInterval = setInterval(fetchProvider, 30000);
+    const providerInterval = setInterval(() => {
+      if (!isGuardian) fetchProvider();
+    }, 30000);
     const countInterval = setInterval(fetchUnreadCount, 15000);
     return () => {
       clearInterval(providerInterval);
       clearInterval(countInterval);
     };
-  }, [fetchProvider, fetchUnreadCount]);
+  }, [fetchProvider, fetchUnreadCount, isGuardian]);
 
   return (
     <div className="border-b border-border bg-background sticky top-0 z-50">
@@ -208,7 +226,7 @@ export function Navbar() {
           </div>
 
           <nav className="flex items-center gap-1">
-            {NAV_ITEMS.map((item) => {
+            {NAV_ITEMS.filter((item) => item.roles.includes(role)).map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link
