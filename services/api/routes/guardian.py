@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -383,9 +384,12 @@ async def link_live(
         raise HTTPException(status_code=404, detail="Dependant not found")
     delay = await _free_delay(db)
     status = await presence_mod.dependant_status(db, link, person, free_delay_seconds=delay)
-    img = None
+    img = clip = None
+    clips_on = bool(await get_setting("guardian_unblurred_clips_enabled", False))
     if link.live_video:
         img = await presence_mod.latest_image(db, link, person, free_delay_seconds=delay)
+        if clips_on:
+            clip = await presence_mod.latest_clip(db, link, person, free_delay_seconds=delay)
     await _log(db, link, "live", request)
     return {
         **status,
@@ -393,7 +397,50 @@ async def link_live(
         "live_video": link.live_video,
         "image_available": img is not None,
         "image_url": f"/api/guardian/links/{link_id}/image" if img is not None else None,
+        "clip_available": clip is not None,
+        "clip_url": f"/api/guardian/links/{link_id}/clip" if clip is not None else None,
     }
+
+
+@router.get("/links/{link_id}/clip")
+async def link_clip(
+    link_id: uuid.UUID,
+    request: Request,
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the dependant's most recent recording clip. Requires live_video.
+
+    Clips are raw operator footage (faces not blurred), so they are disabled by
+    default to hold the privacy promise. A facility opts in via
+    ``guardian_unblurred_clips_enabled``. Per-frame video blur is the planned
+    enhancement that lets this default flip on safely."""
+    user = await _user_from_token_or_header(token, request, db)
+    link = await _load_link(db, link_id)
+    _ensure_owner_or_admin(link, user)
+    _ensure_active(link)
+    if not link.live_video:
+        raise HTTPException(status_code=402, detail="Live video is a paid feature")
+    if not bool(await get_setting("guardian_unblurred_clips_enabled", False)):
+        raise HTTPException(
+            status_code=403,
+            detail="Blurred live clips are coming. Raw clips are disabled for privacy.",
+        )
+    person = await db.get(Person, link.person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Dependant not found")
+    delay = await _free_delay(db)
+    clip = await presence_mod.latest_clip(db, link, person, free_delay_seconds=delay)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="No recent clip available")
+    path = os.path.abspath(clip["clip_path"])
+    allowed_dir = os.path.abspath(settings.recordings_path)
+    if not (path.startswith(allowed_dir + os.sep) or path == allowed_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Clip file not found on disk")
+    await _log(db, link, "live", request, {"clip_observation_id": clip["observation_id"]})
+    return FileResponse(path, media_type="video/mp4")
 
 
 @router.post("/links/{link_id}/search")
@@ -424,7 +471,7 @@ async def link_search(
     delay = await _free_delay(db)
     cutoff = ent.cutoff_time(link, delay)
     person_needle = f'%"person_id": "{person.id}"%'
-    q = (
+    base = (
         select(Observation)
         .where(Observation.started_at <= cutoff)
         .where(
@@ -434,11 +481,39 @@ async def link_search(
         .where(cast(Observation.person_detections, SAString).ilike(person_needle))
     )
     text = (body.query or "").strip()
+    rows = None
+    mode = "recent"
+
+    # Prefer semantic search over the dependant's sightings. Embed the query
+    # and order by pgvector cosine distance; fall back to caption ILIKE, then
+    # to recent-first, so it always returns something useful.
     if text:
-        q = q.where(Observation.vlm_description.ilike(f"%{text}%"))
-    rows = (
-        await db.execute(q.order_by(Observation.started_at.desc()).limit(body.limit))
-    ).scalars().all()
+        embedding = None
+        try:
+            from services.search.embeddings import generate_embedding, get_embedding_provider
+
+            provider = await get_embedding_provider()
+            embedding = await generate_embedding(text, provider)
+        except Exception:
+            embedding = None
+        if embedding:
+            q = (
+                base.where(Observation.description_embedding.isnot(None))
+                .order_by(Observation.description_embedding.cosine_distance(embedding))
+                .limit(body.limit)
+            )
+            rows = (await db.execute(q)).scalars().all()
+            mode = "semantic"
+        if not rows:
+            q = base.where(Observation.vlm_description.ilike(f"%{text}%"))
+            rows = (
+                await db.execute(q.order_by(Observation.started_at.desc()).limit(body.limit))
+            ).scalars().all()
+            mode = "keyword"
+    if rows is None:
+        rows = (
+            await db.execute(base.order_by(Observation.started_at.desc()).limit(body.limit))
+        ).scalars().all()
 
     results = []
     for obs in rows:
@@ -451,9 +526,10 @@ async def link_search(
                 "caption": obs.vlm_description,
             }
         )
-    await _log(db, link, "search", request, {"query": text, "count": len(results)})
+    await _log(db, link, "search", request, {"query": text, "count": len(results), "mode": mode})
     return {
         "query": text,
+        "mode": mode,
         "results": results,
         "delayed": ent.effective_delay_seconds(link, delay) > 0,
     }

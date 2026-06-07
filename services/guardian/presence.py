@@ -171,3 +171,26 @@ async def latest_image(
         "thumbnail_path": obs.thumbnail_path,
         "captured_at": obs.started_at,
     }
+
+
+async def latest_clip(
+    db,
+    link,
+    person,
+    now: datetime | None = None,
+    *,
+    free_delay_seconds: int,
+    allowed_camera_ids: Iterable[uuid.UUID] | None = None,
+) -> dict | None:
+    """The freshest observation recording clip containing the dependant, at or
+    before the cutoff. Returns {observation_id, clip_path, captured_at} or None."""
+    now = now or datetime.now(timezone.utc)
+    cutoff = ent.cutoff_time(link, free_delay_seconds, now)
+    obs = await _latest_observation_with_person(db, person.id, cutoff, allowed_camera_ids)
+    if obs is None or not getattr(obs, "clip_path", None):
+        return None
+    return {
+        "observation_id": str(obs.id),
+        "clip_path": obs.clip_path,
+        "captured_at": obs.started_at,
+    }

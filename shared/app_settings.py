@@ -142,6 +142,11 @@ DEFAULTS: dict[str, Any] = {
     # Gaussian blur radius applied to every image served to a guardian, so no
     # non-dependant face is identifiable. Higher = more private, less legible.
     "guardian_image_blur_radius": 12,
+    # Live video clips are raw operator footage (faces not blurred), so they
+    # expose other people. Off by default to hold the privacy promise; a
+    # facility may opt in for the live_video tier. Per-frame video blur is a
+    # later enhancement that will let this default flip on safely.
+    "guardian_unblurred_clips_enabled": False,
 }
 
 
