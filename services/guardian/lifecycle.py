@@ -84,6 +84,7 @@ async def notify_journey_event(
     subject_kind: str | None,
     subject_key: str | None,
     camera_id=None,
+    zone: str | None = None,
 ) -> dict | None:
     """Emit an arrived/departed guardian alert for a journey subject.
 
@@ -113,8 +114,9 @@ async def notify_journey_event(
             if not active:
                 return None
             cam_uuid = _coerce_uuid(camera_id)
-            zone = None
-            if cam_uuid is not None:
+            # An explicit named zone (a polygon sub-zone) wins; otherwise the
+            # camera's own label is the zone.
+            if zone is None and cam_uuid is not None:
                 cam = await db.get(Camera, cam_uuid)
                 if cam is not None:
                     zone = cam.location_label or cam.name

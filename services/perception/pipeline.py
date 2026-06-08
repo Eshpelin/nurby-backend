@@ -661,6 +661,17 @@ class PerceptionPipeline:
             thumbnail_path=thumbnail_path,
         )
 
+        # Guardian named-zone enter/exit. A recognised person crossing into or
+        # out of a camera's polygon zone fires entered_zone/left_zone with the
+        # zone's own name. Non-blocking and best-effort.
+        try:
+            if faces and cam is not None and getattr(cam, "motion_zones", None):
+                from services.perception import guardian_zones
+
+                await guardian_zones.process(cam, faces)
+        except Exception:
+            logger.debug("guardian zone processing failed", exc_info=True)
+
         # Step 5. Queue VLM call async (non-blocking)
         from services.perception.incident_tracker import INTERESTING_INCIDENT_LABELS
         has_subject = bool(faces) or any(
