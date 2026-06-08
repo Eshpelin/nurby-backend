@@ -412,6 +412,38 @@ class Observation(Base):
     last_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ObservationAction(Base):
+    """Structured per-person action for one observation frame.
+
+    A parallel, queryable signal alongside ``Observation.vlm_description``. The
+    perception pipeline classifies each recognised dependant's body crop into a
+    closed action vocabulary (see ``services.perception.actions.ACTIONS``) and
+    appends one row per person here. Unlike the prose caption, this is indexable,
+    so "every meal Mum attended this week" or "did Dad fall" become real queries.
+
+    Rows are written only for recognised dependants in frame (the action pass is
+    gated on dependant presence to bound VLM cost), so ``person_id`` /
+    ``person_name`` are normally set. ``action`` is always one of the closed
+    vocabulary; ``posture`` is advisory; ``confidence`` is the model's own,
+    nullable when the provider did not return one.
+    """
+
+    __tablename__ = "observation_actions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    observation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("observations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    camera_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    person_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    person_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    posture: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ObservationVlmPass(Base):
     """A single versioned VLM pass over one observation's frame.
 

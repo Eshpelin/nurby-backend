@@ -531,6 +531,7 @@ class VLMQueue:
                         job.observation_id, description, job.provider.name,
                         job.detections, thumbnail_path=thumb_path,
                         vlm_late=is_late, vlm_enqueued_at=eq_iso,
+                        frame=job.frame, provider=job.provider,
                     )
                     logger.info(
                         "VLM for camera %s completed in %.1fs. %s",
@@ -738,6 +739,7 @@ class VLMQueue:
         self, observation_id: uuid.UUID, description: str, provider_name: str,
         detections: list[dict], thumbnail_path: str | None = None,
         vlm_late: bool = False, vlm_enqueued_at: datetime | None = None,
+        frame: np.ndarray | None = None, provider: Provider | None = None,
     ):
         """Update observation record with VLM description and regenerate embedding."""
         try:
@@ -765,9 +767,38 @@ class VLMQueue:
             logger.exception("Failed to patch observation %s with VLM description", observation_id)
             return
 
-        # Guardian meal attendance (eldercare): if the caption shows a recognised
-        # dependant eating during a meal window, record it. Camera-agnostic and
-        # best-effort, off the caption the VLM already produced (no extra call).
+        # Structured per-person actions (the standard action vocabulary). When a
+        # recognised dependant is in frame, classify each one's action into a
+        # closed set and persist an observation_actions row. Gated on
+        # dependant-in-frame so the extra VLM crops never run on stranger-only or
+        # empty scenes. Drives meal attendance from the structured "eating"
+        # action; the caption path below stays as a cheap always-on fallback and
+        # shares dedupe state so the two never double-emit.
+        structured_actions: list[dict] = []
+        try:
+            if meal_inputs is not None and frame is not None and provider is not None:
+                from shared.app_settings import get_setting
+
+                if bool(await get_setting("guardian_actions_enabled", True)):
+                    from services.perception import actions as _actions
+
+                    person_dets, cam_id, started_at = meal_inputs
+                    structured_actions = await _actions.extract_for_observation(
+                        self._vlm,
+                        frame,
+                        detections,
+                        provider,
+                        observation_id=observation_id,
+                        camera_id=cam_id,
+                        person_detections=person_dets,
+                        observed_at=started_at,
+                    )
+        except Exception:
+            logger.debug("guardian action extraction failed", exc_info=True)
+
+        # Guardian meal attendance (eldercare). Prefer the structured "eating"
+        # action when we have it; always also run the caption path as a cheap
+        # fallback. Both share dedupe state, so a person is recorded once per meal.
         try:
             if meal_inputs is not None:
                 from shared.app_settings import get_setting
@@ -777,6 +808,10 @@ class VLMQueue:
 
                     person_dets, cam_id, started_at = meal_inputs
                     when_local = await _to_local(started_at)
+                    if structured_actions:
+                        await guardian_meal.process_actions(
+                            structured_actions, cam_id, when_local
+                        )
                     await guardian_meal.process_caption(
                         description, person_dets, cam_id, when_local
                     )

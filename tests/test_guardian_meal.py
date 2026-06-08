@@ -50,6 +50,40 @@ async def test_records_eating_anywhere_once_per_meal(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_actions_records_structured_eating(monkeypatch):
+    calls = []
+
+    async def fake_emit(name, camera_id, meal):
+        calls.append((name, meal))
+
+    monkeypatch.setattr(gm, "_safe_emit", fake_emit)
+    acts = [{"person_id": DEP, "person_name": "Inara", "action": "eating"}]
+    await gm.process_actions(acts, CAM, LUNCH)
+    assert calls == [("Inara", "lunch")]
+    # structured then caption for same person/meal -> shared dedupe, no double
+    await gm.process_caption("Inara is eating again", _dets(), CAM, LUNCH)
+    assert calls == [("Inara", "lunch")]
+
+
+@pytest.mark.asyncio
+async def test_process_actions_ignores_non_eating_and_off_window(monkeypatch):
+    calls = []
+
+    async def fake_emit(name, camera_id, meal):
+        calls.append(meal)
+
+    monkeypatch.setattr(gm, "_safe_emit", fake_emit)
+    await gm.process_actions(
+        [{"person_id": DEP, "person_name": "Inara", "action": "sleeping"}], CAM, LUNCH
+    )
+    assert calls == []
+    await gm.process_actions(
+        [{"person_id": DEP, "person_name": "Inara", "action": "eating"}], CAM, MIDNIGHT
+    )
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_no_record_when_not_eating_or_off_window(monkeypatch):
     calls = []
 

@@ -680,6 +680,7 @@ class PerceptionPipeline:
                 from shared.app_settings import get_setting
 
                 if bool(await get_setting("guardian_fall_detection_enabled", True)):
+                    from services.perception import actions as _actions
                     from services.perception import guardian_fall
 
                     person_boxes = [
@@ -688,8 +689,29 @@ class PerceptionPipeline:
                         if d.get("label") == "person" and d.get("bbox")
                     ]
                     if person_boxes:
+                        # VLM confirm gate. Geometry decides a box looks fallen;
+                        # the VLM tie-breaks so a resident asleep in bed (low and
+                        # horizontal) does not trip a fall alert. Resolved lazily
+                        # inside guardian_fall.process, so the VLM is only touched
+                        # on a held fall candidate, never on every frame. Fails
+                        # open: on any error the fall still alerts.
+                        confirm = None
+                        if bool(await get_setting("guardian_fall_vlm_confirm_enabled", True)):
+                            async def confirm(_camera, _bbox, _frame=frame):
+                                provider = await self._get_provider_for_camera(_camera)
+                                if provider is None:
+                                    return True  # no VLM available, fail open
+                                raw = await self._vlm.classify_action(
+                                    _actions._crop(_frame, _bbox), provider
+                                )
+                                if raw is None:
+                                    return True  # call failed, fail open
+                                return _actions.confirms_fall(
+                                    _actions.parse_action(raw)
+                                )
+
                         await guardian_fall.process(
-                            cam, person_boxes, faces, frame.shape[0]
+                            cam, person_boxes, faces, frame.shape[0], confirm=confirm
                         )
         except Exception:
             logger.debug("guardian fall processing failed", exc_info=True)

@@ -153,9 +153,20 @@ DEFAULTS: dict[str, Any] = {
     # fallen for several seconds raises a critical guardian alert. Best-effort,
     # not a certified fall alarm.
     "guardian_fall_detection_enabled": True,
+    # VLM tie-break for fall detection. When on, a held fall candidate is sent to
+    # the VLM, which classifies the cropped person; a confident non-fall action
+    # (asleep, lying down) suppresses the alert. Fails open on any error, so a
+    # real fall is never silenced by a VLM hiccup. Cuts sleeping-resident false
+    # positives.
+    "guardian_fall_vlm_confirm_enabled": True,
     # Eldercare meal attendance. A recognised dependant seen in a dining zone
     # during a meal window records an attended-meal event. Presence, not intake.
     "guardian_meal_tracking_enabled": True,
+    # Structured per-person actions. When a recognised dependant is in frame, the
+    # VLM classifies each one's action into a closed vocabulary and stores an
+    # observation_actions row. Powers meal attendance and queryable wellbeing
+    # signals. Gated on dependant-in-frame, so it adds no cost on other scenes.
+    "guardian_actions_enabled": True,
     # Live clips are blurred frame-by-frame and cached before serving, so they
     # are safe to serve by default. Turn the feature off entirely with
     # guardian_clips_enabled. guardian_unblurred_clips_enabled is an explicit

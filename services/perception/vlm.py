@@ -172,6 +172,43 @@ class VLMClient:
             logger.exception("VLM call failed for provider %s", provider.name)
             return None
 
+    async def classify_action(self, crop: np.ndarray, provider: Provider) -> str | None:
+        """Ask the VLM what the single person in ``crop`` is doing and return the
+        raw reply. The caller (services.perception.actions) parses it into the
+        closed action vocabulary. Uses a constrained system prompt and a tiny
+        output cap because the answer is one short JSON object.
+
+        Kept separate from ``describe`` so the action classifier never inherits
+        the scene-description prompt, which would pull the model back toward
+        prose instead of a single label."""
+        from services.perception import actions as _actions
+
+        try:
+            _, jpeg_buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            b64_image = base64.b64encode(jpeg_buf.tobytes()).decode("utf-8")
+        except Exception:
+            logger.debug("action crop encode failed", exc_info=True)
+            return None
+
+        system = _actions.CLASSIFY_SYSTEM_PROMPT
+        user = _actions.CLASSIFY_USER_PROMPT
+        cap = 80  # one small JSON object
+
+        try:
+            if provider.kind == "openai":
+                return await self._call_openai(b64_image, user, provider, system, cap)
+            elif provider.kind == "anthropic":
+                return await self._call_anthropic(b64_image, user, provider, system, cap)
+            elif provider.kind == "google":
+                return await self._call_google(b64_image, user, provider, system, cap)
+            elif provider.kind == "ollama":
+                return await self._call_ollama(b64_image, user, provider, system, cap)
+            logger.warning("Unknown provider kind for action classify: %s", provider.kind)
+            return None
+        except Exception:
+            logger.exception("action classify failed for provider %s", provider.name)
+            return None
+
     async def _call_openai(self, b64_image: str, prompt: str, provider: Provider, system_prompt: str = SYSTEM_PROMPT, max_tokens: int | None = None) -> str | None:
         http = await self._get_http()
         model = provider.default_model or "gpt-4o-mini"
