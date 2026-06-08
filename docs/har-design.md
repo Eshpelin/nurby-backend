@@ -130,18 +130,65 @@ This split is the single biggest change from the v1 sketch, which implicitly ass
 pipeline. It also reframes the old "keyframe rate vs temporal need" risk: that was not a
 tuning knob, it was a placement decision, now resolved.
 
-### L0. Tracking (in ingestion)
+### L0. Tracking and re-identification (two tiers)
 
-Use Ultralytics' built-in tracker: `model.track(..., persist=True)` with `bytetrack` or
-`botsort`. We already depend on Ultralytics in `detector.py`, so this adds a stable
-per-camera `track_id` with no new dependency and no new licence exposure. BoT-SORT adds
-appearance to the association and handles occlusion better; ByteTrack is lighter. Default
-ByteTrack, BoT-SORT behind a setting.
+Tracking is not a Phase-1 convenience. It is a first-class part of both HAR and person
+identification, and it splits into two distinct tiers. A single-camera tracker only solves
+the first.
 
-`track_id` is per-camera, per-session, short-term. Cross-camera identity stays the job of
-OSNet re-id and ArcFace. Tracking gives short-term continuity; re-id and faces stitch it
-to a `person_id`. Binding a track to a person and holding it through occlusion is the fix
-for face-dependent attribution.
+**Today, for context.** We run no motion tracker at all. Identity is two appearance
+models: ArcFace (face) and OSNet body re-id (`reid.py`), the latter clustered in pgvector.
+That associates each detection to a global cluster by embedding similarity, per keyframe.
+It is real re-id and does a form of cross-camera linking, but it is per-detection, not
+per-tracklet, so the embedding is noisy, ID-switches and mis-merges are common when
+clothing is similar (a ward of residents) or a person is briefly occluded, and there is no
+within-scene continuity. For HAR this is fatal: an action lives in a multi-second window,
+and an ID switch mid-window attaches the label to the wrong person.
+
+**Tier 1, within-scene tracking + adaptive re-id (in ingestion).** A real per-camera
+tracker gives every person a stable `track_id` for the whole time they are in a scene,
+robust to short occlusion, with online appearance adaptation. Options:
+
+- **BoxMOT** (mikel-brostrom), recommended. A pluggable library of SOTA trackers
+  (DeepOCSORT, StrongSORT, BoT-SORT, OCSORT, HybridSORT) with swappable ReID backbones,
+  including **OSNet, the model we already use**, plus CLIP-ReID and LightMBN. StrongSORT
+  and DeepOCSORT maintain per-track EMA appearance banks, which is exactly online adaptive
+  re-identification: the appearance template updates as the person's look drifts with pose
+  and lighting. Strong benchmarks (BoT-SORT IDF1 88.9, DeepOCSORT 89.0) and occlusion
+  recovery via two-stage association. AGPL-3.0, but we already carry that via the
+  Ultralytics detector, so it adds no new licence exposure, and it shares OSNet's embedding
+  space with our gallery.
+- **Ultralytics `.track()`** (`bytetrack` / `botsort`), the no-new-dependency fallback. Its
+  built-in BoT-SORT is competitive for easy scenes but is less configurable on the ReID
+  side than BoxMOT. Fine as a first cut; expect to move to BoxMOT for crowded eldercare
+  rooms where ID stability over a HAR window is the whole game.
+
+Either way, the win for identity is that we now match a **tracklet-level** embedding (a
+robust mean / EMA over many frames of one track) to identity, instead of one noisy
+per-keyframe crop. That alone sharpens `person_id` materially.
+
+Correction to an earlier draft: BoxMOT is **not** "no upside over the built-in tracker".
+Its decoupled, adaptive ReID is a real advantage for our hard cases. The library to skip is
+**motcpp**, and only because it is C++ and would add a build/binding burden to a Python
+async stack, not because it lacks capability.
+
+**Tier 2, cross-camera global re-id / MTMC (in perception).** No single-camera tracker does
+this. ByteTrack, BoT-SORT, and BoxMOT are all single-camera only; they never associate a
+person across cameras. Cross-camera identity is a separate gallery-matching problem
+(camera-aware feature normalisation, spatial-temporal constraints). We already have the
+embryo of it in the OSNet + ArcFace gallery. The upgrade is to feed it **tracklet
+embeddings** from Tier 1 rather than per-frame crops, and to bind `track_id → person_id`
+once per track via the highest-confidence face or body match over the track's life. This is
+what gives "the resident in room A is the same as in room B", serving Guardian hand-off and
+a person's whole-day timeline.
+
+Honest limit: cross-camera identity in a ward of similarly-dressed people is never truly
+perfect. Face stays the strongest anchor when visible; these two tiers narrow the gap, they
+do not close it. We should target "high precision, bounded recall" (refuse to merge when
+unsure) over a false sense of certainty.
+
+Binding a track to a person and holding it through occlusion is the fix for the
+face-dependent attribution weakness in v1.
 
 ### L1. Pose (in ingestion)
 
@@ -239,7 +286,9 @@ integration project, not a modelling one. Verified options and licences:
 | Layer | Reuse | Licence | Note |
 |---|---|---|---|
 | Detection | Ultralytics YOLO (already in `detector.py`) | AGPL-3.0 | already a dependency |
-| Tracking | Ultralytics `.track()` ByteTrack/BoT-SORT | AGPL-3.0 | no new dep; or original ByteTrack (MIT) for a clean path |
+| Tracking (Tier 1) | **BoxMOT** (DeepOCSORT/StrongSORT/BoT-SORT, swappable OSNet/CLIP-ReID) | AGPL-3.0 | recommended; adaptive EMA re-id, occlusion-robust, reuses our OSNet; AGPL already carried |
+| Tracking (fallback) | Ultralytics `.track()` ByteTrack/BoT-SORT | AGPL-3.0 | no new dep; weaker ReID control; first-cut only |
+| Cross-camera re-id (Tier 2) | our OSNet + ArcFace gallery (existing), fed tracklet embeddings | n/a (ours) | single-camera trackers do NOT do this |
 | Pose | **rtmlib / RTMPose** | Apache-2.0 | deps: numpy/opencv/onnxruntime; 90+ FPS on i7 CPU |
 | Action | **PYSKL** ST-GCN++ / PoseConv3D | Apache-2.0 | NTU-RGB+D pretrained, 17-kp HRNet format matches RTMPose |
 | Action (alt) | MMAction2 | Apache-2.0 | heavier parent toolbox, same models |
@@ -265,8 +314,14 @@ action) and the tracker has an MIT option (original ByteTrack); the lone AGPL an
 then the YOLO detector, which has separate-licence alternatives. So HAR does not deepen
 the licensing problem and can be made licence-clean independently of the detector.
 
-Avoid: BoxMOT / yolo_tracking and motcpp for tracking. Both are AGPL-3.0 and bring no
-advantage over Ultralytics' built-in trackers or MIT ByteTrack.
+On tracking specifically: BoxMOT is the recommended Tier-1 engine, not something to avoid
+(an earlier draft wrongly dismissed it). Its decoupled, adaptive ReID and occlusion
+recovery are real advantages for crowded eldercare rooms, and it reuses the OSNet embedding
+we already ship. AGPL is moot because the Ultralytics detector already imposes it. The one
+to skip is **motcpp**: capable, but C++, so it adds a build/binding burden to a Python async
+stack for speed we are unlikely to need. If a non-AGPL posture is ever required, the
+licence-clean tracking path is the original MIT ByteTrack plus our own OSNet ReID, at the
+cost of BoxMOT's adaptive-ReID conveniences.
 
 ## Data model changes
 
@@ -321,10 +376,16 @@ not "cameras not people" as v1 claimed. The spike measures the real ceiling.
   cadence for 1, 2, 3 people; the track_id ↔ person_id binding prototype end to end; and
   pose quality on genuinely low-end / wide-angle footage. Output: go/no-go numbers and the
   skeleton-only vs RGB-hybrid decision. Do not start Phase 2 until this lands.
-- **Phase 1. Tracking (safe now, build in ingestion).** Ultralytics `.track()` in
-  `stream.py`; stamp `track_id` onto published keyframes; implement the binding map and
-  write `track_id` onto `observation_actions`. Ships value alone: stable identity through
-  occlusion, fixing the worst v1 attribution failure, with no model swap.
+- **Phase 1. Tracking + re-id (safe now, build in ingestion).** Stand up a Tier-1 tracker
+  in `stream.py` (start with Ultralytics `.track()` for speed of integration, evaluate
+  BoxMOT DeepOCSORT/BoT-SORT with the OSNet ReID we already use); stamp `track_id` onto
+  published keyframes; implement the binding map and write `track_id` onto
+  `observation_actions`. Feed **tracklet-level** embeddings (not per-frame crops) into the
+  existing OSNet + ArcFace gallery (Tier 2) to sharpen `person_id`. Ships value with no
+  model swap: stable identity through occlusion, fixing the worst v1 attribution failure,
+  and better cross-camera identification for Guardian as a side effect. The
+  Ultralytics-vs-BoxMOT choice is itself a Phase 0 measurement (ID-switch rate on the demo
+  cameras).
 - **Phase 2. Pose.** rtmlib RTMPose per track in ingestion; optional keypoint store behind
   a setting. No behaviour change yet; validates pose quality on real cameras.
 - **Phase 3. Temporal model.** PYSKL ST-GCN++ producing the closed vocabulary with
@@ -376,7 +437,13 @@ keypoints or not by default.
 ## Review log
 
 - v1: initial sketch (single-pipeline assumption, VLM-as-classifier critique).
-- v2 (this revision): senior-engineering review relocated HAR to ingestion, added the
+- v2.1: corrected the tracking story. Expanded L0 into a two-tier design (Tier 1
+  within-scene tracking + adaptive re-id via BoxMOT reusing OSNet; Tier 2 cross-camera
+  global re-id via the existing OSNet/ArcFace gallery fed tracklet embeddings). Retracted
+  the earlier "avoid BoxMOT" line; clarified that single-camera trackers do not do
+  cross-camera, and that tracklet-level matching sharpens `person_id`. motcpp skipped on
+  integration cost, not capability.
+- v2 (earlier revision): senior-engineering review relocated HAR to ingestion, added the
   cross-service binding section, a Phase 0 spike, and corrected the "cost scales with
   cameras" claim to "scales with people". AI/ML-researcher review added the concrete OSS
   reuse stack (Ultralytics track, rtmlib/RTMPose, PYSKL ST-GCN++/PoseConv3D on NTU-RGB+D),
