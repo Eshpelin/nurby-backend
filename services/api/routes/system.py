@@ -275,6 +275,10 @@ SETTINGS_WHITELIST: tuple[str, ...] = (
     "guardian_pickup_detection_enabled",
     "guardian_pickup_window_seconds",
     "guardian_image_blur_radius",
+    "guardian_reveal_enabled",
+    "guardian_reveal_ref_distance",
+    "guardian_clips_enabled",
+    "guardian_clip_blur_sigma",
     "guardian_unblurred_clips_enabled",
 )
 

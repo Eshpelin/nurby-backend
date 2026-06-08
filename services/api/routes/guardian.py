@@ -431,7 +431,7 @@ async def link_live(
     delay = await _free_delay(db)
     status = await presence_mod.dependant_status(db, link, person, free_delay_seconds=delay)
     img = clip = None
-    clips_on = bool(await get_setting("guardian_unblurred_clips_enabled", False))
+    clips_on = _truthy(await get_setting("guardian_clips_enabled", True))
     if link.live_video:
         img = await presence_mod.latest_image(db, link, person, free_delay_seconds=delay)
         if clips_on:
@@ -457,21 +457,19 @@ async def link_clip(
 ):
     """Serve the dependant's most recent recording clip. Requires live_video.
 
-    Clips are raw operator footage (faces not blurred), so they are disabled by
-    default to hold the privacy promise. A facility opts in via
-    ``guardian_unblurred_clips_enabled``. Per-frame video blur is the planned
-    enhancement that lets this default flip on safely."""
+    The clip is Gaussian-blurred frame-by-frame (faces not identifiable, audio
+    dropped) and cached, so it is safe to serve by default. A facility that
+    explicitly accepts raw footage can flip ``guardian_unblurred_clips_enabled``
+    to bypass the blur. Clips can be turned off entirely with
+    ``guardian_clips_enabled``."""
     user = await _user_from_token_or_header(token, request, db)
     link = await _load_link(db, link_id)
     _ensure_owner_or_admin(link, user)
     _ensure_active(link)
     if not link.live_video:
         raise HTTPException(status_code=402, detail="Live video is a paid feature")
-    if not bool(await get_setting("guardian_unblurred_clips_enabled", False)):
-        raise HTTPException(
-            status_code=403,
-            detail="Blurred live clips are coming. Raw clips are disabled for privacy.",
-        )
+    if not _truthy(await get_setting("guardian_clips_enabled", True)):
+        raise HTTPException(status_code=403, detail="Clips are disabled")
     person = await db.get(Person, link.person_id)
     if person is None:
         raise HTTPException(status_code=404, detail="Dependant not found")
@@ -485,8 +483,26 @@ async def link_clip(
         raise HTTPException(status_code=403, detail="Access denied")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Clip file not found on disk")
-    await _log(db, link, "live", request, {"clip_observation_id": clip["observation_id"]})
-    return FileResponse(path, media_type="video/mp4")
+
+    # Blur every frame unless a facility explicitly accepts raw footage.
+    raw_ok = _truthy(await get_setting("guardian_unblurred_clips_enabled", False))
+    served_path = path
+    blurred = False
+    if not raw_ok:
+        from services.guardian.video import blur_clip_async
+
+        sigma = int(await get_setting("guardian_clip_blur_sigma", 20))
+        try:
+            served_path = await blur_clip_async(path, sigma)
+            blurred = True
+        except Exception:
+            # Fail safe: never fall back to raw footage on blur failure.
+            raise HTTPException(status_code=503, detail="Clip is being prepared. Try again shortly.")
+    await _log(
+        db, link, "live", request,
+        {"clip_observation_id": clip["observation_id"], "blurred": blurred},
+    )
+    return FileResponse(served_path, media_type="video/mp4")
 
 
 @router.post("/links/{link_id}/search")

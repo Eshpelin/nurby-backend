@@ -142,10 +142,19 @@ DEFAULTS: dict[str, Any] = {
     # Gaussian blur radius applied to every image served to a guardian, so no
     # non-dependant face is identifiable. Higher = more private, less legible.
     "guardian_image_blur_radius": 12,
-    # Live video clips are raw operator footage (faces not blurred), so they
-    # expose other people. Off by default to hold the privacy promise; a
-    # facility may opt in for the live_video tier. Per-frame video blur is a
-    # later enhancement that will let this default flip on safely.
+    # Dependant face reveal. When a perception face match clears the confidence
+    # floor, that one box is left sharp in the otherwise-blurred image. The
+    # floor only ratchets up per facility/camera/link. ref_distance is the
+    # InsightFace L2 "same person" bound used to map confidence to distance.
+    "guardian_reveal_enabled": True,
+    "guardian_reveal_min_confidence": 0.2,
+    "guardian_reveal_ref_distance": 1.1,
+    # Live clips are blurred frame-by-frame and cached before serving, so they
+    # are safe to serve by default. Turn the feature off entirely with
+    # guardian_clips_enabled. guardian_unblurred_clips_enabled is an explicit
+    # facility override to serve raw footage (skips the blur).
+    "guardian_clips_enabled": True,
+    "guardian_clip_blur_sigma": 20,
     "guardian_unblurred_clips_enabled": False,
 }
 
