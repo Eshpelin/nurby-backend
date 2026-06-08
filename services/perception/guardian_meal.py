@@ -109,6 +109,38 @@ async def process_caption(
     return emitted
 
 
+async def process_actions(
+    actions: list[dict] | None,
+    camera_id,
+    when_local: datetime,
+) -> list[dict]:
+    """Record meal attendance from STRUCTURED per-person actions (the standard
+    action vocabulary) instead of the prose caption. Emits ``attended_meal`` once
+    per (person, day, meal) when a dependant's classified action is ``eating``
+    during a meal window. Shares ``_state`` with ``process_caption`` so the two
+    paths never double-emit for the same person and meal. ``actions`` items carry
+    ``person_id``, ``person_name``, and ``action`` (see services.perception.actions)."""
+    meal = current_meal(when_local)
+    if meal is None:
+        return []
+    day = when_local.date().isoformat()
+    emitted: list[dict] = []
+    for a in actions or []:
+        if not isinstance(a, dict) or a.get("action") != "eating":
+            continue
+        pid = a.get("person_id")
+        name = a.get("person_name")
+        if not pid or not name:
+            continue
+        key = (str(pid), day, meal)
+        if key in _state:
+            continue
+        _state.add(key)
+        await _safe_emit(str(name), camera_id, meal)
+        emitted.append({"kind": "attended_meal", "person": str(name), "meal": meal})
+    return emitted
+
+
 async def _safe_emit(person_name: str, camera_id, meal: str) -> None:
     from services.guardian.lifecycle import notify_journey_event
 
