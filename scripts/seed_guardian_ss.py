@@ -58,6 +58,10 @@ def _draw_scene(path: str, label: str) -> None:
     d.rectangle([120, 300, 360, 420], fill=(70, 55, 40))  # desk
     for cx, col in ((520, (60, 130, 100)), (640, (70, 90, 150))):
         d.ellipse([cx - 30, 200, cx + 30, 260], fill=(212, 180, 160))  # head
+        # eyes + mouth so a sharp face reads differently from a blurred one
+        d.ellipse([cx - 16, 222, cx - 6, 232], fill=(35, 30, 28))
+        d.ellipse([cx + 6, 222, cx + 16, 232], fill=(35, 30, 28))
+        d.arc([cx - 14, 234, cx + 14, 252], start=20, end=160, fill=(120, 70, 60), width=3)
         d.rectangle([cx - 45, 255, cx + 45, 400], fill=col)  # body
     d.text((24, 24), label, fill=(180, 200, 190))
     img.save(path, "JPEG", quality=85)
@@ -115,10 +119,18 @@ async def main() -> None:
         # thumbnail the (blurred) image endpoint can serve.
         thumb = os.path.join(THUMBS, "inara_scene.jpg")
         _draw_scene(thumb, "Classroom B  10:42")
+        # Inara is the green figure (head centred ~520); the blue figure is an
+        # unmatched stranger. Reveal should leave Inara's face sharp and keep
+        # the stranger blurred.
         det = {
-            "count": 1,
+            "count": 2,
             "person_name": "Inara",
-            "faces": [{"person_id": str(inara.id), "confidence": 0.95}],
+            "faces": [
+                {"person_id": str(inara.id), "person_name": "Inara",
+                 "bbox": [488, 198, 552, 262], "match_distance": 0.34},
+                {"person_id": None, "person_name": None,
+                 "bbox": [608, 198, 672, 262], "match_distance": None},
+            ],
         }
         obs = Observation(
             camera_id=cam.id,
