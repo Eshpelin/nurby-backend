@@ -1,452 +1,334 @@
-# Human Action Recognition (HAR)
+# Human Action Recognition (HAR): engineering plan
 
-Status: design v2 (revised after a senior-engineering review and an AI/ML-researcher
-review). v1 (single-frame VLM action classifier) shipped in
-`services/perception/actions.py` and is gated on by default. This doc specifies the
-path from that snapshot classifier to a real, temporal, per-track HAR engine, names
-the open-source components to reuse, and gates the risky phases behind a measurement
-spike.
+Status: plan, ready to schedule. Supersedes the earlier discussion-style drafts. This is
+the build document: what we implement, how it touches the existing stack, how it shows up
+on the dashboard, and a phased task list with acceptance criteria.
 
-## TL;DR
+v1 (single-frame VLM action classifier) shipped in `services/perception/actions.py` and is
+gated on by default. It stays as the fallback until v-next proves out per camera.
 
-What shipped is single-frame classification: crop one recognised person, ask the VLM
-what they are doing, store a closed-vocabulary action plus an open-world detail. It is
-useful for coarse, low-frequency signals (a meal happened today, a person is on the
-floor) but it is temporally blind, face-dependent, and scales its cost with the number
-of people in frame.
+---
 
-Real action recognition is motion over time, per tracked person. The target is a
-layered pipeline: track every person, estimate pose, classify a short window of pose
-with a skeleton action model, and **fuse** that with the VLM rather than replacing it.
-HAR becomes the cheap continuous classifier; the VLM keeps running at keyframe cadence,
-now fed the HAR labels so its captions improve, and HAR/VLM agreement becomes a
-self-improving training signal (see L3). We do not build the models. We reuse a mature, mostly Apache-2.0 stack
-(Ultralytics tracking, rtmlib/RTMPose, PYSKL ST-GCN++/PoseConv3D on NTU-RGB+D) whose
-keypoint formats line up, so most of the work is glue and integration, not research.
+## 1. Purpose and scope
 
-Two things from review reshaped the v1 sketch and must be respected:
+Produce continuous, per-person action labels over time, robust to occlusion and to multiple
+people in frame, and surface them to the operator on the camera dashboard. Actions come from
+a closed vocabulary; the VLM adds open-world nuance and cross-checks the labels.
 
-1. **Placement.** HAR cannot run in the perception service. Perception only ever sees
-   sparse motion keyframes off Redis. The dense frame stream exists only in the
-   ingestion worker. L0 (track) and L1 (pose) must live in ingestion; perception keeps
-   detection, face ID, and the VLM. A `track_id` carried across the Redis boundary
-   stitches them.
-2. **Measure before committing.** The CPU throughput, the cross-service identity
-   binding, and pose quality on cheap cameras are unproven. Phase 1 (tracking) is safe
-   to build now; Phases 2-4 are gated behind a short Phase 0 spike that turns three
-   assumptions into measured numbers.
+In scope for v-next: tracking + pose + skeleton action model in ingestion; fusion with the
+VLM; `observation_actions` + a segment table; camera-scoped API + live WS; dashboard
+surfaces (live overlay, activity timeline, enriched cards); operator config + test mode.
 
-The `observation_actions` schema, closed vocabulary, and fall geometry survive
-unchanged; the temporal model becomes the new producer of those rows.
+Out of scope for v-next: clinical gait analysis; custom per-tenant taxonomies; cross-site
+federated training. Captured in section 9 as later work.
 
-## The current implementation, assessed honestly
+Closed vocabulary (`services/perception/actions.ACTIONS`, unchanged): `standing, walking,
+sitting, lying_down, fallen, eating, drinking, sleeping, playing, interacting, unknown`,
+plus a coarse `posture` and an open-world `detail` string.
 
-Pipeline today (`actions.extract_for_observation`, wired in `vlm_queue`):
+---
 
-1. YOLO produces person boxes per keyframe (`services/perception/detector.py`, via
-   Ultralytics). ArcFace gives recognised faces with `person_id`; OSNet body re-id gives
-   `body_cluster_id`. These are appearance models ("who"), associated by embedding
-   similarity, not a frame-to-frame motion tracker.
-2. For each recognised face, find the body box whose region contains the face centre
-   (`body_box_for_face`), crop the frame to that one person.
-3. Send the single-person crop to the VLM with a constrained prompt; parse
-   `{action, posture, confidence, detail}` against a closed vocabulary.
-4. Persist one `observation_actions` row per dependant. Fall uses bbox geometry plus a
-   hold timer plus a VLM crop confirm; meal reads the `eating` action.
+## 2. Current state and its limits
 
-Genuinely good, keep:
+Today: YOLO person boxes on motion keyframes (`detector.py`), ArcFace face -> `person_id`,
+OSNet body re-id -> `body_cluster_id`, then for each recognised face we crop one person and
+ask the VLM for `{action, posture, detail}`. Good for coarse daily signals (meal attended,
+fell), but: temporally blind (one frame cannot see motion), face-dependent (misses occluded
+people), fragile under crowding, and cost scales with people (one VLM call per person per
+observation). Not action recognition. v-next fixes this.
 
-- The closed vocabulary + open `detail` split. Closed action is the queryable anchor;
-  detail is the open description.
-- The `observation_actions` table and the dependant-in-frame gate.
-- Fall = geometry + duration hold + VLM confirm. A defensible pragmatic fall detector
-  even in the target architecture.
+---
 
-Wrong for HAR:
+## 3. Target architecture
 
-- **Temporally blind.** A single frame cannot encode motion. "Eating" is repeated
-  hand-to-mouth over seconds; one still is indistinguishable from scratching. Only fall
-  has temporal state (the hold timer). Transitions are invisible by construction.
-- **Face-dependent attribution.** Only people whose face is recognised get classified.
-  The actions we most care about (eating, lying down) frequently occlude the face.
-- **Fragile under crowding.** Face-centre-in-box breaks when bodies overlap.
-- **Cost scales with people.** Per observation: the full-frame caption, one VLM call per
-  dependant, plus fall-confirm. A three-resident room is three extra VLM calls per
-  observation, the throughput bottleneck on a local model.
-
-v1 is acceptable for daily-granularity wellbeing (meal attended, fell) but must not be
-relied on as action recognition.
-
-## Goals and non-goals
-
-Goals.
-
-- Continuous, per-person action labels over time, robust to short face occlusion and to
-  multiple people in frame.
-- Detect transitions, not just per-frame states.
-- Cost dominated by cheap local models, with the expensive VLM called rarely.
-- Run on a self-hosted box. CPU-only must work; GPU should accelerate.
-- Reuse existing OSS for every model. No training from scratch in the first cut.
-- Same closed vocabulary and `observation_actions` rows as today, so the API, MCP tools,
-  meal, and fall layers inherit the upgrade for free.
-
-Non-goals.
-
-- Clinical gait analysis or centimetre pose accuracy.
-- Fine-grained activities beyond the closed set in the first cut (the open `detail` field
-  carries nuance via the VLM).
-- A certified medical fall alarm. Best-effort remains the framing.
-
-## Architecture and placement (the load-bearing revision)
-
-The system is two services with a Redis boundary, not one pipeline.
+Two services with a Redis boundary. The dense frame stream lives only in ingestion;
+perception only ever sees sparse motion keyframes, so the temporal work must run in
+ingestion.
 
 ```
-INGESTION  (services/ingestion/stream.py)            dense frames live here
-  RTSP via MediaMTX → decode every frame
-  L0  Ultralytics .track()  → person boxes + stable track_id   (ByteTrack/BoT-SORT)
-  L1  rtmlib RTMPose        → 17-kp skeleton per track
-  L2  PYSKL ST-GCN++        → closed action per track per pose window
-  L4  per-track state machine → emit on transition, debounce
-        │  publishes: existing motion keyframe + {track_id, action, window} sidecar
-        ▼ Redis  nurby:motion (+ action sidecar)
-PERCEPTION (services/perception/pipeline.py)         sparse keyframes here
-  YOLO detect, ArcFace face → person_id, OSNet re-id  (unchanged)
-  binds track_id ↔ person_id via face-in-track-box on the keyframe
-  L3  VLM verify (fall) + describe (open detail), rare
-        │ writes
-        ▼  observation_actions(+track_id,+source)  guardian events
+INGESTION  services/ingestion/stream.py            (dense frames, per camera)
+  decode every frame (already happens for motion)
+  L0  track          BoxMOT / Ultralytics .track  -> stable track_id + adaptive re-id
+  L1  pose           rtmlib RTMPose (17-kp)        -> skeleton per track
+  L2  action         PYSKL ST-GCN++ (NTU-RGB+D)    -> closed action per track per window
+  L4  state machine  smooth + debounce             -> emit on transition
+        publishes:
+          - existing motion keyframe + {track_id, action, conf} sidecar -> redis nurby:motion
+          - live action snapshot per camera                              -> redis pub nurby:actions
+          - action segments on transition                                -> DB (via API or direct)
+PERCEPTION services/perception/pipeline.py          (sparse keyframes)
+  YOLO detect, ArcFace, OSNet  (unchanged) -> bind track_id <-> person_id on the keyframe
+  services/perception/actions.py  -> becomes the FUSION layer (was per-crop classifier)
+  services/perception/vlm_queue.py -> feeds action labels into the VLM extra_context
+  L3  VLM  verify (fall) + describe (open detail) + cross-check HAR, keyframe-rate
+API + FRONTEND
+  services/api/ws.py            -> broadcast person_actions (live)
+  services/api/routes/...       -> camera-scoped actions + segments endpoints
+  frontend/                     -> live overlay, activity timeline, enriched cards, config
 ```
 
-Why ingestion: `services/ingestion/stream.py` already decodes every RTSP frame to run
-motion detection (every 5th frame) and to write recording segments. It is the only place
-with a steady frame cadence. Perception consumes `nurby:motion`, a sparse,
-cooldown-throttled keyframe stream, and structurally cannot feed a temporal model.
+Layer detail:
 
-Why keep detect/face/VLM in perception: they are keyframe-rate by design and already
-wired to identity, alerts, search, and entitlements. We do not move them.
+- **L0 tracking, two tiers.** Tier 1 within-scene: BoxMOT (DeepOCSORT/BoT-SORT) with the
+  OSNet ReID we already ship, adaptive EMA appearance banks, occlusion recovery; Ultralytics
+  `.track()` is the no-new-dep first cut. Gives a stable per-camera `track_id`. Tier 2
+  cross-camera: the existing OSNet + ArcFace gallery, now fed tracklet-level embeddings (a
+  robust mean over a track) instead of per-frame crops, which sharpens `person_id`. Single-
+  camera trackers do not do cross-camera; that stays the gallery's job.
+- **L1 pose.** rtmlib RTMPose, Apache-2.0, onnxruntime-only, RTMPose-m ~90 fps on an i7 CPU.
+  17-keypoint output matches PYSKL's pretrained format (no remapping).
+- **L2 action.** PYSKL ST-GCN++ / PoseConv3D, Apache-2.0, pretrained on NTU-RGB+D (contains
+  fall, eat, drink, sit-down, stand-up, walk). Sliding window of per-track keypoints ->
+  closed action. NTU labels map to our vocab; unmapped -> `unknown`.
+- **L3 VLM fusion (not replacement).** HAR action labels go into the VLM prompt
+  (`vlm.describe(extra_context=...)`, already wired) so captions are grounded. The VLM
+  caption/detail confirms or corrects HAR. Agreement -> high-confidence row (`source =
+  skeleton+vlm`); disagreement -> a labelled hard case for the opt-in fine-tuning set. The
+  VLM stays keyframe-rate; it stops being the per-person per-frame classifier.
+- **L4 state machine.** Majority-vote smoothing over a short ring buffer, emit on transition
+  with a minimum dwell. Produces clean segments and answers "standing then suddenly eating".
 
-This split is the single biggest change from the v1 sketch, which implicitly assumed one
-pipeline. It also reframes the old "keyframe rate vs temporal need" risk: that was not a
-tuning knob, it was a placement decision, now resolved.
+---
 
-### L0. Tracking and re-identification (two tiers)
+## 4. Impact on the existing stack
 
-Tracking is not a Phase-1 convenience. It is a first-class part of both HAR and person
-identification, and it splits into two distinct tiers. A single-camera tracker only solves
-the first.
+| Area | File(s) | Change |
+|---|---|---|
+| Ingestion loop | `services/ingestion/stream.py` | add L0/L1/L2/L4; sample a HAR cadence off the dense stream; publish track_id sidecar + live action pub |
+| Detection reuse | `services/perception/detector.py` | none (Ultralytics already present; BoxMOT reuses it) |
+| Identity binding | `services/perception/pipeline.py` | read `track_id` from keyframe; bind to `person_id`; feed tracklet embedding to OSNet gallery (`reid.py`) |
+| Fusion | `services/perception/actions.py` | shift from per-crop classifier to fusion/verify; keep `confirms_fall`, parsing, vocab |
+| VLM grounding | `services/perception/vlm_queue.py`, `vlm.py` | inject HAR labels into `extra_context`; record agreement |
+| Models | `shared/models.py` | extend `observation_actions` (`track_id`, `source`, `window_*` already added; confirm `detail`); add `person_action_segments` |
+| Migrations | `alembic/versions/` | one migration for the segment table + any column adds |
+| API | `services/api/routes/` (camera routes), `services/api/ws.py` | camera-scoped actions + segments endpoints; `person_actions` WS broadcast |
+| Guardian reuse | `services/guardian/wellbeing.py`, `mcp_tools.py` | re-point rollups to segments where cheaper (already shipped) |
+| Settings | `shared/app_settings.py`, `services/api/routes/system.py` | per-camera HAR enable, action set, cadence, thresholds, test mode |
+| Frontend live | `frontend/src/lib/ws.tsx`, `LiveCaptionOverlay.tsx` (+ new `ActionOverlay`) | handle `person_actions`; draw per-track chips on the tile |
+| Frontend history | `frontend/src/app/cameras/[id]/page.tsx` (+ new `ActivityTimeline`) | per-camera action timeline |
+| Frontend cards | `frontend/src/components/ObservationGroupCard.tsx` | action chip + open detail on each observation |
+| Frontend global | `frontend/src/app/timeline/page.tsx` | filter by action |
+| Frontend config | camera settings UI | HAR enable, preset, thresholds, test-mode review screen |
 
-**Today, for context.** We run no motion tracker at all. Identity is two appearance
-models: ArcFace (face) and OSNet body re-id (`reid.py`), the latter clustered in pgvector.
-That associates each detection to a global cluster by embedding similarity, per keyframe.
-It is real re-id and does a form of cross-camera linking, but it is per-detection, not
-per-tracklet, so the embedding is noisy, ID-switches and mis-merges are common when
-clothing is similar (a ward of residents) or a person is briefly occluded, and there is no
-within-scene continuity. For HAR this is fatal: an action lives in a multi-second window,
-and an ID switch mid-window attaches the label to the wrong person.
+Backward-compatible: every change is additive and gated by `guardian_actions_enabled` /
+new per-camera HAR settings. v1 stays the fallback; nothing existing is removed.
 
-**Tier 1, within-scene tracking + adaptive re-id (in ingestion).** A real per-camera
-tracker gives every person a stable `track_id` for the whole time they are in a scene,
-robust to short occlusion, with online appearance adaptation. Options:
+---
 
-- **BoxMOT** (mikel-brostrom), recommended. A pluggable library of SOTA trackers
-  (DeepOCSORT, StrongSORT, BoT-SORT, OCSORT, HybridSORT) with swappable ReID backbones,
-  including **OSNet, the model we already use**, plus CLIP-ReID and LightMBN. StrongSORT
-  and DeepOCSORT maintain per-track EMA appearance banks, which is exactly online adaptive
-  re-identification: the appearance template updates as the person's look drifts with pose
-  and lighting. Strong benchmarks (BoT-SORT IDF1 88.9, DeepOCSORT 89.0) and occlusion
-  recovery via two-stage association. AGPL-3.0, but we already carry that via the
-  Ultralytics detector, so it adds no new licence exposure, and it shares OSNet's embedding
-  space with our gallery.
-- **Ultralytics `.track()`** (`bytetrack` / `botsort`), the no-new-dependency fallback. Its
-  built-in BoT-SORT is competitive for easy scenes but is less configurable on the ReID
-  side than BoxMOT. Fine as a first cut; expect to move to BoxMOT for crowded eldercare
-  rooms where ID stability over a HAR window is the whole game.
+## 5. Data model and API
 
-Either way, the win for identity is that we now match a **tracklet-level** embedding (a
-robust mean / EMA over many frames of one track) to identity, instead of one noisy
-per-keyframe crop. That alone sharpens `person_id` materially.
+`observation_actions` (exists): `id, observation_id, camera_id, person_id, person_name,
+action, posture, confidence, detail, track_id, source, window_start, window_end,
+observed_at`. Raw, per-window. `source in {skeleton, vlm_crop, skeleton+vlm, geometry,
+caption_backfill}`.
 
-Correction to an earlier draft: BoxMOT is **not** "no upside over the built-in tracker".
-Its decoupled, adaptive ReID is a real advantage for our hard cases. The library to skip is
-**motcpp**, and only because it is C++ and would add a build/binding burden to a Python
-async stack, not because it lacks capability.
+`person_action_segments` (NEW): merged contiguous runs, written by L4 on transition. Columns:
+`id, camera_id, person_id, person_name, track_id, action, confidence_avg, started_at,
+ended_at, source`. Indexed on `(camera_id, started_at)` and `(person_id, started_at)`. This
+is the clean source for the timeline and the wellbeing rollups (cheap range queries instead
+of merging raw rows).
 
-**Tier 2, cross-camera global re-id / MTMC (in perception).** No single-camera tracker does
-this. ByteTrack, BoT-SORT, and BoxMOT are all single-camera only; they never associate a
-person across cameras. Cross-camera identity is a separate gallery-matching problem
-(camera-aware feature normalisation, spatial-temporal constraints). We already have the
-embryo of it in the OSNet + ArcFace gallery. The upgrade is to feed it **tracklet
-embeddings** from Tier 1 rather than per-frame crops, and to bind `track_id → person_id`
-once per track via the highest-confidence face or body match over the track's life. This is
-what gives "the resident in room A is the same as in room B", serving Guardian hand-off and
-a person's whole-day timeline.
+Keypoints: not persisted by default (privacy). Opt-in `track_keypoints` table behind a
+setting, only when collecting a fine-tuning set (see section 7, data flywheel).
 
-Honest limit: cross-camera identity in a ward of similarly-dressed people is never truly
-perfect. Face stays the strongest anchor when visible; these two tiers narrow the gap, they
-do not close it. We should target "high precision, bounded recall" (refuse to merge when
-unsure) over a false sense of certainty.
+Endpoints:
+- `GET /cameras/{id}/actions?from&to` -> segments for all people on a camera (activity
+  timeline).
+- `GET /cameras/{id}/actions/live` -> current per-person actions (fallback for non-WS).
+- `WS person_actions` (via `services/api/ws.py`): `{camera_id, people: [{track_id,
+  person_id?, person_name?, action, confidence, bbox}]}` pushed on change.
+- Existing guardian `GET /guardian/links/{id}/actions` and `/wellbeing` (shipped) re-point
+  to `person_action_segments`.
 
-Binding a track to a person and holding it through occlusion is the fix for the
-face-dependent attribution weakness in v1.
+---
 
-### L1. Pose (in ingestion)
+## 6. Dashboard and UX (how HAR reaches the operator)
 
-Primary: **rtmlib** (RTMPose). Apache-2.0, dependencies are only numpy, opencv,
-onnxruntime, with optional OpenVINO/TensorRT backends. RTMPose-m reports 90+ FPS on an
-Intel i7-11700 CPU via ONNXRuntime; RTMPose-s is lighter again. This directly answers the
-"pose is too expensive on CPU" worry from review: at those rates, top-down pose for a
-handful of tracked people per camera is affordable on CPU, subject to the spike confirming
-it on the real box with real person counts.
+Three surfaces, smallest to largest commitment:
 
-Output is a 17-keypoint COCO/HRNet skeleton, which is exactly the format the action model
-below was pretrained on, so no keypoint remapping is needed.
+**A. Live action overlay (camera tile).** Extend `LiveCaptionOverlay.tsx` (or add
+`ActionOverlay.tsx`). On the live feed, draw a small chip per tracked person near their box:
+recognised name (or "Person") + current action + a confidence dot. `fallen` renders red and
+pinned; calm actions render muted. Driven by the new `person_actions` WS event handled in
+`frontend/src/lib/ws.tsx`. This is the "what is happening right now" view and the highest-
+impact surface for trust.
 
-Alternative: Ultralytics YOLO-pose (same dependency we already ship). Simpler to wire,
-but heavier per person and keeps us on the AGPL dependency for this stage. rtmlib is the
-better default because it is Apache and CPU-fast.
+**B. Activity timeline (camera detail page).** New `ActivityTimeline` on
+`frontend/src/app/cameras/[id]/page.tsx`: a horizontal band per recognised person showing
+action segments across the selected day (sitting 9:00-9:45, walking 9:45-9:50, eating
+12:05-12:35). Reads `GET /cameras/{id}/actions`. Reuses the visual language of the existing
+timeline. Click a segment to jump to that moment/clip. This is the "what happened" view and
+the thing eldercare families and staff actually scan.
 
-### L2. Temporal action model (in ingestion)
+**C. Enriched moment cards.** `ObservationGroupCard.tsx` gains an action chip + the open
+`detail` line, so existing observation cards read "Mr Rahman, eating, plate of food at the
+window" instead of a bare caption. Cheapest win; rides existing data.
 
-Use **PYSKL** (`kennymckormick/pyskl`, Apache-2.0): ST-GCN++ and PoseConv3D with model
-zoos pretrained on **NTU-RGB+D 60 and 120**, whose label set already contains *falling
-down, eating, drinking, sitting down, standing up, staggering, walking*. PYSKL's
-pretrained models use the HRNet 17-keypoint 2D skeleton format, which matches RTMPose's
-output. It ships a real-time skeleton-action demo, including a CPU example. MMAction2
-(Apache-2.0) is the heavier parent toolbox and an equivalent fallback.
+**D. Cross-cutting.** The global `/timeline` page gets an action filter; natural-language
+search is now grounded by action labels; the guardian wellbeing panel (shipped) reads the
+segment table. Alerts (fall/meal) already fan out through the existing notification path and
+event feed, no new surface needed.
 
-Feed a sliding window of per-track keypoints (start at ~32-48 frames, tune in the spike)
-into ST-GCN++; map the NTU label to our closed vocabulary, unmapped labels collapse to
-`unknown`. ST-GCN++ inference is millisecond-scale. Output: per-track action + confidence
-per window, written with `source = "skeleton"`.
+UX rules: actions are advisory, never block the live view; `unknown` is not shown as a chip;
+on cameras where HAR is degraded (section 7) the overlay shows a small "HAR limited" marker
+rather than silently dropping.
 
-Heavier alternative for appearance-defined actions or poor pose: an RGB clip model
-(VideoMAE / X3D, both with permissive weights) on the track crop. GPU-hungry. Keep behind
-the same interface; default skeleton for cost. See the pose-quality gate in Risks.
+---
 
-### L3. VLM as a fused enricher, not a replacement (in perception)
+## 7. Solution, deployment, and operations (constraints, not opinions)
 
-Do not retire the VLM. Re-order it. The mistake in v1 is using the VLM as the
-per-person, per-frame classifier, which is the O(people x frames) cost. The fix is not to
-silence it but to stop fanning it out per person: HAR becomes the continuous, cheap,
-per-track classifier, and the VLM stays at its current keyframe cadence, now **fed by
-HAR** and cross-checking it. The two enrich each other.
+These are requirements the build must satisfy, derived from a solutions review.
 
-- **HAR to VLM.** Pass each tracked person's action label + confidence into the VLM's
-  prompt as ground-truth context (we already have `vlm.describe(extra_context=...)` and the
-  cascade refiner for exactly this). The VLM stops guessing "someone near a table" and
-  writes a grounded, consistent caption: "the resident the motion model reads as eating is
-  having lunch at the window". Better captions, better search embeddings, for free.
-- **VLM to HAR.** The VLM caption / open `detail` can confirm or correct the skeleton label
-  ("drinking tea", not "eating"). Disagreement is a signal, not noise.
-- **Agreement over time, a self-improving loop.** When HAR and VLM agree, write a
-  high-confidence row and spend nothing more. When they disagree, that is a labelled hard
-  case: route it (with the opt-in keypoint store) into a fine-tuning set. This is what
-  closes the NTU domain gap (NTU's scripted "eating/drinking" differs from real
-  eldercare). The system improves from its own disagreements without hand-labelling.
-- **High-stakes still verifies.** A high-confidence skeleton `fallen` still triggers the
-  VLM crop confirm, same `confirms_fall` policy as today.
+**Deployment profiles / min-spec.** Ship a capability matrix and pick the profile at setup
+from measured hardware:
 
-So the VLM load drops from O(people x observations) to roughly its current keyframe rate,
-while its output quality goes up because HAR grounds it. The `source` column records who
-produced each row (`skeleton`, `vlm_crop`, or a fused `skeleton+vlm` agreement) so trust
-and the training set are auditable.
+| Tier | Hardware | Cameras | L0/L1/L2 | HAR cadence |
+|---|---|---|---|---|
+| S | CPU-only (NUC class) | 1-2 | ByteTrack + RTMPose-s + ST-GCN++ | reduced fps |
+| M | strong CPU / iGPU | 3-6 | BoxMOT BoT-SORT + RTMPose-m | full cadence |
+| L | discrete GPU | 6+ | DeepOCSORT + RTMPose-m + optional RGB fallback | full + RGB on poor cams |
 
-### L4. State machine (in ingestion)
+**Graceful degradation (mandatory).** When the per-camera budget is exceeded, degrade in
+order: lower HAR fps -> drop pose on lowest-priority tracks -> fall back to v1 VLM snapshot
+for that camera. Surface a per-camera `har_status` capability flag (`full | limited | off`)
+to the dashboard and API. Never silently stop classifying.
 
-Per-track smoothing (majority vote over a short ring buffer) then emit on transition,
-debounced with a minimum dwell per action. This produces a clean timeline and is what
-answers "standing then suddenly eating": a transition in the smoothed per-track stream.
-Fall and meal become consumers of this stream.
+**Operator onboarding and trust.** Per-camera: enable HAR, choose a use-case preset
+(eldercare / childcare / security) that selects the relevant action subset and default
+thresholds, optionally restrict HAR to a drawn zone (reuse existing motion/privacy zones).
+Ship a **test / dry-run mode**: actions are computed and shown on the dashboard but raise no
+alerts for a configurable window, with a review screen to confirm accuracy before going
+live. Eldercare staff will not trust fall alerts they could not validate on their own
+cameras first; this is non-negotiable for adoption.
 
-## Cross-service identity binding (new)
+**Data flywheel vs privacy (resolve the contradiction).** The self-improving loop in L3
+needs disagreement cases, but keypoints are not persisted by default. Reconcile explicitly:
+the flywheel is **opt-in only**. An operator may enable a local `track_keypoints` capture for
+HAR/VLM disagreement cases, reviewable and exportable by them, never auto-uploaded. Any
+cross-site improvement is a future, separately-consented program (section 9). Until then, the
+honest claim is "improves when you opt in and fine-tune," not "improves automatically."
 
-`track_id` is born in ingestion; `person_id` is resolved later in perception. They must be
-joined, and review flagged this as unspecified. Plan:
+**Compliance, liability, positioning.** Fall detection is sensitive. Productize the stance,
+not just a footnote: surface "best-effort, not a certified medical alarm" on the fall config
+and on each fall alert; note that pose/gait may be biometric in some jurisdictions and that
+keypoints are not stored by default; reuse existing consent gating. Position cameras as a
+**complement to, not a replacement for**, certified fall sensors or wearables. Record the
+honest build-vs-buy point: for the highest-liability fall use case, radar/wearables are more
+certifiable; Nurby's edge is whole-scene understanding and per-family Guardian, not a
+medical guarantee.
 
-- Ingestion stamps `track_id` (and the current smoothed action + window bounds) onto the
-  motion keyframe it publishes, as sidecar fields on the Redis message.
-- Perception runs its existing ArcFace pass on the keyframe. The recognised face box falls
-  inside one tracked person box, which carries a `track_id`; that binds
-  `track_id → person_id` for the life of the track.
-- A short-lived map `(camera_id, track_id) → person_id` (Redis, TTL on track loss) lets
-  ingestion-side action emissions in the gap between face hits still attribute to the
-  right person.
-- Until a track is bound to a `person_id`, its actions are buffered, not emitted, so we
-  never write actions for unidentified people (also the privacy default).
+**Buyer acceptance criteria (pilot exit).** Define before any rollout: on the customer's own
+cameras, in test mode, over a 2-week pilot, fall recall >= agreed threshold and false alerts
+<= agreed per-camera-per-night, with operator sign-off. This is what "working" means
+contractually, distinct from the dev eval below.
 
-This is real glue work and is the main integration risk after placement. The spike
-prototypes it end to end on one camera.
+**Day-2 operations.** Per-camera HAR health (pose quality, fps, `har_status`) surfaced in the
+UI and API. Model weights versioned and shipped with release images; documented update path.
+Accuracy observability: track the skeleton-vs-VLM agreement rate per camera as a live quality
+signal and warn when it drops. OSS maintenance risk (OpenMMLab/PYSKL cadence; Ultralytics
+commercial-license trigger if a hosted tier is ever sold) tracked as a dependency risk.
 
-## Open-source reuse and licensing (researcher view)
+---
 
-The HAR field is mature. Every layer has a strong, reusable implementation, so this is an
-integration project, not a modelling one. Verified options and licences:
+## 8. Phased delivery and task list
+
+Each phase is independently shippable and reversible by setting. Tasks are sized to land as
+their own PRs.
+
+### Phase 0 — Spike (gates 2+; 1-2 days, throwaway code allowed)
+- HAR-0.1 Stand up rtmlib RTMPose + a tracker + a PYSKL pretrained ST-GCN++ on a handful of
+  demo-camera clips.
+- HAR-0.2 Measure pose+track+action throughput at the target cadence for 1/2/3 people on a
+  representative CPU box; record the tier ceiling.
+- HAR-0.3 Prototype `track_id <-> person_id` binding end to end on one camera.
+- HAR-0.4 Read pose quality on genuinely low-end / wide-angle footage; decide skeleton-only
+  vs RGB-hybrid; decide ByteTrack vs BoxMOT by ID-switch rate.
+- Acceptance: a go/no-go memo with numbers and the two decisions above.
+
+### Phase 1 — Tracking + re-id (safe now, in ingestion)
+- HAR-1.1 Integrate the chosen Tier-1 tracker in `stream.py`; assign stable `track_id`.
+- HAR-1.2 Stamp `track_id` (+ smoothed action placeholder) onto the published keyframe.
+- HAR-1.3 Bind `track_id -> person_id` in `pipeline.py`; TTL Redis map for the gap between
+  face hits; buffer actions for unbound tracks.
+- HAR-1.4 Feed tracklet-level embeddings into the OSNet gallery (`reid.py`); write `track_id`
+  onto `observation_actions`.
+- HAR-1.5 Tests: ID continuity through a scripted occlusion clip; binding correctness.
+- Acceptance: stable per-person tracks through occlusion on demo cameras; `person_id` ID-
+  switch rate down vs today.
+
+### Phase 2 — Pose (in ingestion)
+- HAR-2.1 rtmlib RTMPose per tracked person; cap tracked persons; gate to bound dependants.
+- HAR-2.2 Optional `track_keypoints` store behind a setting (default off).
+- HAR-2.3 Per-camera pose-quality metric -> feeds `har_status`.
+- Acceptance: 17-kp skeletons at the tier cadence within the measured CPU budget; quality
+  metric visible.
+
+### Phase 3 — Action model + fusion
+- HAR-3.1 PYSKL ST-GCN++ on per-track pose windows -> closed action; NTU->vocab map.
+- HAR-3.2 Write `observation_actions` with `source=skeleton`.
+- HAR-3.3 Fusion in `actions.py`/`vlm_queue.py`: inject HAR labels into VLM context; record
+  agreement (`source=skeleton+vlm`); keep fall VLM-confirm.
+- HAR-3.4 Run alongside v1 behind a setting; A/B on the labelled clip set; flip default when
+  it wins.
+- Acceptance: per-frame action accuracy and fall recall beat v1 on the eval set; VLM load
+  drops to keyframe rate.
+
+### Phase 4 — State machine, segments, and dashboard
+- HAR-4.1 L4 smoothing + transition emission in ingestion.
+- HAR-4.2 `person_action_segments` table + migration; write on transition.
+- HAR-4.3 `GET /cameras/{id}/actions` + `person_actions` WS broadcast in `services/api/ws.py`.
+- HAR-4.4 Live `ActionOverlay` on the camera tile (`ws.tsx`, `LiveCaptionOverlay.tsx`).
+- HAR-4.5 `ActivityTimeline` on `cameras/[id]/page.tsx`; segment click -> moment/clip.
+- HAR-4.6 Action chip + detail on `ObservationGroupCard.tsx`; action filter on `/timeline`.
+- HAR-4.7 Re-point guardian `wellbeing`/`actions` to segments.
+- Acceptance: operator sees live per-person actions and a per-day activity timeline; fall/
+  meal still fire correctly.
+
+### Phase 5 — Productization, ops, trust
+- HAR-5.1 Deployment-profile detection + min-spec picker at setup.
+- HAR-5.2 Graceful degradation + `har_status` per camera (UI + API).
+- HAR-5.3 Operator config: per-camera enable, use-case preset, thresholds, HAR zone.
+- HAR-5.4 Test/dry-run mode + review screen before alerts go live.
+- HAR-5.5 Compliance surfacing: best-effort disclaimers, biometric/consent notes.
+- HAR-5.6 Day-2: agreement-rate observability + weight-version/update path + docs.
+- Acceptance: a non-technical operator can enable HAR on a camera, validate it in test mode,
+  and go live; pilot acceptance criteria measurable.
+
+---
+
+## 9. Risks, open decisions, and later work
+
+Risks: CPU throughput at scale (mitigated by tiers + caps, measured in Phase 0); pose quality
+on cheap cameras (decision gate in Phase 0, RGB fallback); cross-service binding (Phase 0
+prototype); cadence vs the existing motion budget (reconcile the two ingestion loops); NTU
+domain gap (opt-in fine-tuning); OSS maintenance + Ultralytics licensing.
+
+Honest limits: cross-camera identity in a ward of similarly-dressed people is never perfect;
+target high-precision / bounded-recall, face as the strongest anchor. Fall detection stays
+best-effort, never a medical guarantee.
+
+Open decisions (carried from Phase 0): ByteTrack vs BoxMOT default; RTMPose-m vs -s per tier;
+window length and HAR fps; skeleton-only vs RGB-hybrid; persist keypoints default (no).
+
+Later work (out of v-next): per-tenant custom action taxonomies; cross-site federated /
+consented training program; additional verticals (retail slip-fall, PPE, queue) reusing the
+same engine and segment model.
+
+---
+
+## 10. Reusable OSS and licensing
 
 | Layer | Reuse | Licence | Note |
 |---|---|---|---|
-| Detection | Ultralytics YOLO (already in `detector.py`) | AGPL-3.0 | already a dependency |
-| Tracking (Tier 1) | **BoxMOT** (DeepOCSORT/StrongSORT/BoT-SORT, swappable OSNet/CLIP-ReID) | AGPL-3.0 | recommended; adaptive EMA re-id, occlusion-robust, reuses our OSNet; AGPL already carried |
-| Tracking (fallback) | Ultralytics `.track()` ByteTrack/BoT-SORT | AGPL-3.0 | no new dep; weaker ReID control; first-cut only |
-| Cross-camera re-id (Tier 2) | our OSNet + ArcFace gallery (existing), fed tracklet embeddings | n/a (ours) | single-camera trackers do NOT do this |
-| Pose | **rtmlib / RTMPose** | Apache-2.0 | deps: numpy/opencv/onnxruntime; 90+ FPS on i7 CPU |
-| Action | **PYSKL** ST-GCN++ / PoseConv3D | Apache-2.0 | NTU-RGB+D pretrained, 17-kp HRNet format matches RTMPose |
-| Action (alt) | MMAction2 | Apache-2.0 | heavier parent toolbox, same models |
-| RGB fallback | VideoMAE / X3D (HF, OpenMMLab) | Apache-2.0 / permissive | only if pose quality forces it |
-| Fall references | badalyaz/fall-detection, aay-b/human-fall-detection, niraljshah/Fall_Detection | mixed | reference heuristics only, not core |
+| Detection | Ultralytics YOLO (in `detector.py`) | AGPL-3.0 | already a dependency |
+| Track Tier 1 | BoxMOT (DeepOCSORT/StrongSORT/BoT-SORT, OSNet/CLIP-ReID) | AGPL-3.0 | recommended; adaptive EMA re-id; reuses our OSNet; AGPL already carried |
+| Track fallback | Ultralytics `.track()` ByteTrack/BoT-SORT | AGPL-3.0 | no new dep; first cut |
+| Cross-camera | our OSNet + ArcFace gallery, fed tracklet embeddings | ours | single-camera trackers do not do this |
+| Pose | rtmlib / RTMPose | Apache-2.0 | onnxruntime-only; ~90 fps i7 CPU; 17-kp matches PYSKL |
+| Action | PYSKL ST-GCN++ / PoseConv3D | Apache-2.0 | NTU-RGB+D pretrained |
+| Action (alt) | MMAction2 | Apache-2.0 | heavier parent toolbox |
+| RGB fallback | VideoMAE / X3D | Apache-2.0 / permissive | only if pose quality forces it |
 
-Two practical wins from the survey:
-
-1. **Keypoint-format match.** RTMPose emits 17-keypoint COCO/HRNet skeletons; PYSKL's
-   pretrained NTU models consume the same. The two compose with no remapping and the
-   pretrained weights are usable directly. This removes the largest "build it ourselves"
-   risk.
-2. **Avoid the heavy frameworks where possible.** rtmlib deliberately strips the mmcv /
-   mmpose / mmdet dependency stack down to onnxruntime, which is what makes it deployable
-   inside our container without dragging in the full OpenMMLab build chain. Prefer rtmlib
-   for inference; only reach for MMAction2/MMPose if we need to fine-tune.
-
-Licensing strategy. We are already AGPL-3.0 through the Ultralytics detector, so the
-**easy path** (Ultralytics track + pose + PYSKL + MMAction2) adds no new exposure and is
-fine for an open-source self-host product. If a commercial, non-AGPL posture is ever
-wanted, the HAR-specific layers already have Apache options (rtmlib pose, PYSKL/MMAction2
-action) and the tracker has an MIT option (original ByteTrack); the lone AGPL anchor is
-then the YOLO detector, which has separate-licence alternatives. So HAR does not deepen
-the licensing problem and can be made licence-clean independently of the detector.
-
-On tracking specifically: BoxMOT is the recommended Tier-1 engine, not something to avoid
-(an earlier draft wrongly dismissed it). Its decoupled, adaptive ReID and occlusion
-recovery are real advantages for crowded eldercare rooms, and it reuses the OSNet embedding
-we already ship. AGPL is moot because the Ultralytics detector already imposes it. The one
-to skip is **motcpp**: capable, but C++, so it adds a build/binding burden to a Python async
-stack for speed we are unlikely to need. If a non-AGPL posture is ever required, the
-licence-clean tracking path is the original MIT ByteTrack plus our own OSNet ReID, at the
-cost of BoxMOT's adaptive-ReID conveniences.
-
-## Data model changes
-
-`observation_actions` gains, by migration:
-
-- `track_id` (string, indexed): the per-camera track the action came from.
-- `source` (string): `skeleton` | `vlm_crop` | `skeleton+vlm` (the two agreed) |
-  `geometry` | `caption_backfill`, so continuous HAR rows, fused high-confidence rows, and
-  VLM/legacy rows are distinguishable for trust tuning and for building the fine-tuning set
-  from disagreements.
-- optional `window_start` / `window_end` (timestamptz): the span a temporal label covers.
-
-Keypoints: default to **not persisting** raw keypoints (privacy-lean, recompute on
-demand). Add an opt-in `track_keypoints` table behind a setting only when collecting a
-fine-tuning set. Nothing in the existing schema is dropped; the closed vocab, `action`,
-`posture`, `confidence`, `detail`, indexes, and the wellbeing API/MCP all stay.
-
-## Resource budget (revised, OSS-grounded, still spike-gated)
-
-Per camera, on the dense ingestion stream rather than every raw frame (sample to a HAR
-cadence, start ~8-12 fps):
-
-- Decode + motion: already paid in ingestion.
-- Track (Ultralytics ByteTrack): association only, negligible.
-- Pose (RTMPose-m via onnxruntime): the recurring cost. Published numbers are 90+ FPS on
-  an i7 CPU for single inference; real cost is per tracked person per sampled frame, so it
-  scales with people. Cap tracked persons and gate pose to dependant-bound tracks, exactly
-  as the VLM is gated today.
-- Action (ST-GCN++): millisecond-scale per track per window.
-- VLM: only fall confirm and occasional detail.
-
-Net: continuous classification moves off the VLM onto cheap CPU models, and the OSS
-benchmarks say this is feasible for modest person counts on CPU, with GPU as headroom. But
-the honest goal must be stated correctly: cost scales with **people** (pose is per person),
-not "cameras not people" as v1 claimed. The spike measures the real ceiling.
-
-## Privacy
-
-- Pose and skeletons are computed on-device, same as everything else. No frames leave the
-  box.
-- Default to not persisting keypoints, so we do not accumulate a biometric gait store
-  unless an operator opts in for fine-tuning.
-- HAR runs only for recognised, bound dependants by default (the binding gate above), so
-  we do not build action profiles on strangers or non-consented people.
-- Per-person blur and consent gating are upstream and unchanged.
-
-## Phased migration (additive, reversible by setting)
-
-- **Phase 0. Spike (1-2 days, gates everything below).** On the demo/test cameras and one
-  representative CPU box, stand up rtmlib RTMPose + Ultralytics track + a PYSKL pretrained
-  ST-GCN++ on a handful of clips. Measure: pose+track+action throughput at the target
-  cadence for 1, 2, 3 people; the track_id ↔ person_id binding prototype end to end; and
-  pose quality on genuinely low-end / wide-angle footage. Output: go/no-go numbers and the
-  skeleton-only vs RGB-hybrid decision. Do not start Phase 2 until this lands.
-- **Phase 1. Tracking + re-id (safe now, build in ingestion).** Stand up a Tier-1 tracker
-  in `stream.py` (start with Ultralytics `.track()` for speed of integration, evaluate
-  BoxMOT DeepOCSORT/BoT-SORT with the OSNet ReID we already use); stamp `track_id` onto
-  published keyframes; implement the binding map and write `track_id` onto
-  `observation_actions`. Feed **tracklet-level** embeddings (not per-frame crops) into the
-  existing OSNet + ArcFace gallery (Tier 2) to sharpen `person_id`. Ships value with no
-  model swap: stable identity through occlusion, fixing the worst v1 attribution failure,
-  and better cross-camera identification for Guardian as a side effect. The
-  Ultralytics-vs-BoxMOT choice is itself a Phase 0 measurement (ID-switch rate on the demo
-  cameras).
-- **Phase 2. Pose.** rtmlib RTMPose per track in ingestion; optional keypoint store behind
-  a setting. No behaviour change yet; validates pose quality on real cameras.
-- **Phase 3. Temporal model.** PYSKL ST-GCN++ producing the closed vocabulary with
-  `source="skeleton"`. Run alongside the v1 VLM classifier behind a setting; A/B before
-  switching the default. Demote the VLM to confirm + detail once skeleton quality is
-  proven.
-- **Phase 4. State machine + timeline.** Per-track smoothing and transition emission; move
-  fall and meal onto the action stream; build the per-person action-timeline UI.
-
-Each phase is shippable and reversible via a setting. v1 stays the fallback until Phase 3
-proves out on real footage.
-
-## Evaluation
-
-- A labelled clip set from the demo/test cameras and any consented real footage, tagged
-  with ground-truth action and transition times.
-- Metrics: per-frame action accuracy, transition-timing error, fall precision/recall (the
-  high-stakes one), false-alert rate per camera-hour.
-- A/B v1 (VLM snapshot) vs Phase 3 (skeleton) on the same clips before flipping the
-  default. Reuse the nightly-CI eval harness pattern from the agent work.
-- Honesty gate: do not relax the "best-effort, not a medical alarm" framing until fall
-  recall and false-alert rate clear an agreed bar on real footage.
-
-## Risks and open decisions
-
-- **CPU throughput at scale.** OSS benchmarks say RTMPose is CPU-real-time, but multi-person
-  multi-camera on the actual self-host box is unproven. Mitigation: cap tracked persons,
-  gate pose to bound dependants, stagger cameras; measured in Phase 0.
-- **Pose quality on cheap cameras is a decision gate, not a footnote.** Low-res,
-  wide-angle, ceiling-mounted, poorly lit feeds degrade 2D pose, which caps skeleton HAR
-  and may force the GPU-heavy RGB clip model as the primary on those cameras. Phase 0 must
-  read pose quality on genuinely bad footage and decide skeleton-only vs RGB-hybrid before
-  Phase 3.
-- **Cross-service binding** (above) is the main integration risk after placement; prototype
-  it in Phase 0.
-- **Cadence vs the existing motion budget.** Ingestion runs motion every 5th frame on
-  purpose to save CPU; HAR wants a steadier sampled cadence on tracked persons. Reconcile
-  the two loops so HAR sampling does not starve motion/recording.
-- **NTU domain gap.** NTU "eating/drinking" classes are scripted; real eldercare differs.
-  May need light fine-tuning on domain clips, which is why the opt-in keypoint store
-  exists.
-- **Licensing.** Easy path is AGPL (already true via the detector). A licence-clean HAR
-  path exists (rtmlib + MIT ByteTrack + PYSKL); the detector is then the only AGPL anchor.
-
-Open decisions for the build: ByteTrack vs BoT-SORT default; rtmlib RTMPose-m vs -s;
-window length and HAR sampling fps; skeleton-only vs RGB-hybrid (Phase 0 output); persist
-keypoints or not by default.
-
-## Review log
-
-- v1: initial sketch (single-pipeline assumption, VLM-as-classifier critique).
-- v2.1: corrected the tracking story. Expanded L0 into a two-tier design (Tier 1
-  within-scene tracking + adaptive re-id via BoxMOT reusing OSNet; Tier 2 cross-camera
-  global re-id via the existing OSNet/ArcFace gallery fed tracklet embeddings). Retracted
-  the earlier "avoid BoxMOT" line; clarified that single-camera trackers do not do
-  cross-camera, and that tracklet-level matching sharpens `person_id`. motcpp skipped on
-  integration cost, not capability.
-- v2 (earlier revision): senior-engineering review relocated HAR to ingestion, added the
-  cross-service binding section, a Phase 0 spike, and corrected the "cost scales with
-  cameras" claim to "scales with people". AI/ML-researcher review added the concrete OSS
-  reuse stack (Ultralytics track, rtmlib/RTMPose, PYSKL ST-GCN++/PoseConv3D on NTU-RGB+D),
-  established the RTMPose↔PYSKL keypoint-format match that removes most build-it-ourselves
-  risk, grounded the CPU budget in published RTMPose benchmarks, and worked out the
-  licensing matrix (Apache HAR layers; AGPL only via the existing detector).
+Skip motcpp (capable but C++, poor fit for a Python async stack). Licence-clean path if a
+non-AGPL posture is ever needed: original MIT ByteTrack + our OSNet + Apache pose/action,
+leaving the detector as the only AGPL anchor.
