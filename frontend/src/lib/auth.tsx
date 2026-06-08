@@ -55,7 +55,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const TOKEN_KEY = "nurby_token";
 const USER_KEY = "nurby_user";
 
-const PUBLIC_PATHS = ["/login", "/setup"];
+const PUBLIC_PATHS = ["/login", "/setup", "/guardian/claim"];
 
 // Error that also carries the HTTP status, so callers can react to a
 // 409 (duplicate / already done) without string-matching the message.
