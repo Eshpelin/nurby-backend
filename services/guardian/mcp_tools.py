@@ -110,6 +110,42 @@ async def guardian_recent_events(ctx: dict, limit: int = 10) -> dict:
     return {"events": events[:limit], "count": len(events[:limit])}
 
 
+async def guardian_wellbeing(ctx: dict, person_name: str | None = None) -> dict:
+    """Wellbeing rollup for the dependants you follow: did they eat today, did
+    they fall recently, and a per-action breakdown over the last week. Reads the
+    structured action signals, honors the free-tier delay, and only ever returns
+    your own dependants. Best-effort, never a medical guarantee."""
+    from services.guardian import wellbeing as wb
+
+    user = ctx["user"]
+    db = ctx["db"]
+    delay = int(await get_setting("guardian_free_delay_seconds", 1800))
+    links = await _active_links_for_user(db, user.id)
+    out: list[dict[str, Any]] = []
+    for link in links:
+        if not ent.can_view(link, ent.CAP_TIMELINE):
+            continue
+        person = await db.get(Person, link.person_id)
+        if person is None:
+            continue
+        name = person.nickname or person.display_name
+        if person_name and person_name.strip().lower() not in (name or "").lower():
+            continue
+        cutoff = ent.cutoff_time(link, delay)
+        summary = await wb.wellbeing_summary(db, person.id, cutoff=cutoff)
+        out.append(
+            {
+                "display_name": name,
+                "ate_today": summary["ate_today"],
+                "last_fall_at": summary["last_fall_at"],
+                "last_action": summary["last_action"],
+                "counts": summary["counts"],
+                "delayed": ent.effective_delay_seconds(link, delay) > 0,
+            }
+        )
+    return {"dependants": out, "count": len(out)}
+
+
 GUARDIAN_MCP_TOOLS: list[dict[str, Any]] = [
     {
         "name": "guardian_dependant_status",
@@ -148,6 +184,27 @@ GUARDIAN_MCP_TOOLS: list[dict[str, Any]] = [
         },
         "side_effect": "read",
         "fn": guardian_recent_events,
+    },
+    {
+        "name": "guardian_wellbeing",
+        "description": (
+            "Wellbeing rollup for the dependants you follow: did they eat today, "
+            "did they fall recently, and a per-action breakdown over the last "
+            "week. Use for 'did Mum eat lunch' or 'has Dad fallen'. Best-effort "
+            "signals, not a medical guarantee. Free tier data is delayed. Only "
+            "your own dependants are ever returned."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person_name": {
+                    "type": "string",
+                    "description": "Optional. Filter to one dependant by name.",
+                }
+            },
+        },
+        "side_effect": "read",
+        "fn": guardian_wellbeing,
     },
 ]
 
