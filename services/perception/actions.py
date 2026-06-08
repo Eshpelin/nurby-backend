@@ -175,6 +175,51 @@ def parse_action(raw: str | None) -> dict:
     return out
 
 
+# Caption phrases mapped to a coarse action, highest-signal first. Used to
+# backfill the actions table from existing prose captions without re-running the
+# VLM, and as a cheap text-only classifier. Order matters: a caption saying
+# "fallen on the floor" must map to "fallen" before any weaker cue.
+_CAPTION_ACTION_CUES: tuple[tuple[str, str], ...] = (
+    ("collapsed", "fallen"),
+    ("on the floor", "fallen"),
+    ("on the ground", "fallen"),
+    ("has fallen", "fallen"),
+    ("fallen", "fallen"),
+    ("fell down", "fallen"),
+    ("lying on the floor", "fallen"),
+    ("being fed", "eating"),
+    ("having lunch", "eating"),
+    ("having dinner", "eating"),
+    ("having breakfast", "eating"),
+    ("having a meal", "eating"),
+    ("eating", "eating"),
+    ("is eating", "eating"),
+    ("drinking", "drinking"),
+    ("asleep", "sleeping"),
+    ("sleeping", "sleeping"),
+    ("lying in bed", "sleeping"),
+    ("lying down", "lying_down"),
+    ("walking", "walking"),
+    ("playing", "playing"),
+    ("sitting", "sitting"),
+    ("standing", "standing"),
+)
+
+
+def coarse_action_from_caption(text: str | None) -> str | None:
+    """Best-effort single action from a prose caption, or ``None`` when no clear
+    cue is present. Text-only, no VLM. Used by the backfill so existing
+    observations populate the actions table immediately; lower confidence than a
+    live crop classification, so callers should mark these rows accordingly."""
+    t = (text or "").lower()
+    if not t:
+        return None
+    for phrase, action in _CAPTION_ACTION_CUES:
+        if phrase in t:
+            return action
+    return None
+
+
 def body_box_for_face(face_bbox, person_bboxes):
     """Return the person/body bbox whose region contains the face-box centre, or
     ``None``. Lets us crop a recognised dependant's whole body for action
