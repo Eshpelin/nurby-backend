@@ -17,8 +17,10 @@ of people in frame.
 
 Real action recognition is motion over time, per tracked person. The target is a
 layered pipeline: track every person, estimate pose, classify a short window of pose
-with a skeleton action model, and reserve the VLM for verification and open-world
-description. We do not build the models. We reuse a mature, mostly Apache-2.0 stack
+with a skeleton action model, and **fuse** that with the VLM rather than replacing it.
+HAR becomes the cheap continuous classifier; the VLM keeps running at keyframe cadence,
+now fed the HAR labels so its captions improve, and HAR/VLM agreement becomes a
+self-improving training signal (see L3). We do not build the models. We reuse a mature, mostly Apache-2.0 stack
 (Ultralytics tracking, rtmlib/RTMPose, PYSKL ST-GCN++/PoseConv3D on NTU-RGB+D) whose
 keypoint formats line up, so most of the work is glue and integration, not research.
 
@@ -175,12 +177,33 @@ Heavier alternative for appearance-defined actions or poor pose: an RGB clip mod
 (VideoMAE / X3D, both with permissive weights) on the track crop. GPU-hungry. Keep behind
 the same interface; default skeleton for cost. See the pose-quality gate in Risks.
 
-### L3. VLM as verifier and describer (in perception, rare)
+### L3. VLM as a fused enricher, not a replacement (in perception)
 
-Invert v1. The temporal model classifies continuously and cheaply; the VLM is called only
-to (a) confirm a high-confidence `fallen` on a keyframe crop, same `confirms_fall` policy
-as today, and (b) periodically fill the open `detail`. VLM load drops from
-O(people x observations) to a few events per camera.
+Do not retire the VLM. Re-order it. The mistake in v1 is using the VLM as the
+per-person, per-frame classifier, which is the O(people x frames) cost. The fix is not to
+silence it but to stop fanning it out per person: HAR becomes the continuous, cheap,
+per-track classifier, and the VLM stays at its current keyframe cadence, now **fed by
+HAR** and cross-checking it. The two enrich each other.
+
+- **HAR to VLM.** Pass each tracked person's action label + confidence into the VLM's
+  prompt as ground-truth context (we already have `vlm.describe(extra_context=...)` and the
+  cascade refiner for exactly this). The VLM stops guessing "someone near a table" and
+  writes a grounded, consistent caption: "the resident the motion model reads as eating is
+  having lunch at the window". Better captions, better search embeddings, for free.
+- **VLM to HAR.** The VLM caption / open `detail` can confirm or correct the skeleton label
+  ("drinking tea", not "eating"). Disagreement is a signal, not noise.
+- **Agreement over time, a self-improving loop.** When HAR and VLM agree, write a
+  high-confidence row and spend nothing more. When they disagree, that is a labelled hard
+  case: route it (with the opt-in keypoint store) into a fine-tuning set. This is what
+  closes the NTU domain gap (NTU's scripted "eating/drinking" differs from real
+  eldercare). The system improves from its own disagreements without hand-labelling.
+- **High-stakes still verifies.** A high-confidence skeleton `fallen` still triggers the
+  VLM crop confirm, same `confirms_fall` policy as today.
+
+So the VLM load drops from O(people x observations) to roughly its current keyframe rate,
+while its output quality goes up because HAR grounds it. The `source` column records who
+produced each row (`skeleton`, `vlm_crop`, or a fused `skeleton+vlm` agreement) so trust
+and the training set are auditable.
 
 ### L4. State machine (in ingestion)
 
@@ -250,8 +273,10 @@ advantage over Ultralytics' built-in trackers or MIT ByteTrack.
 `observation_actions` gains, by migration:
 
 - `track_id` (string, indexed): the per-camera track the action came from.
-- `source` (string): `skeleton` | `vlm_crop` | `geometry` | `caption_backfill`, so
-  continuous HAR rows are distinguishable from VLM/legacy rows for trust tuning.
+- `source` (string): `skeleton` | `vlm_crop` | `skeleton+vlm` (the two agreed) |
+  `geometry` | `caption_backfill`, so continuous HAR rows, fused high-confidence rows, and
+  VLM/legacy rows are distinguishable for trust tuning and for building the fine-tuning set
+  from disagreements.
 - optional `window_start` / `window_end` (timestamptz): the span a temporal label covers.
 
 Keypoints: default to **not persisting** raw keypoints (privacy-lean, recompute on
