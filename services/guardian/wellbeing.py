@@ -66,6 +66,7 @@ async def recent_actions(
                 "action": r.action,
                 "posture": r.posture,
                 "confidence": r.confidence,
+                "detail": getattr(r, "detail", None),
                 "at": r.observed_at.isoformat(),
                 "zone": (cam.location_label or cam.name) if cam else None,
             }

@@ -82,6 +82,11 @@ async def run(days: int | None, commit: bool) -> dict:
                             action=action,
                             posture=None,
                             confidence=None,  # text-derived, not a fresh crop
+                            # The existing caption is an open description of the
+                            # scene; carry it as detail so backfilled rows still
+                            # have the open-world layer, capped to the column's
+                            # practical size.
+                            detail=(obs.vlm_description or "")[:240] or None,
                             observed_at=obs.started_at,
                         )
                     )
