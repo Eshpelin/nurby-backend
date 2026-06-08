@@ -75,17 +75,24 @@ ACTION_SCHEMA: dict = {
         "action": {"type": "string", "enum": list(ACTIONS)},
         "posture": {"type": "string", "enum": list(POSTURES)},
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        # Open-world description. The closed action is the queryable anchor; this
+        # free-text field captures what the action enum cannot (objects held,
+        # clothing, who they are with, finer activity). Always optional.
+        "detail": {"type": "string"},
     },
     "required": ["action"],
     "additionalProperties": False,
 }
+
+# Hard cap on the open-world detail so a runaway model cannot bloat a row.
+DETAIL_MAX_CHARS = 240
 
 # System prompt forcing a single-person classification into the closed
 # vocabulary. Kept terse so small models stay on task.
 CLASSIFY_SYSTEM_PROMPT = (
     "You label what ONE person in a cropped security-camera image is doing. "
     "Reply with a single JSON object and nothing else, in the form "
-    '{"action": "<one action>", "posture": "<one posture>", "confidence": <0..1>}. '
+    '{"action": "<one action>", "posture": "<one posture>", "confidence": <0..1>, "detail": "<short description>"}. '
     "Choose action from exactly this list: "
     + ", ".join(ACTIONS)
     + ". Choose posture from exactly this list: "
@@ -93,7 +100,10 @@ CLASSIFY_SYSTEM_PROMPT = (
     + ". Use \"fallen\" ONLY for a person who has collapsed or fallen to the "
     "floor and looks unable to get up. A person resting in a bed, on a sofa, or "
     "asleep is \"sleeping\" or \"lying_down\", NOT \"fallen\". If you cannot tell, "
-    'use "unknown" with low confidence.'
+    'use "unknown" with low confidence. The "detail" field is a short free-text '
+    "description of what this person is doing that the action label cannot "
+    "capture: objects they hold, clothing, who they are with, finer activity. "
+    "Keep detail under 25 words and describe only what you can see."
 )
 
 CLASSIFY_USER_PROMPT = "What is this person doing? Answer with the JSON object only."
@@ -117,6 +127,16 @@ def _coerce_confidence(value) -> float | None:
     return max(0.0, min(1.0, c))
 
 
+def _coerce_detail(value) -> str | None:
+    """Open-world description, trimmed and length-capped, or None when empty."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    return s[:DETAIL_MAX_CHARS]
+
+
 def parse_action(raw: str | None) -> dict:
     """Turn a raw VLM reply into ``{action, posture, confidence}``.
 
@@ -126,7 +146,7 @@ def parse_action(raw: str | None) -> dict:
     than raising, because a parse failure must not silence downstream logic that
     fails open (for example fall confirm)."""
     text = (raw or "").strip()
-    out = {"action": "unknown", "posture": "unknown", "confidence": None}
+    out = {"action": "unknown", "posture": "unknown", "confidence": None, "detail": None}
     if not text:
         return out
 
@@ -144,6 +164,7 @@ def parse_action(raw: str | None) -> dict:
                 out["action"] = action
                 out["posture"] = _coerce_posture(data.get("posture"))
                 out["confidence"] = _coerce_confidence(data.get("confidence"))
+                out["detail"] = _coerce_detail(data.get("detail"))
                 return out
     except (ValueError, TypeError):
         pass
@@ -340,12 +361,14 @@ async def extract_for_observation(
                 "action": parsed["action"],
                 "posture": parsed["posture"],
                 "confidence": parsed["confidence"],
+                "detail": parsed.get("detail"),
             }
         )
 
-    # Persist. Skip "unknown" rows: they carry no signal and would bloat the
-    # table on every cluttered frame.
-    persist = [r for r in results if r["action"] != "unknown"]
+    # Persist. Skip rows that carry no signal at all (unknown action AND no
+    # open-world detail), so a cluttered frame does not bloat the table. An
+    # unknown action with a real description is still worth keeping.
+    persist = [r for r in results if r["action"] != "unknown" or r.get("detail")]
     if persist:
         await _store_actions(observation_id, camera_id, observed_at, persist)
     return results
@@ -377,6 +400,7 @@ async def _store_actions(observation_id, camera_id, observed_at, rows: list[dict
                         action=r["action"],
                         posture=r.get("posture"),
                         confidence=r.get("confidence"),
+                        detail=r.get("detail"),
                         observed_at=observed_at,
                     )
                 )

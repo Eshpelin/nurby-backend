@@ -440,6 +440,11 @@ class ObservationAction(Base):
     action: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     posture: Mapped[str | None] = mapped_column(String(32), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Open-world description of what this person was doing, beyond the closed
+    # action enum (objects held, clothing, finer activity). Free text from the
+    # VLM, nullable. The closed action stays the queryable anchor; this holds the
+    # nuance the enum cannot.
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

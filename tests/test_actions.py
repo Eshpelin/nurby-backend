@@ -15,6 +15,26 @@ def test_parse_strict_json():
     assert p["action"] == "eating"
     assert p["posture"] == "sitting"
     assert p["confidence"] == 0.9
+    assert p["detail"] is None
+
+
+def test_parse_open_world_detail():
+    p = actions.parse_action(
+        '{"action": "eating", "detail": "holding a cup of tea by the window"}'
+    )
+    assert p["action"] == "eating"
+    assert p["detail"] == "holding a cup of tea by the window"
+
+
+def test_parse_detail_length_capped():
+    long = "x" * 500
+    p = actions.parse_action('{"action": "walking", "detail": "' + long + '"}')
+    assert len(p["detail"]) == actions.DETAIL_MAX_CHARS
+
+
+def test_parse_blank_detail_is_none():
+    p = actions.parse_action('{"action": "walking", "detail": "   "}')
+    assert p["detail"] is None
 
 
 def test_parse_json_in_code_fence_and_prose():
