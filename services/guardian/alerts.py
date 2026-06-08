@@ -101,7 +101,7 @@ def compose_message(kind: str, display_name: str, *, zone: str | None = None,
     if kind == "fell":
         return f"{display_name} may have fallen{where}. Please check on them."
     if kind == "attended_meal":
-        return f"{display_name} was at the table{where}."
+        return f"{display_name} came to {zone or 'a meal'}."
     return f"Update about {display_name}."
 
 

@@ -276,6 +276,7 @@ SETTINGS_WHITELIST: tuple[str, ...] = (
     "guardian_pickup_window_seconds",
     "guardian_image_blur_radius",
     "guardian_fall_detection_enabled",
+    "guardian_meal_tracking_enabled",
     "guardian_reveal_enabled",
     "guardian_reveal_ref_distance",
     "guardian_clips_enabled",
