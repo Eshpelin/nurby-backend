@@ -75,6 +75,23 @@ def _write_vlm_thumbnail(
 
 logger = logging.getLogger("nurby.perception.vlm_queue")
 
+
+async def _to_local(dt: datetime | None) -> datetime:
+    """Convert a UTC observation time to the facility's local time so meal
+    windows compare against local hours. Falls back to the input on any error."""
+    now = dt or datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        from shared.app_settings import get_setting
+
+        tzname = await get_setting("system_timezone", "UTC")
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        return now.astimezone(ZoneInfo(str(tzname or "UTC")))
+    except Exception:  # noqa: BLE001
+        return now
+
 # Module-level stats registry so API can read without direct pipeline reference
 _global_stats: dict[str, "CameraVLMStats"] = {}
 
@@ -737,9 +754,34 @@ class VLMQueue:
                         if vlm_enqueued_at is not None:
                             obs.vlm_enqueued_at = vlm_enqueued_at
                     await db.commit()
+                    meal_inputs = (
+                        obs.person_detections,
+                        obs.camera_id,
+                        obs.started_at,
+                    )
+                else:
+                    meal_inputs = None
         except Exception:
             logger.exception("Failed to patch observation %s with VLM description", observation_id)
             return
+
+        # Guardian meal attendance (eldercare): if the caption shows a recognised
+        # dependant eating during a meal window, record it. Camera-agnostic and
+        # best-effort, off the caption the VLM already produced (no extra call).
+        try:
+            if meal_inputs is not None:
+                from shared.app_settings import get_setting
+
+                if bool(await get_setting("guardian_meal_tracking_enabled", True)):
+                    from services.perception import guardian_meal
+
+                    person_dets, cam_id, started_at = meal_inputs
+                    when_local = await _to_local(started_at)
+                    await guardian_meal.process_caption(
+                        description, person_dets, cam_id, when_local
+                    )
+        except Exception:
+            logger.debug("guardian meal processing failed", exc_info=True)
 
         # Regenerate embedding now that VLM description is available
         try:

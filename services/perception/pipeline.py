@@ -693,20 +693,8 @@ class PerceptionPipeline:
                         )
         except Exception:
             logger.debug("guardian fall processing failed", exc_info=True)
-
-        # Guardian meal attendance (eldercare). A recognised dependant seen in a
-        # dining zone during a meal window records an attended-meal event, once
-        # per meal per day. Presence at the table, not intake.
-        try:
-            if faces and cam is not None and getattr(cam, "motion_zones", None):
-                from shared.app_settings import get_setting
-
-                if bool(await get_setting("guardian_meal_tracking_enabled", True)):
-                    from services.perception import guardian_meal
-
-                    await guardian_meal.process(cam, faces)
-        except Exception:
-            logger.debug("guardian meal processing failed", exc_info=True)
+        # Guardian meal attendance runs off the VLM caption once it lands (so it
+        # catches eating anywhere, not just a dining zone). See vlm_queue.
 
         # Step 5. Queue VLM call async (non-blocking)
         from services.perception.incident_tracker import INTERESTING_INCIDENT_LABELS
