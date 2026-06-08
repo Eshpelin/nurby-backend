@@ -1,0 +1,34 @@
+# Nurby
+
+> Free, open-source, self-hosted AI software for understanding security cameras with local vision models. Nurby ingests RTSP and ONVIF cameras, recognizes faces and license plates on-device, captions scenes with a vision-language model, runs plain-language automation rules, and answers questions about footage. With a local model, no video ever leaves your network.
+
+This repository is the Nurby backend and web app: a self-hosted network video recorder (NVR) and AI surveillance platform. It runs on hardware you control via Docker Compose. People use it as a private home-security system, a small-business CCTV setup, and a programmable surveillance platform with a REST API, webhooks, and physical-device alerts. It is an AI-native alternative to cloud camera subscriptions and a companion to projects like Frigate, Scrypted, Shinobi, and Blue Iris.
+
+## Architecture
+
+- `services/api` — FastAPI backend: auth, cameras, people, vehicles, rules, settings, webhooks, guardian, agent/ask.
+- `services/perception` — the vision pipeline: detection (YOLO), face recognition (InsightFace), plate reading, VLM captioning, audio events, journeys.
+- `services/agent` — the natural-language "Ask Nurby" agent and MCP server over footage.
+- `services/guardian` — Guardian: presence, entitlements, alerts, per-guardian delivery, image privacy (blur + dependant face reveal).
+- `frontend` — Next.js dashboard (dark, keyboard-friendly).
+- `shared` — SQLAlchemy models, config, database, auth. Postgres + pgvector store everything; Redis backs queues and cooldowns.
+
+## Key facts
+
+- License: open source, free to self-host. No paywall, no billing today.
+- Privacy: with a local vision-language model, no footage leaves the network. Cloud AI providers (OpenAI, Anthropic, Gemini) are opt-in per camera or rule.
+- Cameras: anything speaking RTSP or ONVIF (Reolink, Amcrest, Hikvision, Dahua, Unifi, and more).
+- Detection: 600+ objects out of the box, swappable models, custom labels.
+- Automation: triggers, conditions, chained actions (webhook, API call, email, in-app, physical alarm), cooldowns, face/zone gating, plain-sentence previews.
+- Search: natural-language search over footage using vector embeddings.
+- Data: time- or size-based retention per camera. Clips export as MP4, events as JSON or CSV. Everything lives in Postgres on a volume you own.
+
+## Guardian
+
+Guardian is a privacy-first view layer for facilities (daycares, schools, eldercare). Each family follows one specific person and nobody else. Safe-arrival and verified-pickup alerts checked against an approved-pickup registry, presence and zone alerts, weekly trends. Every image served to a guardian is blurred so no non-dependant face is identifiable; the bound dependant's own face is revealed when a perception match clears a confidence threshold. The facility grants access, guardians never self-grant, and every view is logged. Free and open source.
+
+## Links
+
+- Website: https://nurby.ai
+- Guardian: https://nurby.ai/guardian
+- Press kit: docs/brand/

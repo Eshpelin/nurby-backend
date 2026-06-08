@@ -1,5 +1,12 @@
 # Nurby
 
+[![License](https://img.shields.io/github/license/Eshpelin/nurby?color=16B981)](LICENSE)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-yes-16B981)](#deploy)
+[![Local AI](https://img.shields.io/badge/local%20AI-Ollama%20%7C%20OpenAI%20%7C%20Anthropic%20%7C%20Gemini-16B981)](#)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](#deploy)
+[![Stars](https://img.shields.io/github/stars/Eshpelin/nurby?style=flat&color=16B981)](https://github.com/Eshpelin/nurby/stargazers)
+[![Website](https://img.shields.io/badge/demo-nurby.ai-16B981)](https://nurby.ai)
+
 Self-hostable, privacy-first AI camera surveillance you fully own. Point Nurby at any IP camera and a vision model of your choice (local or cloud), and it turns raw video into people, journeys, events, and answers. Ask it "where was the dog last night" in plain language, wire a rule that flashes a siren when a stranger appears after 10pm, and keep every frame on your own hardware.
 
 Nurby is an **open-source, self-hosted CCTV and NVR platform**. a privacy-first **video management system (VMS)** with on-device AI. Run it on your own hardware as a free alternative to cloud security-camera subscriptions, and as an AI-native companion to projects like Frigate, Scrypted, MotionEye, Shinobi, and Blue Iris.
