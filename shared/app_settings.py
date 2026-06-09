@@ -167,6 +167,16 @@ DEFAULTS: dict[str, Any] = {
     # observation_actions row. Powers meal attendance and queryable wellbeing
     # signals. Gated on dependant-in-frame, so it adds no cost on other scenes.
     "guardian_actions_enabled": True,
+    # Temporal HAR (v-next): continuous tracking + pose + skeleton action model in
+    # ingestion, writing person_action_segments. Heavy and integration-pending, so it
+    # defaults OFF; turn on per deployment once verified on the target hardware. See
+    # docs/har-design.md.
+    "guardian_har_enabled": False,
+    # HAR sampling cadence off the dense stream (frames/sec per camera).
+    "har_cadence_fps": 8,
+    # Age-based retention for person_action_segments. Continuous HAR would otherwise grow
+    # this table without bound (observations have no auto-retention).
+    "har_segment_retention_days": 30,
     # Live clips are blurred frame-by-frame and cached before serving, so they
     # are safe to serve by default. Turn the feature off entirely with
     # guardian_clips_enabled. guardian_unblurred_clips_enabled is an explicit

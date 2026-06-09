@@ -144,6 +144,38 @@ class RetentionManager:
                     "Audio event retention failed for camera %s", cam.id
                 )
 
+        # HAR action segments. System-wide window (one setting), not per-camera, because
+        # continuous HAR would otherwise grow person_action_segments without bound the same
+        # way conversations/detections did. Best-effort; failure never blocks the loop.
+        try:
+            await self._enforce_har_segment_retention()
+        except Exception:
+            logger.exception("HAR segment retention failed")
+
+    async def _enforce_har_segment_retention(self) -> None:
+        """Delete person_action_segments older than ``har_segment_retention_days``."""
+        from shared.app_settings import get_setting
+        from shared.models import PersonActionSegment
+
+        days = int(await get_setting("har_segment_retention_days", 30) or 0)
+        if days <= 0:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        async with async_session() as db:
+            rows = (
+                await db.execute(
+                    select(PersonActionSegment).where(PersonActionSegment.started_at < cutoff)
+                )
+            ).scalars().all()
+            for seg in rows:
+                await db.delete(seg)
+            if rows:
+                await db.commit()
+                logger.info(
+                    "HAR segment retention. deleted %d segments (cutoff %s, %d days)",
+                    len(rows), cutoff.isoformat(), days,
+                )
+
     async def _enforce_audio_retention(self, camera: Camera) -> None:
         """Delete AudioCapture rows + opus blobs older than the camera's
         ``audio_retention_days``.

@@ -449,6 +449,38 @@ class ObservationAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PersonActionSegment(Base):
+    """A contiguous run of one action by one tracked person (HAR timeline source).
+
+    Written by the HAR state machine on a transition (or on track loss): merged, debounced
+    action runs with a start and an end. Unlike ``observation_actions`` (keyframe-anchored,
+    one row per observation), this is **track-anchored and observation-independent** so it can
+    capture continuous activity between keyframes. It is the cheap range-query source for the
+    per-camera activity timeline and the wellbeing rollups.
+
+    Identity is the held binding from ``identity_binding``: ``person_id`` is set only for a
+    recognised, consented person; segments for unknown/body-only tracks either carry no
+    ``person_id`` or are dropped before write, and are never shown on a guardian surface.
+    Has its own age-based retention (``har_segment_retention_days``) because, unlike
+    observations, continuous HAR would otherwise grow this table without bound.
+    """
+
+    __tablename__ = "person_action_segments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    camera_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    person_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    person_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    track_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    confidence_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # skeleton | skeleton+vlm | geometric — provenance for trust + the training set.
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ObservationVlmPass(Base):
     """A single versioned VLM pass over one observation's frame.
 
