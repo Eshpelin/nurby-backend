@@ -1,8 +1,9 @@
 # Human Action Recognition (HAR): engineering plan
 
-Status: plan, ready to schedule. Supersedes the earlier discussion-style drafts. This is
-the build document: what we implement, how it touches the existing stack, how it shows up
-on the dashboard, and a phased task list with acceptance criteria.
+Status: Phase 0 spike complete, **conditional GO** (see `docs/har-phase0-findings.md`).
+Proceed to Phase 1; hold Phase 3 until throughput + occlusion are confirmed on real target
+hardware. This is the build document: what we implement, how it touches the existing stack,
+how it shows up on the dashboard, and a phased task list with acceptance criteria.
 
 The architecture, stack-impact, dashboard, and edge-case sections were verified against the
 actual code (ingestion `stream.py`/`manager.py`, `services/api/ws.py`, the frontend overlay
@@ -152,6 +153,28 @@ Edge cases found in the same files, now explicit:
 
 Backward-compatible: every change is additive and gated by `guardian_actions_enabled` /
 new per-camera HAR settings. v1 stays the fallback; nothing existing is removed.
+
+### 4.1 Hard requirements from the Phase 0 spike
+
+Non-negotiables surfaced by reading the code (`docs/har-phase0-findings.md`):
+
+- **Retention.** Observations and `observation_actions` have **no** auto-cleanup today
+  (`services/ingestion/retention.py` only prunes audio/transcripts/recordings). Continuous HAR
+  produces far more rows, so `person_action_segments` MUST ship age-based retention
+  (`har_segment_retention_days`) modelled on the audio-capture cleanup, plus CASCADE where it
+  references observations. Otherwise it grows unbounded.
+- **Facility scoping.** Generic camera/observation endpoints are NOT facility-scoped (only
+  Guardian routes are). The new camera-scoped actions endpoint MUST scope via
+  `facility_camera_ids()` / the `_allowed_cameras` pattern, or it leaks one facility's activity
+  to another.
+- **Three identity states.** A track may carry a bound `person_id`, a `body_cluster_id` only,
+  or neither (`person_id` exists only for an enrolled + consented face match or a face-confirmed
+  body cluster). Guardian-facing action display gates on `person_id`; unknown-body actions are
+  dropped or stored without identity, never shown to a family.
+- **Consent at query time.** Revoking consent does not erase an already-written `person_id`.
+  Action endpoints gate on `consent_given` at read time (redact name/id), same as reveal/blur.
+- **Motion zones reused.** `pipeline.py:_apply_motion_zones` already gates detection, so HAR
+  inherits include/exclude regions for free. No new zone type.
 
 ---
 
@@ -313,10 +336,17 @@ their own PRs.
 - Acceptance: a go/no-go memo with numbers and the two decisions above.
 
 ### Phase 1 — Tracking + re-id (safe now, in ingestion)
+- HAR-1.0 Examine `services/perception/tracker.py` (`ObjectTracker`, already used for
+  loitering/line-cross) and align the HAR tracker with it rather than inventing a second
+  notion of a track.
 - HAR-1.1 Integrate the chosen Tier-1 tracker in `stream.py`; assign stable `track_id`.
-- HAR-1.2 Stamp `track_id` (+ smoothed action placeholder) onto the published keyframe.
-- HAR-1.3 Bind `track_id -> person_id` in `pipeline.py`; TTL Redis map for the gap between
-  face hits; buffer actions for unbound tracks.
+- HAR-1.2 **Version the `nurby:motion` payload** (currently unversioned: `camera_id,
+  timestamp, motion_score, frame`) and add the ingestion tracker's `track_ids`; keep
+  consumers backward-compatible.
+- HAR-1.3 Bind `track_id -> person_id` in `pipeline.py` (the Phase-0 prototype logic: tightest
+  containing track box, hold through occlusion); write a shared Redis map
+  `(camera_id, track_id) -> person_id` (TTL) that ingestion reads to attribute segments;
+  handle the three identity states (person_id / body_cluster_id only / neither).
 - HAR-1.4 Feed tracklet-level embeddings into the OSNet gallery (`reid.py`); write `track_id`
   onto `observation_actions`.
 - HAR-1.5 Tests: ID continuity through a scripted occlusion clip; binding correctness.
@@ -342,9 +372,11 @@ their own PRs.
 
 ### Phase 4 — State machine, segments, and dashboard
 - HAR-4.1 L4 smoothing + transition emission in ingestion.
-- HAR-4.2 `person_action_segments` table + migration; write on transition.
+- HAR-4.2 `person_action_segments` table + migration; write on transition; **age-based
+  retention job** (`har_segment_retention_days`) + CASCADE, modelled on audio-capture cleanup.
 - HAR-4.3 `GET /cameras/{id}/actions` + `person_actions` via the existing global
-  `broadcast()`; enforce the privacy reveal + zone gating server-side here.
+  `broadcast()`; enforce **facility scoping** (`facility_camera_ids`), **consent at query
+  time**, and the privacy reveal + zone gating, all server-side here.
 - HAR-4.4 `CurrentActivityStrip` (text strip, `useWSSubscribe` pattern, modelled on
   `LiveCaptionOverlay`). Bbox-pinned chips are a separate, later task, not in this phase.
 - HAR-4.5 Extend `FollowFeedPage.tsx` with an action band + action filter (do not build a new
