@@ -9,6 +9,7 @@ import type { StreamType } from "@/lib/camera-types";
 import { AddCameraModal } from "@/components/AddCameraModal";
 import { StarredStatusRow } from "@/components/StarredStatusRow";
 import { LiveCaptionOverlay } from "@/components/LiveCaptionOverlay";
+import { CurrentActivityStrip } from "@/components/CurrentActivityStrip";
 import { AudioActiveDot } from "@/components/AudioActiveDot";
 import { VLMStatusBadge } from "@/components/VLMStatusBadge";
 import { SummarizeNowButton } from "@/components/SummarizeNowButton";
@@ -932,6 +933,12 @@ function CameraSidebarCard({
         {/* Live caption overlay. Only when transcription enabled */}
         {camera.status !== "offline" && camera.audio_transcribe_enabled && (
           <LiveCaptionOverlay cameraId={camera.id} position="bottom" />
+        )}
+
+        {/* HAR live current-activity strip. Renders only when person_actions
+            arrive (HAR enabled), so it is invisible otherwise. */}
+        {camera.status !== "offline" && (
+          <CurrentActivityStrip cameraId={camera.id} position="top" />
         )}
 
         {/* Audio active dot + VLM thinking badge. Stack top-left so the
