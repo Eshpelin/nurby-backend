@@ -53,6 +53,11 @@ class PerceptionPipeline:
         from services.perception.tracker import ObjectTracker
         self._trackers: dict[str, ObjectTracker] = {}
         self._ObjectTracker = ObjectTracker
+        # Per-camera HAR identity binders. Hold tracker_id -> person_id across
+        # keyframes so a track keeps its identity through face occlusion.
+        from services.perception.identity_binding import IdentityBinder
+        self._binders: dict[str, IdentityBinder] = {}
+        self._IdentityBinder = IdentityBinder
 
     async def _get_redis(self):
         if self._redis is None:
@@ -625,6 +630,36 @@ class PerceptionPipeline:
         thumbnail_path = await self._save_thumbnail(camera_id, timestamp, frame, detections)
 
         # Step 4. Store observation in database (immediately, without waiting for VLM)
+        # HAR identity binding. Hold tracker_id -> person_id across keyframes so a track
+        # keeps its identity through face occlusion. At this point person_dets carry a
+        # tracker_id (from tracker.update) and a body_cluster_id (from body re-id), and
+        # faces carry person_id, so identity is resolved where all three co-exist. The
+        # result is a per-track identity with three honest states (person/body/unknown),
+        # attached onto each detection and persisted as person_detections["tracks"] for
+        # HAR segments and the dashboard. Pure bookkeeping, no model call.
+        binder = self._binders.get(camera_id)
+        if binder is None:
+            binder = self._IdentityBinder()
+            self._binders[camera_id] = binder
+        track_identity = binder.update(camera_id, person_dets, faces)
+        tracks_payload = []
+        for d in person_dets:
+            tid = d.get("tracker_id")
+            if tid is None:
+                continue
+            ident = track_identity.get(int(tid), {})
+            d["bound_person_id"] = ident.get("person_id")
+            d["bound_person_name"] = ident.get("person_name")
+            d["identity_state"] = ident.get("state")
+            tracks_payload.append({
+                "tracker_id": int(tid),
+                "bbox": d.get("bbox"),
+                "person_id": ident.get("person_id"),
+                "person_name": ident.get("person_name"),
+                "body_cluster_id": ident.get("body_cluster_id"),
+                "state": ident.get("state"),
+            })
+
         person_detections = None
         bodies_payload = [
             {
@@ -633,7 +668,7 @@ class PerceptionPipeline:
             }
             for d in person_dets if d.get("body_cluster_id")
         ]
-        if faces or bodies_payload:
+        if faces or bodies_payload or tracks_payload:
             person_detections = {
                 "faces": [
                     {
@@ -646,6 +681,9 @@ class PerceptionPipeline:
                     for f in (faces or [])
                 ],
                 "bodies": bodies_payload,
+                # New for HAR: per-track held identity (tracker_id -> person, body, or
+                # unknown). Additive; existing consumers of faces/bodies are unaffected.
+                "tracks": tracks_payload,
                 "count": len(faces or []) + len(bodies_payload),
             }
 
