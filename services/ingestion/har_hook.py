@@ -56,24 +56,42 @@ def current_tracks(camera_id) -> list[dict]:
     except Exception:
         return []
 
-# Cheap cache of the enabled flag + cadence so we don't hit settings every frame.
-_cfg: dict = {"at": 0.0, "enabled": False, "cadence": 8}
+# Cheap cache of the HAR settings so we don't hit the store every frame.
+_cfg: dict = {"at": 0.0, "enabled": False, "cadence": 8, "test_mode": False, "action_set": "all"}
 _CFG_TTL = 30.0
 
 
-async def _config() -> tuple[bool, int]:
+async def _config() -> dict:
     now = time.monotonic()
     if now - _cfg["at"] < _CFG_TTL:
-        return _cfg["enabled"], _cfg["cadence"]
+        return _cfg
     try:
         from shared.app_settings import get_setting
 
         _cfg["enabled"] = bool(await get_setting("guardian_har_enabled", False))
         _cfg["cadence"] = int(await get_setting("har_cadence_fps", 8) or 8)
+        _cfg["test_mode"] = bool(await get_setting("guardian_har_test_mode", False))
+        _cfg["action_set"] = str(await get_setting("har_action_set", "all") or "all")
     except Exception:
         _cfg["enabled"] = False
     _cfg["at"] = now
-    return _cfg["enabled"], _cfg["cadence"]
+    return _cfg
+
+
+async def _write_live_snapshot(get_redis, cam, live) -> None:
+    """Publish the current live actions to Redis (short TTL) so perception can ground its VLM
+    caption on them (HAR -> VLM fusion). Best-effort."""
+    if get_redis is None or not live:
+        return
+    try:
+        import json as _json
+
+        redis = await get_redis()
+        if redis is None:
+            return
+        await redis.set(f"har:live:{cam}", _json.dumps(live), ex=10)
+    except Exception:
+        logger.debug("HAR live snapshot write failed", exc_info=True)
 
 
 async def _enrich_identity(get_redis, cam, segments, live) -> None:
@@ -112,12 +130,12 @@ async def run_har(camera_id, frame, loop, executor, get_redis=None) -> None:
     any error. ``get_redis`` is the StreamWorker's async redis getter, used to read the
     cross-service identity map."""
     try:
-        enabled, cadence = await _config()
-        if not enabled:
+        cfg = await _config()
+        if not cfg["enabled"]:
             return
         cam = str(camera_id)
         now = time.monotonic()
-        min_gap = 1.0 / max(1, cadence)
+        min_gap = 1.0 / max(1, cfg["cadence"])
         if now - _last_run.get(cam, 0.0) < min_gap:
             return
         _last_run[cam] = now
@@ -144,9 +162,18 @@ async def run_har(camera_id, frame, loop, executor, get_redis=None) -> None:
         ts = time.time()  # wall-clock epoch so segment bounds convert to datetimes
         segments, live = runner.process_poses(poses, now=ts)
 
-        # Attribute identity from the cross-service map, then broadcast + persist.
+        # Narrow to the deployment's use-case action set (Phase 5 preset).
+        from services.perception.har_actions import action_in_set
+
+        aset = cfg.get("action_set", "all")
+        live = [e for e in live if action_in_set(e.get("action"), aset)]
+        segments = [s for s in segments if action_in_set(s.get("action"), aset)]
+
+        # Attribute identity from the cross-service map.
         await _enrich_identity(get_redis, cam, segments, live)
 
+        # Publish live snapshot (for VLM fusion) + broadcast to the dashboard.
+        await _write_live_snapshot(get_redis, cam, live)
         try:
             from services.api.ws import broadcast_person_actions
 
@@ -154,7 +181,8 @@ async def run_har(camera_id, frame, loop, executor, get_redis=None) -> None:
         except Exception:
             logger.debug("HAR live broadcast failed", exc_info=True)
 
-        if segments:
+        # Persist unless in test/dry-run mode (operator validates live before trusting).
+        if segments and not cfg.get("test_mode"):
             for s in segments:
                 s["started_at"] = _epoch_to_dt(s.get("started_at"))
                 s["ended_at"] = _epoch_to_dt(s.get("ended_at"))

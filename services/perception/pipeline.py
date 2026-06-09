@@ -815,6 +815,30 @@ class PerceptionPipeline:
                     faces=faces,
                     detections=detections,
                 )
+                # HAR -> VLM fusion. When HAR is on, ground the caption on the live per-person
+                # action signal so the VLM describes "Mum eating" instead of guessing.
+                try:
+                    from shared.app_settings import get_setting
+
+                    if bool(await get_setting("guardian_har_enabled", False)):
+                        import json as _json
+
+                        r = await self._get_redis()
+                        raw = await r.get(f"har:live:{camera_id}")
+                        if raw:
+                            from services.perception.har_context import format_har_context
+
+                            har_live = _json.loads(
+                                raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+                            )
+                            har_ctx = format_har_context(har_live)
+                            if har_ctx:
+                                extra_context = (
+                                    f"{extra_context} {har_ctx}".strip()
+                                    if extra_context else har_ctx
+                                )
+                except Exception:
+                    logger.debug("HAR->VLM fusion context failed", exc_info=True)
                 refiner_provider = await self._get_refiner_provider(cam, provider)
                 refiner_triggers = (
                     cam.vlm_refiner_trigger_objects

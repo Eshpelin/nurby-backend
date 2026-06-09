@@ -177,6 +177,14 @@ DEFAULTS: dict[str, Any] = {
     # Age-based retention for person_action_segments. Continuous HAR would otherwise grow
     # this table without bound (observations have no auto-retention).
     "har_segment_retention_days": 30,
+    # Test/dry-run mode (Phase 5). When on, HAR runs and shows live activity on the dashboard
+    # but does NOT persist segments or fire alerts, so an operator can validate accuracy on
+    # their own cameras before trusting it. Trust gate before going live.
+    "guardian_har_test_mode": False,
+    # Use-case action preset: which actions a deployment surfaces. all | eldercare |
+    # childcare | security. Narrows the meaningful actions so a site is not shown logic from
+    # another vertical.
+    "har_action_set": "all",
     # Live clips are blurred frame-by-frame and cached before serving, so they
     # are safe to serve by default. Turn the feature off entirely with
     # guardian_clips_enabled. guardian_unblurred_clips_enabled is an explicit

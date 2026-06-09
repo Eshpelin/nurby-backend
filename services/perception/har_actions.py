@@ -184,3 +184,29 @@ def get_backend(name: str = "geometric"):
     if name == "stgcn":
         return STGCNActionBackend()
     return GeometricActionBackend()
+
+
+# ── Use-case action presets (Phase 5 basics) ────────────────────────────────────────────
+# Which actions a deployment surfaces/stores. An operator picks a preset per use case so a
+# childcare site is not alerted on "fallen"-style eldercare logic and vice versa. "all" is the
+# default. Filtering is applied to live + stored segments by the ingestion hook.
+from services.perception.actions import ACTIONS as _VOCAB
+
+ALL_ACTIONS = set(_VOCAB)
+ACTION_SETS: dict[str, set[str]] = {
+    "all": ALL_ACTIONS,
+    "eldercare": {"fallen", "eating", "drinking", "lying_down", "sitting", "standing", "walking", "sleeping"},
+    "childcare": {"playing", "interacting", "walking", "sitting", "lying_down", "eating", "sleeping"},
+    "security": {"walking", "standing", "fallen", "interacting"},
+}
+
+
+def allowed_actions(preset: str | None) -> set[str]:
+    """The action set for a preset name; falls back to all. ``unknown`` is always allowed
+    through (it is filtered elsewhere) so presets only narrow the meaningful actions."""
+    return ACTION_SETS.get((preset or "all").strip().lower(), ALL_ACTIONS) | {"unknown"}
+
+
+def action_in_set(action: str | None, preset: str | None) -> bool:
+    a = str(action or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return a in allowed_actions(preset)
