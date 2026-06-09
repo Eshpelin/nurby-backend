@@ -185,6 +185,16 @@ class StreamWorker:
                 frame_count += 1
                 motion_score = None
 
+                # HAR (Phase 2-4). No-op unless guardian_har_enabled; self-throttles to
+                # har_cadence_fps and offloads pose to the executor. Fully isolated so it can
+                # never affect the motion/recording path when off or on error.
+                try:
+                    from services.ingestion import har_hook
+
+                    await har_hook.run_har(self.camera_id, frame, loop, self._executor)
+                except Exception:
+                    logger.debug("HAR hook error (ignored)", exc_info=True)
+
                 # Motion detection on interval
                 if frame_count % MOTION_FRAME_INTERVAL == 0:
                     motion_score = self._detect_motion(frame)
