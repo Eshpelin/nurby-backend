@@ -8,6 +8,7 @@ import type { PersonaPatch } from "@/lib/camera-personas";
 import { ConversationCard } from "@/components/ConversationCard";
 import { SummaryCard } from "@/components/SummaryCard";
 import { PrivacyZonesSection } from "@/components/PrivacyZonesSection";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 
 const COMMON_TIMEZONES = [
   "America/Los_Angeles",
@@ -1536,6 +1537,11 @@ export default function CameraConfigPage() {
           </svg>
           Audio
         </Link>
+      </div>
+
+      {/* HAR activity timeline. Empty until human action recognition is enabled. */}
+      <div className="mb-6">
+        <ActivityTimeline cameraId={cameraId} />
       </div>
 
       {/* Resolution + FPS info bar */}
