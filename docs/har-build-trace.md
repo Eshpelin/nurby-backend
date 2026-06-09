@@ -81,6 +81,24 @@ Both are thin; deferred because they show data that only flows once HAR is enabl
    module owns it. When the runner matures, decide whether fall stays geometry+VLM (current) or
    consumes the skeleton `lying_down` signal as an additional prior.
 
+## Update: follow-up work landed (PRs #30, #31)
+
+Closed since the trace was written:
+- **Identity reconciliation (was the #1 gap): DONE.** `har_idmap.py` writes
+  `(camera, ingestion_track_id) -> person` to Redis from perception (faces bound to the
+  ingestion track boxes carried on the v2 keyframe payload), TTL-refreshed on presence; the
+  ingestion hook reads it and attributes segments/live to the right person or to none.
+  Unit-tested vs a fake Redis. The careful part is no longer a stub.
+- **Concurrency cap (was #2): DONE.** Process-wide `min(4, cpu-2)` semaphore around pose.
+- **Historical activity timeline (was remaining UI): DONE.** `ActivityTimeline` on the camera
+  page reading `/cameras/{id}/actions`; tsc clean.
+
+Still open: ST-GCN weights/runtime (seam only -> eating/etc are `unknown` until then); VLM
+fusion into the runner; observation-card action chip; Phase 5 productization (operator config,
+test mode, deployment profiles, degradation, compliance surfacing); and the verification gates
+(real-NUC throughput, real-footage accuracy eval). Identity is now correct-by-construction in
+code, but still unverified on a live camera + stack.
+
 ## How to turn it on (when ready)
 
 Set `guardian_har_enabled=true` after: identity reconciliation done, throughput confirmed on
