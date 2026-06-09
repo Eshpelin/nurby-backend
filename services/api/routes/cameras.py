@@ -249,6 +249,30 @@ async def list_cameras(_current_user: User = Depends(get_current_user), db: Asyn
     return [_camera_to_response(c) for c in result.scalars().all()]
 
 
+@router.get("/{camera_id}/actions")
+async def camera_action_timeline(
+    camera_id: uuid.UUID,
+    hours: int = Query(default=24, ge=1, le=168),
+    action: str | None = Query(default=None, max_length=32),
+    limit: int = Query(default=500, ge=1, le=2000),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Operator-facing HAR activity timeline for a camera: merged per-person action segments
+    over the last ``hours``. Empty until HAR is enabled. Guardian families use the
+    delay/consent/reveal-gated /guardian endpoints instead, not this one."""
+    from datetime import timedelta
+
+    from services.perception.har_segments import camera_segments
+
+    cam = await db.get(Camera, camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    items = await camera_segments(db, camera_id, since=since, action=action, limit=limit)
+    return {"items": items, "count": len(items), "hours": hours}
+
+
 @router.post("", status_code=201)
 async def create_camera(body: CameraCreate, _current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     payload = body.model_dump()

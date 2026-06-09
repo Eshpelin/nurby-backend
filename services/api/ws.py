@@ -44,6 +44,21 @@ async def broadcast(message: dict):
     _connections -= dead
 
 
+async def broadcast_person_actions(camera_id, people: list[dict]):
+    """Push current per-person actions for a camera (HAR live overlay).
+
+    ``people`` is a list of ``{track_id, person_id?, person_name?, action, confidence}``.
+    The HAR ingestion runner calls this on each sampled update. Clients subscribe with
+    ``useWSSubscribe("person_actions", handler, cameraId)`` and filter by camera, matching
+    the existing transcript_created / vlm_status pattern (single global socket, client-side
+    camera filter). Identity is already gated upstream: only person-state tracks carry a
+    name; unknown/body tracks are sent without identity or omitted by the runner for
+    guardian-facing cameras."""
+    await broadcast(
+        {"type": "person_actions", "camera_id": str(camera_id), "people": people or []}
+    )
+
+
 # ── Phone-as-mic ────────────────────────────────────────────────────────
 
 # Live browser-mic sessions. one per audio_only camera. Each session
