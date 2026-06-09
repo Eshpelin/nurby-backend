@@ -161,28 +161,75 @@ class GeometricActionBackend:
 
 
 class STGCNActionBackend:
-    """Adapter seam for PYSKL ST-GCN++ (NTU-RGB+D). Window format T x 17 x 3 matches the
-    geometric backend's input. Not runnable here (mmcv); wire weights + runtime on a real
-    deployment, then register this backend in place of the geometric one."""
+    """ONNX-runtime ST-GCN backend. No mmcv / OpenMMLab at runtime.
+
+    mmcv is only the OpenMMLab *training/research* framework; it is not needed to run a
+    pretrained model. The intended flow is: export a PYSKL/MMAction2 ST-GCN++ (or PoseConv3D)
+    checkpoint to ONNX ONCE on a dev machine, ship the small ``.onnx`` file, and run it here
+    with ``onnxruntime`` (already a dependency, same as the pose model). This keeps the
+    deployed image free of mmcv's compiled, version-pinned baggage.
+
+    The seam is wired but not exercised here because it needs the exported weights + a
+    documented label map; on a deployment, set ``model_path`` to the ONNX file and provide the
+    NTU->vocab ``label_map``. Input is a window of T x 17 x 3 (matches RTMPose/yolo-pose), which
+    this backend assembles; the exact tensor layout is recorded with the exported model.
+    """
 
     name = "stgcn"
 
-    def __init__(self, model=None, label_map=None):
-        self._model = model
+    def __init__(self, model_path: str | None = None, label_map: dict | None = None):
+        self.model_path = model_path
         self._label_map = label_map or {}
+        self._session = None
+
+    def _load(self):  # pragma: no cover - needs the exported .onnx
+        if self._session is not None:
+            return self._session
+        if not self.model_path:
+            raise NotImplementedError(
+                "STGCNActionBackend needs an exported ONNX model. Export a PYSKL/MMAction2 "
+                "ST-GCN++ checkpoint to ONNX offline (mmcv is only needed for that one-time "
+                "export, not at runtime), set har_action_model_path, and provide an "
+                "NTU->vocab label_map. Until then the geometric backend is the default."
+            )
+        import numpy as np  # noqa: F401
+        import onnxruntime as ort
+
+        self._session = ort.InferenceSession(
+            self.model_path, providers=["CPUExecutionProvider"]
+        )
+        return self._session
 
     def classify(self, window: list[PoseFrame]) -> tuple[str, float]:  # pragma: no cover
-        if self._model is None:
-            raise NotImplementedError(
-                "STGCNActionBackend needs a loaded PYSKL model + NTU->vocab label_map. "
-                "Wire on a GPU/real deployment; the geometric backend is the default."
-            )
-        raise NotImplementedError("ST-GCN inference wiring is deployment-specific.")
+        import numpy as np
+
+        sess = self._load()
+        frames = [f for f in window if f and f.keypoints]
+        if not frames:
+            return ("unknown", 0.0)
+        # T x V(17) x C(3). The exported model documents its exact expected layout; reshape
+        # there if it differs (e.g. N C T V M for PoseConv3D).
+        arr = np.array([[(x, y, c) for (x, y, c) in f.keypoints[:17]] for f in frames],
+                       dtype=np.float32)
+        inp = {sess.get_inputs()[0].name: arr[None, ...]}
+        out = sess.run(None, inp)[0]
+        idx = int(np.argmax(out))
+        conf = float(np.max(_softmax(out.reshape(-1))))
+        ntu_label = self._label_map.get(idx)
+        action = _coerce_action(ntu_label) or "unknown"
+        return (action, conf)
 
 
-def get_backend(name: str = "geometric"):
+def _softmax(v):
+    import numpy as np
+
+    e = np.exp(v - np.max(v))
+    return e / (e.sum() or 1.0)
+
+
+def get_backend(name: str = "geometric", model_path: str | None = None, label_map: dict | None = None):
     if name == "stgcn":
-        return STGCNActionBackend()
+        return STGCNActionBackend(model_path=model_path, label_map=label_map)
     return GeometricActionBackend()
 
 
@@ -191,6 +238,7 @@ def get_backend(name: str = "geometric"):
 # childcare site is not alerted on "fallen"-style eldercare logic and vice versa. "all" is the
 # default. Filtering is applied to live + stored segments by the ingestion hook.
 from services.perception.actions import ACTIONS as _VOCAB
+from services.perception.actions import _coerce_action  # noqa: E402
 
 ALL_ACTIONS = set(_VOCAB)
 ACTION_SETS: dict[str, set[str]] = {

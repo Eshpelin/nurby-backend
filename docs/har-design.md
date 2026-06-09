@@ -86,9 +86,15 @@ Layer detail:
   camera trackers do not do cross-camera; that stays the gallery's job.
 - **L1 pose.** rtmlib RTMPose, Apache-2.0, onnxruntime-only, RTMPose-m ~90 fps on an i7 CPU.
   17-keypoint output matches PYSKL's pretrained format (no remapping).
-- **L2 action.** PYSKL ST-GCN++ / PoseConv3D, Apache-2.0, pretrained on NTU-RGB+D (contains
-  fall, eat, drink, sit-down, stand-up, walk). Sliding window of per-track keypoints ->
-  closed action. NTU labels map to our vocab; unmapped -> `unknown`.
+- **L2 action.** ST-GCN++ / PoseConv3D pretrained on NTU-RGB+D (contains fall, eat, drink,
+  sit-down, stand-up, walk). Sliding window of per-track keypoints -> closed action; NTU
+  labels map to our vocab, unmapped -> `unknown`. **Runtime is ONNX via onnxruntime, no mmcv.**
+  mmcv (the OpenMMLab framework) is only needed to *export* a PYSKL/MMAction2 checkpoint to
+  ONNX once on a dev machine; the deployed image ships the small `.onnx` and runs it with the
+  onnxruntime we already use for pose. We never take mmcv as a runtime/install dependency.
+  Note: ST-GCN is an accuracy/latency *upgrade*, not a requirement for v1 -- the geometric
+  backend covers posture + fall and the VLM fusion covers eating/drinking/etc, so v1 can ship
+  with no skeleton-action model and add ONNX ST-GCN later.
 - **L3 VLM fusion (not replacement).** HAR action labels go into the VLM prompt
   (`vlm.describe(extra_context=...)`, already wired) so captions are grounded. The VLM
   caption/detail confirms or corrects HAR. Agreement -> high-confidence row (`source =
@@ -429,7 +435,7 @@ same engine and segment model.
 | Track fallback | Ultralytics `.track()` ByteTrack/BoT-SORT | AGPL-3.0 | no new dep; first cut |
 | Cross-camera | our OSNet + ArcFace gallery, fed tracklet embeddings | ours | single-camera trackers do not do this |
 | Pose | rtmlib / RTMPose | Apache-2.0 | onnxruntime-only; ~90 fps i7 CPU; 17-kp matches PYSKL |
-| Action | PYSKL ST-GCN++ / PoseConv3D | Apache-2.0 | NTU-RGB+D pretrained |
+| Action | ST-GCN++ / PoseConv3D, **exported to ONNX** (run via onnxruntime) | Apache-2.0 | NTU-RGB+D pretrained; mmcv only for the one-time offline export, never at runtime; optional (geometric + VLM cover v1) |
 | Action (alt) | MMAction2 | Apache-2.0 | heavier parent toolbox |
 | RGB fallback | VideoMAE / X3D | Apache-2.0 / permissive | only if pose quality forces it |
 
