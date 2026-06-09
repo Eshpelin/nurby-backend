@@ -22,7 +22,9 @@ is left honest rather than hallucinated.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -32,6 +34,27 @@ logger = logging.getLogger("nurby.ingestion.har_hook")
 _runners: dict[str, object] = {}
 _pose: dict[str, object] = {}
 _last_run: dict[str, float] = {}
+
+# Process-wide HAR concurrency cap (design 3.1). Pose inference offloads to per-camera
+# executors, but without a global bound, N cameras would thundering-herd the CPU. This
+# semaphore is what the deployment tiers effectively configure. Sized like the VLM workers:
+# min(4, cpu-2), at least 1.
+_HAR_MAX = max(1, min(4, (os.cpu_count() or 4) - 2))
+_HAR_SEM = asyncio.Semaphore(_HAR_MAX)
+
+
+def current_tracks(camera_id) -> list[dict]:
+    """The HAR runner's current track boxes for a camera, ``[{tracker_id, bbox}]``. Published
+    on the keyframe so perception can bind faces to them and write the identity map. Empty
+    when HAR has not run for this camera."""
+    runner = _runners.get(str(camera_id))
+    if runner is None:
+        return []
+    try:
+        tracks = getattr(runner, "_tracker").tracks
+        return [{"tracker_id": tr.track_id, "bbox": list(tr.bbox)} for tr in tracks.values()]
+    except Exception:
+        return []
 
 # Cheap cache of the enabled flag + cadence so we don't hit settings every frame.
 _cfg: dict = {"at": 0.0, "enabled": False, "cadence": 8}
@@ -53,15 +76,41 @@ async def _config() -> tuple[bool, int]:
     return _cfg["enabled"], _cfg["cadence"]
 
 
-def _identity_fn(camera_id, tracker_id):
-    """Stub. Returns None until the ingestion<->perception tracker-id reconciliation lands.
-    We never invent identity. See module docstring."""
-    return None
+async def _enrich_identity(get_redis, cam, segments, live) -> None:
+    """Attach person identity to segments + live snapshot from the cross-service Redis id map
+    (written by perception). Tracks with no binding stay person-less; never guessed."""
+    if get_redis is None:
+        return
+    try:
+        from services.perception import har_idmap
+
+        redis = await get_redis()
+        if redis is None:
+            return
+        track_ids = {e.get("track_id") for e in (live or [])} | {
+            s.get("track_id") for s in (segments or [])
+        }
+        track_ids.discard(None)
+        idmap = await har_idmap.lookup_many(redis, cam, list(track_ids))
+        for e in live or []:
+            ident = idmap.get(e.get("track_id"))
+            if ident:
+                e["person_id"] = ident.get("person_id")
+                e["person_name"] = ident.get("person_name")
+        for s in segments or []:
+            ident = idmap.get(s.get("track_id"))
+            if ident:
+                s["person_id"] = ident.get("person_id")
+                s["person_name"] = ident.get("person_name")
+    except Exception:
+        logger.debug("HAR identity enrich failed", exc_info=True)
 
 
-async def run_har(camera_id, frame, loop, executor) -> None:
+async def run_har(camera_id, frame, loop, executor, get_redis=None) -> None:
     """Called from the ingestion StreamWorker per decoded frame. No-op unless HAR is enabled
-    and the per-camera cadence allows this frame. Safe on any error."""
+    and the per-camera cadence allows this frame. Bounded by a process-wide semaphore. Safe on
+    any error. ``get_redis`` is the StreamWorker's async redis getter, used to read the
+    cross-service identity map."""
     try:
         enabled, cadence = await _config()
         if not enabled:
@@ -83,18 +132,21 @@ async def run_har(camera_id, frame, loop, executor) -> None:
         if runner is None:
             from services.perception.har_runner import HARRunner
 
-            runner = HARRunner(cam, identity_fn=_identity_fn)
+            runner = HARRunner(cam)  # identity attached post-hoc from the Redis map
             _runners[cam] = runner
 
-        # Pose off the event loop (GIL released by the model), same pattern as cap.read.
-        poses = await loop.run_in_executor(executor, pose_est.infer, frame)
+        # Global concurrency cap so N cameras cannot thundering-herd the CPU.
+        async with _HAR_SEM:
+            poses = await loop.run_in_executor(executor, pose_est.infer, frame)
         if poses is None:
             return
 
         ts = time.time()  # wall-clock epoch so segment bounds convert to datetimes
         segments, live = runner.process_poses(poses, now=ts)
 
-        # Broadcast live current activity (client filters by camera).
+        # Attribute identity from the cross-service map, then broadcast + persist.
+        await _enrich_identity(get_redis, cam, segments, live)
+
         try:
             from services.api.ws import broadcast_person_actions
 
@@ -102,7 +154,6 @@ async def run_har(camera_id, frame, loop, executor) -> None:
         except Exception:
             logger.debug("HAR live broadcast failed", exc_info=True)
 
-        # Persist finalised segments, converting epoch bounds to datetimes.
         if segments:
             for s in segments:
                 s["started_at"] = _epoch_to_dt(s.get("started_at"))

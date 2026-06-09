@@ -660,6 +660,29 @@ class PerceptionPipeline:
                 "state": ident.get("state"),
             })
 
+        # Cross-service HAR identity map. When the keyframe carries the ingestion HAR
+        # runner's track boxes (har_tracks, v2 payload), bind recognised faces to THOSE boxes
+        # and store (camera, ingestion_track_id) -> person in Redis, so the ingestion runner
+        # can attribute its continuous action segments to the right person. Gated; best-effort.
+        try:
+            from shared.app_settings import get_setting
+
+            if bool(await get_setting("guardian_har_enabled", False)):
+                import json as _json
+
+                raw = data.get(b"har_tracks")
+                har_tracks = (
+                    _json.loads(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+                    if raw else []
+                )
+                if har_tracks:
+                    from services.perception import har_idmap
+
+                    r = await self._get_redis()
+                    await har_idmap.bind_and_store(r, camera_id, har_tracks, faces)
+        except Exception:
+            logger.debug("HAR idmap write failed", exc_info=True)
+
         person_detections = None
         bodies_payload = [
             {

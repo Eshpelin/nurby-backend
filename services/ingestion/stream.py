@@ -191,7 +191,10 @@ class StreamWorker:
                 try:
                     from services.ingestion import har_hook
 
-                    await har_hook.run_har(self.camera_id, frame, loop, self._executor)
+                    await har_hook.run_har(
+                        self.camera_id, frame, loop, self._executor,
+                        get_redis=self._get_redis,
+                    )
                 except Exception:
                     logger.debug("HAR hook error (ignored)", exc_info=True)
 
@@ -494,6 +497,18 @@ class StreamWorker:
             _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             jpeg_bytes = jpeg_buf.tobytes()
 
+            # Carry the HAR runner's current track boxes so perception can bind faces to
+            # them and write the cross-service identity map. Empty/"[]" when HAR is off, so
+            # this is backward-compatible (the "v" field versions the payload).
+            import json as _json
+
+            from services.ingestion import har_hook
+
+            try:
+                har_tracks = _json.dumps(har_hook.current_tracks(self.camera_id))
+            except Exception:
+                har_tracks = "[]"
+
             r = await self._get_redis()
             await r.xadd(
                 REDIS_STREAM_KEY,
@@ -502,6 +517,8 @@ class StreamWorker:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "motion_score": str(round(motion_score, 4)),
                     "frame": jpeg_bytes,
+                    "v": "2",
+                    "har_tracks": har_tracks,
                 },
                 maxlen=REDIS_STREAM_MAXLEN,
                 approximate=True,
