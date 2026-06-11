@@ -1,0 +1,89 @@
+name: ci
+
+# Core safety net on every PR and push to main. Before this existed, only
+# the agent-eval subset ran in CI; the other ~600 tests, lint, and the
+# frontend build were never checked, so a broken frontend or a failing
+# suite could merge clean.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test deps
+        # The suite is deterministic and DB/LLM-free. The heavy perception
+        # stack (torch, torchreid, open_clip, dlib via face_recognition,
+        # panns, librosa, nudenet, ultralytics) is NOT needed: the few tests
+        # that touch those paths skip when the import is missing. Keeping
+        # them out turns a multi-GB, compile-from-source install into a
+        # ~1-minute one.
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pyyaml \
+            "fastapi>=0.115" httpx "sqlalchemy[asyncio]>=2.0" \
+            "pydantic>=2.0" pydantic-settings "pgvector>=0.3" \
+            "asyncpg>=0.30" numpy opencv-python-headless redis \
+            "python-jose[cryptography]" "passlib[bcrypt]" alembic \
+            jsonschema psutil aiosmtplib python-multipart pillow
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+  python-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff (logic errors)
+        # Gates only on rules that indicate real bugs (undefined names,
+        # duplicate dict keys, syntax errors). The repo carries style debt
+        # (E501 long lines, F401 unused imports) that should be paid down
+        # before widening this to the full configured rule set.
+        run: ruff check services/ shared/ tests/ scripts/ --select F821,F823,F811,F601,F632
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build

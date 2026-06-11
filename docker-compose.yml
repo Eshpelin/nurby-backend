@@ -81,6 +81,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Surfaces "unhealthy" in `docker compose ps` when the API cannot reach
+    # its database, instead of looking up while every request 500s.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/api/health', timeout=5); sys.exit(0 if r.status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Bundled local AI. An optional Ollama server so Docker users get
   # one-click, fully local VLM without installing anything on the host.
