@@ -209,19 +209,66 @@ def _read_nvidia_smi() -> list[dict] | None:
 
 @router.get("/smtp")
 async def get_smtp_config(_current_user: User = Depends(require_admin)):
-    """Return current SMTP configuration with masked password."""
-    masked_password = ""
-    if settings.smtp_password:
-        pw = settings.smtp_password
-        masked_password = pw[:2] + "***" + pw[-2:] if len(pw) >= 4 else "***"
+    """Effective SMTP configuration (in-app settings win over env vars)
+    with the password masked. ``source`` tells the UI whether the config
+    is editable in-app ("db"), env-managed ("env"), or absent."""
+    from shared.email import resolve_smtp
+
+    cfg = await resolve_smtp()
+    pw = cfg["password"]
+    masked_password = (pw[:2] + "***" + pw[-2:] if len(pw) >= 4 else "***") if pw else ""
     return {
-        "smtp_host": settings.smtp_host,
-        "smtp_port": settings.smtp_port,
-        "smtp_user": settings.smtp_user,
+        "smtp_host": cfg["host"],
+        "smtp_port": cfg["port"],
+        "smtp_user": cfg["user"],
         "smtp_password": masked_password,
-        "smtp_from": settings.smtp_from,
-        "smtp_tls": settings.smtp_tls,
+        "smtp_from": cfg["from_addr"],
+        "smtp_tls": cfg["tls"],
+        "source": cfg["source"],
     }
+
+
+class SmtpConfigBody(BaseModel):
+    host: str
+    port: int = 587
+    user: str = ""
+    # Empty string means "keep the currently stored password".
+    password: str = ""
+    from_addr: str = ""
+    tls: bool = True
+
+
+@router.put("/smtp")
+async def put_smtp_config(
+    body: SmtpConfigBody, _current_user: User = Depends(require_admin)
+):
+    """Save SMTP config from the Settings UI. Stored in app settings
+    (password Fernet-sealed), effective immediately, no restart. An empty
+    host clears the in-app config and falls back to env vars."""
+    from shared.app_settings import get_setting, set_setting
+    from shared.crypto import encrypt_secret
+
+    host = body.host.strip()
+    if not host:
+        await set_setting("smtp_config", None)
+        return {"ok": True, "source": "env" if settings.smtp_host else "unconfigured"}
+
+    existing = await get_setting("smtp_config")
+    password_enc = (existing or {}).get("password_enc", "") if isinstance(existing, dict) else ""
+    if body.password:
+        password_enc = encrypt_secret(body.password).decode("utf-8")
+    await set_setting(
+        "smtp_config",
+        {
+            "host": host,
+            "port": int(body.port),
+            "user": body.user.strip(),
+            "password_enc": password_enc,
+            "from": body.from_addr.strip(),
+            "tls": bool(body.tls),
+        },
+    )
+    return {"ok": True, "source": "db"}
 
 
 class SmtpTestRequest(BaseModel):
@@ -231,8 +278,11 @@ class SmtpTestRequest(BaseModel):
 @router.post("/smtp-test")
 async def test_smtp(body: SmtpTestRequest, _current_user: User = Depends(require_admin)):
     """Send a test email to verify SMTP configuration."""
-    if not settings.smtp_host:
-        return {"ok": False, "message": "SMTP not configured. Set SMTP_HOST in your environment or .env file"}
+    from shared.email import resolve_smtp
+
+    cfg = await resolve_smtp()
+    if not cfg["host"]:
+        return {"ok": False, "message": "SMTP not configured. Save your mail server details first, then test."}
 
     try:
         await send_email(

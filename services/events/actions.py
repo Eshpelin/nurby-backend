@@ -526,8 +526,10 @@ async def _execute_email(action, observation_data, rule, event_id, ctx):
         return
     recipient = render(recipient_tpl, ctx)
 
-    if not settings.smtp_host:
-        await _update_event_status(event_id, "email", "failed", "SMTP not configured. Set SMTP_HOST in environment")
+    from shared.email import resolve_smtp
+    smtp_cfg = await resolve_smtp()
+    if not smtp_cfg["host"]:
+        await _update_event_status(event_id, "email", "failed", "SMTP not configured (Settings -> Email alerts)")
         return
 
     subject = render(action.get("subject", "Nurby alert. {{rule_name}}"), ctx)

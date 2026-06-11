@@ -122,6 +122,10 @@ export default function SettingsPage() {
   const [smtpTestEmail, setSmtpTestEmail] = useState("");
   const [smtpTesting, setSmtpTesting] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [smtpPasswordInput, setSmtpPasswordInput] = useState("");
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [smtpSaveResult, setSmtpSaveResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [smtpPresetHelp, setSmtpPresetHelp] = useState<string | null>(null);
 
   // Privacy blur state (per-person toggle)
   const [blurPersons, setBlurPersons] = useState<{ id: string; display_name: string; relationship: string | null; privacy_blur: boolean; photo_path: string | null }[]>([]);
@@ -521,6 +525,53 @@ export default function SettingsPage() {
       else setSmtpTestResult({ ok: false, message: `Test returned ${res.status}` });
     } catch { setSmtpTestResult({ ok: false, message: "Network error" }); }
     finally { setSmtpTesting(false); }
+  };
+
+  const SMTP_PRESETS: { label: string; host: string; port: string; tls: boolean; help: string }[] = [
+    { label: "Gmail", host: "smtp.gmail.com", port: "587", tls: true,
+      help: "Use a Google App Password, not your normal Gmail password. Create one at myaccount.google.com/apppasswords (requires 2-step verification), then paste it here with your full Gmail address as username." },
+    { label: "Outlook", host: "smtp-mail.outlook.com", port: "587", tls: true,
+      help: "Sign in with your full Outlook/Hotmail address. If your account has two-step verification, create an app password at account.microsoft.com/security." },
+    { label: "iCloud", host: "smtp.mail.me.com", port: "587", tls: true,
+      help: "Use an app-specific password from appleid.apple.com (Sign-In and Security -> App-Specific Passwords), with your full iCloud address as username." },
+    { label: "Custom", host: "", port: "587", tls: true,
+      help: "Enter your mail server's SMTP details. Your hosting provider's docs list them, usually under 'SMTP' or 'sending email'." },
+  ];
+
+  const applySmtpPreset = (p: { host: string; port: string; tls: boolean; help: string }) => {
+    setSmtpConfig((prev) => ({ ...prev, host: p.host, port: p.port, tls: p.tls }));
+    setSmtpPresetHelp(p.help);
+    setSmtpSaveResult(null);
+  };
+
+  const handleSmtpSave = async () => {
+    setSmtpSaving(true);
+    setSmtpSaveResult(null);
+    try {
+      const res = await authFetch("/api/smtp", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: smtpConfig.host.trim(),
+          port: parseInt(smtpConfig.port) || 587,
+          user: smtpConfig.user.trim(),
+          // Blank password = keep whatever is stored.
+          password: smtpPasswordInput,
+          from_addr: smtpConfig.from.trim(),
+          tls: smtpConfig.tls,
+        }),
+      });
+      if (res.ok) {
+        setSmtpSaveResult({ ok: true, message: "Saved. Send yourself a test email below to confirm." });
+        setSmtpPasswordInput("");
+      } else {
+        const j = await res.json().catch(() => null);
+        setSmtpSaveResult({ ok: false, message: j?.detail || `Save failed (${res.status})` });
+      }
+    } catch {
+      setSmtpSaveResult({ ok: false, message: "Network error" });
+    } finally {
+      setSmtpSaving(false);
+    }
   };
 
   const activeProvider = providers.find((p) => p.active);
@@ -1319,59 +1370,97 @@ export default function SettingsPage() {
       {showSmtpModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowSmtpModal(false)} />
-          <div className="relative bg-card border border-border rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-semibold mb-1">Email Configuration</h2>
+          <div className="relative bg-card border border-border rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold mb-1">Email alerts</h2>
             <p className="text-xs text-muted-foreground mb-4">
-              SMTP settings are configured via environment variables in your .env file.
+              Where Nurby sends alert and report emails from. Pick your
+              provider, paste the password, save, then send yourself a test.
+              No restart needed.
             </p>
 
             {smtpLoading ? (
               <div className="text-sm text-muted-foreground py-6 text-center">Loading.</div>
             ) : (
               <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1.5">Quick setup</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {SMTP_PRESETS.map((p) => (
+                      <button key={p.label} type="button" onClick={() => applySmtpPreset(p)}
+                        className={`px-2 py-1.5 text-xs rounded-md border transition-colors ${
+                          smtpConfig.host === p.host && p.host
+                            ? "border-accent bg-accent/10 text-foreground"
+                            : "border-border text-muted-foreground hover:text-foreground"
+                        }`}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {smtpPresetHelp && (
+                    <p className="mt-1.5 text-[11px] text-muted-foreground leading-snug">{smtpPresetHelp}</p>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1">SMTP Host</label>
-                    <input type="text" value={smtpConfig.host} disabled
-                      className="w-full px-3 py-2 rounded-md bg-muted border border-border text-sm opacity-70" placeholder="Not set" />
-                    <span className="text-[10px] text-muted-foreground">env SMTP_HOST</span>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">SMTP host</label>
+                    <input type="text" value={smtpConfig.host}
+                      onChange={(e) => setSmtpConfig((prev) => ({ ...prev, host: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
+                      placeholder="smtp.example.com" />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1">SMTP Port</label>
-                    <input type="text" value={smtpConfig.port} disabled
-                      className="w-full px-3 py-2 rounded-md bg-muted border border-border text-sm opacity-70" placeholder="587" />
-                    <span className="text-[10px] text-muted-foreground">env SMTP_PORT</span>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Port</label>
+                    <input type="text" value={smtpConfig.port}
+                      onChange={(e) => setSmtpConfig((prev) => ({ ...prev, port: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
+                      placeholder="587" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground block mb-1">Username</label>
-                    <input type="text" value={smtpConfig.user} disabled
-                      className="w-full px-3 py-2 rounded-md bg-muted border border-border text-sm opacity-70" placeholder="Not set" />
-                    <span className="text-[10px] text-muted-foreground">env SMTP_USER</span>
+                    <input type="text" value={smtpConfig.user}
+                      onChange={(e) => setSmtpConfig((prev) => ({ ...prev, user: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
+                      placeholder="you@example.com" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground block mb-1">Password</label>
-                    <input type="password" value={smtpConfig.password} disabled
-                      className="w-full px-3 py-2 rounded-md bg-muted border border-border text-sm opacity-70" placeholder="Not set" />
-                    <span className="text-[10px] text-muted-foreground">env SMTP_PASSWORD</span>
+                    <input type="password" value={smtpPasswordInput}
+                      onChange={(e) => setSmtpPasswordInput(e.target.value)}
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
+                      placeholder={smtpConfig.password ? "unchanged" : "app password"} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1">From Address</label>
-                    <input type="text" value={smtpConfig.from} disabled
-                      className="w-full px-3 py-2 rounded-md bg-muted border border-border text-sm opacity-70" placeholder="Not set" />
-                    <span className="text-[10px] text-muted-foreground">env SMTP_FROM</span>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">From address</label>
+                    <input type="text" value={smtpConfig.from}
+                      onChange={(e) => setSmtpConfig((prev) => ({ ...prev, from: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:outline-none focus:border-accent"
+                      placeholder="defaults to username" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground block mb-1">TLS</label>
-                    <div className="flex items-center gap-2 px-3 py-2">
+                    <button type="button"
+                      onClick={() => setSmtpConfig((prev) => ({ ...prev, tls: !prev.tls }))}
+                      className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-sm hover:bg-muted/40 transition-colors">
                       <span className={`w-2 h-2 rounded-full ${smtpConfig.tls ? "bg-green-500" : "bg-yellow-500"}`} />
-                      <span className="text-sm">{smtpConfig.tls ? "Enabled" : "Disabled"}</span>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">env SMTP_TLS</span>
+                      {smtpConfig.tls ? "Enabled (recommended)" : "Disabled"}
+                    </button>
                   </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <button onClick={handleSmtpSave} disabled={smtpSaving || !smtpConfig.host.trim()}
+                    className="px-3 py-1.5 text-sm rounded-md bg-foreground text-background font-medium hover:opacity-90 disabled:opacity-50">
+                    {smtpSaving ? "Saving." : "Save"}
+                  </button>
+                  {smtpSaveResult && (
+                    <span className={`text-xs ${smtpSaveResult.ok ? "text-green-400" : "text-red-400"}`}>
+                      {smtpSaveResult.message}
+                    </span>
+                  )}
                 </div>
 
                 {/* Test */}
