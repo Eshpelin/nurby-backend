@@ -200,6 +200,56 @@ async def export_events_csv(
     )
 
 
+@router.get("/count")
+async def events_count(
+    acked: bool | None = Query(default=None),
+    rule_id: uuid.UUID | None = Query(default=None),
+    from_: datetime | None = Query(default=None, alias="from"),
+    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Count events, e.g. ?acked=false for the unreviewed badge."""
+    from sqlalchemy import func as sa_func
+
+    query = select(sa_func.count(Event.id))
+    if rule_id:
+        query = query.where(Event.rule_id == rule_id)
+    if from_:
+        query = query.where(Event.fired_at >= from_)
+    if acked is True:
+        query = query.where(Event.acked_at.is_not(None))
+    elif acked is False:
+        query = query.where(Event.acked_at.is_(None))
+    count = (await db.execute(query)).scalar_one()
+    return {"count": int(count)}
+
+
+@router.post("/batch-ack")
+async def batch_ack(
+    event_ids: list[uuid.UUID],
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Acknowledge many events in one call (max 500). Already-acked
+    events are skipped; the first acker is preserved (same semantics as
+    the single ack endpoint)."""
+    if len(event_ids) > 500:
+        raise HTTPException(status_code=400, detail="At most 500 events per call")
+    now = datetime.now(timezone.utc)
+    acked = 0
+    for eid in event_ids:
+        event = await db.get(Event, eid)
+        if event is None or event.acked_at is not None:
+            continue
+        event.acked_at = now
+        event.acked_by_user_id = current_user.id
+        event.acked_via = "web"
+        if event.acknowledged_at is None:
+            event.acknowledged_at = now
+        acked += 1
+    await db.commit()
+    return {"acked": acked, "requested": len(event_ids)}
+
+
 @router.get("/{event_id}")
 async def get_event(
     event_id: uuid.UUID,

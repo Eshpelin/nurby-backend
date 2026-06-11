@@ -35,7 +35,17 @@ from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy import String as SAString
 
 from services.agent.access import accessible_camera_ids
-from shared.models import Camera, Event, Journey, Observation, Person, Rule, Vehicle
+from shared.models import (
+    Camera,
+    DailyDigest,
+    Event,
+    Incident,
+    Journey,
+    Observation,
+    Person,
+    Rule,
+    Vehicle,
+)
 from shared.person_alias import alias_names, display_name_for
 
 logger = logging.getLogger("nurby.agent.tools")
@@ -2338,6 +2348,154 @@ async def get_vehicles(
     return {"vehicles": out, "count": len(out)}
 
 
+_LIST_RULES_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "name_contains": {
+            "type": "string", "minLength": 1, "maxLength": 255,
+            "description": "Case-insensitive substring match on rule name.",
+        },
+        "enabled_only": {"type": "boolean", "default": False},
+    },
+}
+
+
+async def list_rules(
+    ctx: dict,
+    name_contains: str | None = None,
+    enabled_only: bool = False,
+) -> dict:
+    """List automation rules so rule names/ids can be discovered before
+    querying their firings with get_events."""
+    db = ctx["db"]
+    query = select(Rule).order_by(Rule.created_at)
+    if enabled_only:
+        query = query.where(Rule.enabled == True)  # noqa: E712
+    if name_contains:
+        query = query.where(func.lower(Rule.name).like(f"%{name_contains.strip().lower()}%"))
+    rows = (await db.execute(query)).scalars().all()
+    return {
+        "count": len(rows),
+        "rules": [
+            {
+                "rule_id": str(r.id),
+                "name": r.name,
+                "enabled": r.enabled,
+                "trigger": (r.trigger_pattern or {}).get("type"),
+                "cooldown_seconds": r.cooldown_seconds,
+            }
+            for r in rows
+        ],
+    }
+
+
+_GET_INCIDENTS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "hours": {
+            "type": "integer", "minimum": 1, "maximum": _MAX_WINDOW_HOURS,
+            "default": 24,
+            "description": "Look-back window over incident start time.",
+        },
+        "camera_ids": {
+            "type": "array", "items": {"type": "string", "format": "uuid"},
+            "maxItems": 50,
+        },
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
+    },
+}
+
+
+async def get_incidents(
+    ctx: dict,
+    hours: int = 24,
+    camera_ids: list[str] | None = None,
+    limit: int = 25,
+) -> dict:
+    """Curated incident clusters (repeat sightings grouped into one
+    semantic event, with a closing VLM summary once finalized)."""
+    db = ctx["db"]
+    user = ctx["user"]
+    hours = _clamp_hours(hours)
+    limit = _clamp_limit(limit, default=25, max_=100)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    allowed = await accessible_camera_ids(user, db)
+    query = (
+        select(Incident)
+        .where(Incident.started_at >= cutoff)
+        .order_by(Incident.started_at.desc())
+        .limit(limit)
+    )
+    if allowed is not None:
+        query = query.where(Incident.camera_id.in_(allowed))
+    if camera_ids:
+        wanted = _to_uuid_set(camera_ids)
+        if wanted:
+            query = query.where(Incident.camera_id.in_(wanted))
+    rows = (await db.execute(query)).scalars().all()
+    cam_rows = await db.execute(
+        select(Camera.id, Camera.name).where(
+            Camera.id.in_({i.camera_id for i in rows} or {uuid.uuid4()})
+        )
+    )
+    cam_names = {cid: cname for cid, cname in cam_rows.all()}
+    return {
+        "count": len(rows),
+        "hours": hours,
+        "incidents": [
+            {
+                "incident_id": str(i.id),
+                "camera": cam_names.get(i.camera_id, str(i.camera_id)),
+                "kind": i.signature_kind,
+                "who_or_what": i.signature_key,
+                "started_at": i.started_at.isoformat(),
+                "ended_at": i.ended_at.isoformat() if i.ended_at else None,
+                "ongoing": not i.finalized,
+                "occurrence_count": i.occurrence_count,
+                "summary": i.summary_text,
+            }
+            for i in rows
+        ],
+    }
+
+
+_GET_DAILY_DIGEST_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "limit": {
+            "type": "integer", "minimum": 1, "maximum": 7, "default": 1,
+            "description": "How many most-recent digests to return.",
+        },
+    },
+}
+
+
+async def get_daily_digest(ctx: dict, limit: int = 1) -> dict:
+    """Pre-computed household daily digests, newest first."""
+    db = ctx["db"]
+    limit = _clamp_limit(limit, default=1, max_=7)
+    rows = (
+        await db.execute(
+            select(DailyDigest).order_by(DailyDigest.window_end.desc()).limit(limit)
+        )
+    ).scalars().all()
+    return {
+        "count": len(rows),
+        "digests": [
+            {
+                "window_start": d.window_start.isoformat(),
+                "window_end": d.window_end.isoformat(),
+                "summary": d.summary_text,
+            }
+            for d in rows
+        ],
+    }
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
@@ -2477,6 +2635,49 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "fn": summarize_window,
         "side_effect": "read",
         "cost_class": "medium",
+    },
+    {
+        "name": "list_rules",
+        "description": (
+            "List automation rules (id, name, enabled, trigger type). "
+            "Use this FIRST when a question names a rule you have not "
+            "seen ('did my porch rule fire?') or asks what automations "
+            "exist, then pass the rule_id to get_events. Cheap."
+        ),
+        "input_schema": _LIST_RULES_SCHEMA,
+        "fn": list_rules,
+        "side_effect": "read",
+        "cost_class": "cheap",
+    },
+    {
+        "name": "get_incidents",
+        "description": (
+            "Curated incident clusters: repeated sightings of the same "
+            "person/vehicle/animal grouped into one semantic event with "
+            "start/end, occurrence count, and (once finalized) a one-"
+            "line VLM summary. Best tool for 'anything unusual "
+            "lately?', 'list notable events this week', or summarizing "
+            "a stretch of activity without re-reading raw observations. "
+            "Cheap. WINDOW. Defaults to last 24h; widen with hours."
+        ),
+        "input_schema": _GET_INCIDENTS_SCHEMA,
+        "fn": get_incidents,
+        "side_effect": "read",
+        "cost_class": "cheap",
+    },
+    {
+        "name": "get_daily_digest",
+        "description": (
+            "The pre-computed household daily digest narrative (the "
+            "same one shown on the dashboard each morning). Cheapest "
+            "possible answer to 'what happened yesterday/today overall' "
+            "questions; prefer it over summarize_activity when the user "
+            "wants the day's recap rather than a custom analysis."
+        ),
+        "input_schema": _GET_DAILY_DIGEST_SCHEMA,
+        "fn": get_daily_digest,
+        "side_effect": "read",
+        "cost_class": "cheap",
     },
     {
         "name": "get_vehicles",

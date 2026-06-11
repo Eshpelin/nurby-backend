@@ -652,6 +652,9 @@ def test_registry_lookup():
         "summarize_activity",
         "summarize_window",
         "query_relationships",
+        "list_rules",
+        "get_incidents",
+        "get_daily_digest",
         "analyze_clip",
         "analyze_frame",
     }

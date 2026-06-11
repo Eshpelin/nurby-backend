@@ -7,7 +7,6 @@ import {
   cameraLookup,
   personLookup,
   type Camera,
-  type EventEntry,
   type Person,
   type Rule,
   type TelegramChannelOption,
@@ -90,28 +89,19 @@ export default function RulesPage() {
     }
   }, [authFetch]);
 
-  // Aggregate "last fired" timestamps from the events feed. The
-  // backend exposes no per-rule last_fired_at field today, so we
-  // reduce the recent event history client-side. Refreshed on save.
+  // Per-rule "last fired" map straight from the backend (one GROUP BY),
+  // replacing the old fetch-200-events-and-reduce-client-side workaround
+  // that missed anything older than the window. Refreshed on save.
   const fetchLastFired = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && now - lastFiredFetchedAt.current < LAST_FIRED_CACHE_MS) return;
     try {
-      const res = await authFetch("/api/events?limit=200");
+      const res = await authFetch("/api/rules/last-fired");
       if (!res.ok) return;
       // Stamp the cache only on success so a failed fetch retries on the
       // next call instead of pinning stale timestamps for the TTL.
       lastFiredFetchedAt.current = now;
-      const list = (await res.json()) as EventEntry[];
-      const map: Record<string, string | null> = {};
-      for (const e of list) {
-        if (!e.rule_id) continue;
-        const existing = map[e.rule_id];
-        if (!existing || new Date(e.fired_at) > new Date(existing)) {
-          map[e.rule_id] = e.fired_at;
-        }
-      }
-      setLastFiredByRule(map);
+      setLastFiredByRule(await res.json());
     } catch {
       /* silent */
     }

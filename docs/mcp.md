@@ -110,9 +110,61 @@ exposed in v1.6.
 | `get_last_sightings` | Last-seen-at per Person and per common label (30d) |
 | `get_events` | Rule firings (Events) over a time window |
 | `summarize_activity` | Pre-aggregated "what happened today?" rollup |
+| `list_rules` | Automation rules (id, name, enabled, trigger type) |
+| `get_incidents` | Curated incident clusters with VLM summaries |
+| `get_daily_digest` | The pre-computed household daily digest |
 | `query_relationships` | Co-presence, revisit, path, seen-with-label, transitions |
 | `analyze_clip` | VLM over a video window (expensive, cached forever) |
 | `analyze_frame` | VLM over one observation's thumbnail (cached forever) |
+
+## Which tool answers which question
+
+A decision guide for clients (and humans) choosing a tool:
+
+| You want to know | Call | Why |
+|---|---|---|
+| "What happened today, overall?" | `get_daily_digest`, else `summarize_activity` | Digest is pre-computed; zero analysis cost |
+| "Where was Mom last seen?" | `get_last_sightings` | Cheapest per-entity freshness check |
+| "What was Simon doing all day?" | `get_journeys` (person_name, hours=24) | Cross-camera sessions beat raw observations |
+| "Was there a package at the door at 3pm?" | `query_observations` (labels, window) | Indexed search over detections + captions |
+| "Did my porch rule fire? How often?" | `list_rules` then `get_events` | Rule firings are confirmed happenings; never re-analyze to count |
+| "Anything unusual this week?" | `get_incidents` (hours=168) | Curated clusters with summaries |
+| "Who visits together? Usual paths?" | `query_relationships` | Co-presence / transition analytics |
+| "Is that a golden retriever in this frame?" | `analyze_frame` | VLM on one thumbnail (medium cost) |
+| "Watch 4-5pm and tell me if the gate opened" | `analyze_clip` | VLM over a window. The expensive last resort |
+
+Cost intuition: everything above the `analyze_*` rows is a cheap indexed
+read. `analyze_frame` is one VLM call; `analyze_clip` samples several
+frames per call. Both are cached forever per (target, question), so
+repeating a question is free.
+
+## Time and timezone handling
+
+Tool time windows are **relative hours** (`hours=24`) resolved against
+the server clock, and timestamps in results are ISO-8601 with offsets.
+The household's display timezone is the `system_timezone` app setting;
+when a client asks for "yesterday evening", it should convert to an
+explicit window or pass a wide-enough `hours` and filter on the
+returned timestamps. The agent's own prompt grounds "today" in
+`system_timezone`; external MCP clients must do their own grounding.
+
+## Troubleshooting
+
+- **`invalid or expired token` at startup.** Mint a fresh token (they
+  carry the standard JWT expiry) and restart the server; the token is
+  read once at launch.
+- **Tools list is empty.** The SDK handshake succeeded but the token's
+  user resolved to nothing. Check the token was minted for an active
+  user on this same Nurby instance (same `JWT_SECRET`).
+- **`budget exhausted` errors.** The user's daily agent budget is spent.
+  Raise `agent_daily_token_budget_per_user` /
+  `agent_daily_cost_cents_per_user` in Settings, or wait for the daily
+  reset. Pure reads do not consume budget; only `analyze_*` calls do.
+- **Results truncated.** List tools cap at their `limit` (default 20-25,
+  max 100-200). Pass a higher `limit` or narrow the window rather than
+  assuming the result set is complete.
+- **Empty results for something that definitely happened.** Widen the
+  window: tools default to 24h. Retry with `hours=168`, then `720`.
 
 ## Security notes
 

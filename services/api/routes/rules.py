@@ -70,6 +70,28 @@ async def create_rule(body: RuleCreate, _current_user: User = Depends(get_curren
     return rule
 
 
+@router.get("/last-fired")
+async def rules_last_fired(
+    _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Map of rule_id -> most recent fired_at, in one GROUP BY.
+
+    Replaces the frontend workaround that fetched 200 events and
+    aggregated client-side (missing anything older than the window)."""
+    from sqlalchemy import func as sa_func
+
+    from shared.models import Event
+
+    rows = (
+        await db.execute(
+            select(Event.rule_id, sa_func.max(Event.fired_at))
+            .where(Event.rule_id.is_not(None))
+            .group_by(Event.rule_id)
+        )
+    ).all()
+    return {str(rule_id): fired_at.isoformat() for rule_id, fired_at in rows}
+
+
 @router.get("/{rule_id}", response_model=RuleResponse)
 async def get_rule(rule_id: uuid.UUID, _current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     rule = await db.get(Rule, rule_id)
