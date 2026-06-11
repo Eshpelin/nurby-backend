@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.events.actions import _call_vlm, _get_provider_by_kind
 from shared.config import settings
 from shared.models import Camera, Observation, Person
-from services.events.actions import _call_vlm, _get_provider_by_kind
 
 logger = logging.getLogger(__name__)
 

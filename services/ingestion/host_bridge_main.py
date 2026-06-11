@@ -27,10 +27,10 @@ import sys
 
 from sqlalchemy import select
 
+from services.ingestion.webcam_bridge import bridge_manager
 from shared.config import settings
 from shared.database import async_session
 from shared.models import Camera
-from services.ingestion.webcam_bridge import bridge_manager
 
 logging.basicConfig(
     level=logging.INFO,

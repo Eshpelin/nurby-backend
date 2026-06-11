@@ -36,16 +36,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from shared.camera_secrets import unseal
 from services.discovery.onvif import (
     ptz_continuous_move,
     ptz_goto_preset,
     ptz_stop,
 )
+from shared.camera_secrets import unseal
 
 logger = logging.getLogger("nurby.perception.ptz_tracker")
 

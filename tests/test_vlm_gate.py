@@ -8,7 +8,6 @@ graceful fallbacks.
 import asyncio
 
 import numpy as np
-import pytest
 
 from services.perception import vlm_gate
 from services.perception.vlm_gate import (

@@ -13,9 +13,8 @@ two event lists per pipeline tick.
 from __future__ import annotations
 
 import time
-from typing import Iterable
 
-from services.perception.tracker import ObjectTracker, Track, _centroid
+from services.perception.tracker import ObjectTracker, _centroid
 
 
 def _point_in_polygon(pt: tuple[float, float], poly: list[list[int]]) -> bool:

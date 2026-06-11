@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 from services.perception import daily_digest as dd
 
-
 WS = datetime(2026, 6, 4, 0, 0, tzinfo=timezone.utc)
 WE = WS + timedelta(hours=24)
 

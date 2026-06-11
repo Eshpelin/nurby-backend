@@ -1,14 +1,11 @@
 import asyncio
 import json
 import logging
-import os
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from shared.auth import decode_access_token
-from shared.config import settings
 
 logger = logging.getLogger("nurby.api.ws")
 

@@ -34,7 +34,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-
 # A binding is dropped this many seconds after its track was last seen. Keyframes are
 # sparse (seconds apart) and a person can be briefly occluded or leave and return, so this
 # is generous on purpose. Tune per deployment; injectable for tests.

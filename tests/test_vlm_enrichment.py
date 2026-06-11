@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from services.perception.vlm_enrichment_worker import build_attributes, next_lens
 
-
 # ---- lens sequencing ----------------------------------------------------
 
 def test_first_lens_is_attributes():

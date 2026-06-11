@@ -10,7 +10,6 @@ multiple models can be merged using configurable strategies.
 import asyncio
 import logging
 import os
-from collections import defaultdict
 
 import numpy as np
 

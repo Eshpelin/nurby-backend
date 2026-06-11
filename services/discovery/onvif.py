@@ -8,7 +8,6 @@ import asyncio
 import hashlib
 import logging
 import os
-import re
 import socket
 import uuid
 import xml.etree.ElementTree as ET

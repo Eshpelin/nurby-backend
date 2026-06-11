@@ -14,7 +14,6 @@ import pytest
 
 from shared.schemas import RuleCreate
 
-
 # ── helpers ──────────────────────────────────────────────────────────
 
 

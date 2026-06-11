@@ -12,20 +12,25 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 import redis.asyncio as aioredis
+from sqlalchemy import select
 
+from services.events.engine import RuleEngine
+from services.perception.detector import ObjectDetector
+from services.perception.faces import FaceRecognizer
+from services.perception.plates import detect_plates
+from services.perception.reid import BodyReID
+from services.perception.vehicles import (
+    VEHICLE_LABELS,
+    identify_vehicles,
+    plateless_reid_on,
+    schedule_descriptions,
+)
+from services.perception.vlm import VLMClient, get_active_provider
+from services.perception.vlm_queue import VLMJob, VLMQueue
+from services.search.embeddings import generate_embedding, get_embedding_provider
 from shared.config import settings
 from shared.database import async_session
 from shared.models import Camera, Observation, Provider, Transcript
-from services.perception.detector import ObjectDetector
-from services.perception.faces import FaceRecognizer
-from services.perception.reid import BodyReID
-from services.perception.plates import detect_plates
-from services.perception.vehicles import identify_vehicles, plateless_reid_on, schedule_descriptions, VEHICLE_LABELS
-from services.perception.vlm import VLMClient, get_active_provider
-from services.perception.vlm_queue import VLMQueue, VLMJob
-from services.search.embeddings import generate_embedding, get_embedding_provider
-from services.events.engine import RuleEngine
-from sqlalchemy import select
 
 logger = logging.getLogger("nurby.perception.pipeline")
 
@@ -1166,8 +1171,8 @@ class PerceptionPipeline:
                     ]
                     if person_ids:
                         try:
-                            from services.recap import invalidate_person_recaps
                             from services.api.ws import broadcast as _ws_broadcast
+                            from services.recap import invalidate_person_recaps
 
                             await invalidate_person_recaps(db, person_ids)
                             await _ws_broadcast({

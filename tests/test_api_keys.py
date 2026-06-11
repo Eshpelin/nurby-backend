@@ -4,12 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from shared import auth as auth_mod
 from shared.auth import (
     API_KEY_PREFIX,
+    _user_from_api_key,
     generate_api_key,
     hash_api_key,
-    _user_from_api_key,
 )
 
 

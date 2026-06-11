@@ -1,18 +1,53 @@
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from fastapi.responses import JSONResponse
 
-from shared.config import settings
-from services.api.routes import admin_stats, agent, api_keys, audio, auth, body_clusters, cameras, conversations, daily_digest, detection_models, devices, digests, events, guardian, incidents, invites, journeys, notifications, observations, ollama_deploy, persons, privacy_zones, providers, recordings, reports, rules, search, summaries, system, telegram, timeline, transcripts, users, vehicles, webhook_subscriptions
-from services.digest.scheduler import run_digest_loop
+from services.api.routes import (
+    admin_stats,
+    agent,
+    api_keys,
+    audio,
+    auth,
+    body_clusters,
+    cameras,
+    conversations,
+    daily_digest,
+    detection_models,
+    devices,
+    digests,
+    events,
+    guardian,
+    incidents,
+    invites,
+    journeys,
+    notifications,
+    observations,
+    ollama_deploy,
+    persons,
+    privacy_zones,
+    providers,
+    recordings,
+    reports,
+    rules,
+    search,
+    summaries,
+    system,
+    telegram,
+    timeline,
+    transcripts,
+    users,
+    vehicles,
+    webhook_subscriptions,
+)
 from services.api.ws import router as ws_router
+from services.digest.scheduler import run_digest_loop
+from shared.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +57,9 @@ START_TIME = time.time()
 def _run_migrations() -> None:
     """Apply any pending alembic migrations on startup."""
     try:
-        from alembic import command
         from alembic.config import Config
+
+        from alembic import command
 
         repo_root = Path(__file__).resolve().parents[2]
         ini_path = repo_root / "alembic.ini"
@@ -42,6 +78,12 @@ def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if "nurby_dev" in (settings.database_url or ""):
+        logger.warning(
+            "Postgres is using the default dev password (nurby_dev). Fine "
+            "for trying Nurby out; set POSTGRES_PASSWORD in .env before "
+            "exposing this machine beyond your own network."
+        )
     await asyncio.to_thread(_run_migrations)
     digest_task = asyncio.create_task(run_digest_loop())
     # Body re-identification housekeeping. Decay tentative clusters and
@@ -52,8 +94,8 @@ async def lifespan(app: FastAPI):
     reid_task = asyncio.create_task(reid_sweeper.run())
     # Telegram long-poll supervisor. One asyncio task per enabled bot
     # token, reconciled every 30s against telegram_channels.
-    from services.notify.telegram_poller import TelegramPollerManager
     from services.notify.telegram import shutdown_client as _tg_shutdown
+    from services.notify.telegram_poller import TelegramPollerManager
     tg_manager = TelegramPollerManager()
     tg_task = asyncio.create_task(tg_manager.run())
     # Scheduled reports. Saved agent questions on a clock ("what was Simon

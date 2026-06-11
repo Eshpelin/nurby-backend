@@ -29,7 +29,7 @@ import numpy as np
 from sqlalchemy import select
 
 from shared.app_settings import get_setting
-from shared.models import FaceEmbedding, Person
+from shared.models import Person
 
 logger = logging.getLogger("nurby.agent.privacy")
 

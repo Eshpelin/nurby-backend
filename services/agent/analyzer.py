@@ -39,7 +39,6 @@ import base64
 import hashlib
 import json
 import logging
-import os
 import re
 import string
 import uuid

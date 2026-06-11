@@ -28,7 +28,6 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
 
 from sqlalchemy import and_, select
 

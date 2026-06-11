@@ -13,7 +13,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
 
 import jsonschema
 import pytest
@@ -26,16 +25,15 @@ from services.agent.tools import (
     analyze_clip,
     analyze_frame,
     get_camera_layout,
-    get_journeys,
     get_events,
     get_household_snapshot,
+    get_journeys,
     get_last_sightings,
-    summarize_activity,
     get_tool,
     query_observations,
     query_relationships,
+    summarize_activity,
 )
-
 
 # ── helpers ─────────────────────────────────────────────────────────
 

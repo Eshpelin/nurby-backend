@@ -25,7 +25,6 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 

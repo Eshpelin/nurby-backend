@@ -16,8 +16,6 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from services.agent import driver as driver_mod
 from services.agent.llm import LLMResponse, LLMToolUse
 
@@ -413,8 +411,9 @@ def test_summarize_prior_evidence_returns_lines(monkeypatch):
 
 def test_format_evidence_preamble_renders_tool_calls():
     """Parent-context evidence preamble surfaces the prior run's tool calls."""
-    from services.agent.driver import _format_evidence_preamble
     from types import SimpleNamespace
+
+    from services.agent.driver import _format_evidence_preamble
 
     rows_newest_first = [
         SimpleNamespace(

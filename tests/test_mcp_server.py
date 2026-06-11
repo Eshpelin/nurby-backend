@@ -17,13 +17,9 @@ from typing import Any
 
 import pytest
 
-from services.agent import budget as budget_mod
-from services.agent import tools as tools_mod
 from services.agent.budget import BudgetStatus
 from services.agent.tools import TOOL_REGISTRY
 from services.mcp import server as mcp_server
-from shared import auth as auth_mod
-
 
 # ── fixtures / fakes ─────────────────────────────────────────────────
 

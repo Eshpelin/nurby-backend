@@ -20,7 +20,6 @@ behavioural contract these tests pin down.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -29,7 +28,6 @@ import numpy as np
 import pytest
 
 from services.agent import analyzer as A
-
 
 # ────────────────────────────────────────────────────────────────────
 # normalize_question

@@ -95,6 +95,7 @@ def test_schema_top_level_key_check():
 
 def test_condition_evaluated_by_runner(monkeypatch):
     import asyncio
+
     from services.events import actions as actions_mod
 
     calls = []
@@ -131,6 +132,7 @@ def test_condition_evaluated_by_runner(monkeypatch):
 
 def test_chained_output_writes_vars(monkeypatch):
     import asyncio
+
     from services.events import actions as actions_mod
 
     async def fake_call_vlm(*args, **kwargs):

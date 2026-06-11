@@ -30,13 +30,9 @@ import logging
 import os
 import re
 import uuid
-
-import httpx
-
 from datetime import datetime, timezone
 
-from shared.database import async_session
-from shared.models import Event, Notification, Provider, WebhookSubscription
+import httpx
 from sqlalchemy import select
 
 from services.events.templates import (
@@ -44,6 +40,8 @@ from services.events.templates import (
     render,
     safe_eval_condition,
 )
+from shared.database import async_session
+from shared.models import Event, Notification, Provider, WebhookSubscription
 
 logger = logging.getLogger("nurby.events.actions")
 
@@ -517,7 +515,6 @@ async def _execute_notify(action, observation_data, rule, event_id, ctx):
 
 
 async def _execute_email(action, observation_data, rule, event_id, ctx):
-    from shared.config import settings
     from shared.email import send_email
 
     recipient_tpl = action.get("to")
@@ -1110,8 +1107,8 @@ def _build_inline_keyboard(buttons, event_id, rule_id, ctx) -> dict | None:
     """
     if not buttons:
         return None
-    from services.notify.telegram import sign_callback, CALLBACK_DATA_MAX
     from services.events.templates import render as _render
+    from services.notify.telegram import CALLBACK_DATA_MAX, sign_callback
     rows = []
     for spec in buttons:
         if not isinstance(spec, dict):
@@ -1183,8 +1180,11 @@ async def _telegram_suppression_reason(rule, event_id, observation_data) -> str 
         return None
 
     from datetime import timedelta
-    from shared.models import Event as _Event, Observation as _Observation
+
     from sqlalchemy import select as _select
+
+    from shared.models import Event as _Event
+    from shared.models import Observation as _Observation
     cooldown = max(0, int(getattr(rule, "cooldown_seconds", 60) or 60))
     window_start = now - timedelta(seconds=cooldown)
     try:
@@ -1217,15 +1217,15 @@ async def _execute_telegram(action, observation_data, rule, event_id, ctx):
     keyboard with HMAC-signed callback_data. Rule snooze and per-event
     mute suppress the send before the network call.
     """
-    from shared.crypto import InvalidToken, decrypt_secret
-    from shared.models import TelegramChannel
     from services.notify.telegram import (
-        TelegramAPI,
-        TelegramError,
         PHOTO_CAPTION_MAX,
         PHOTO_FALLBACK_SENTINEL,
+        TelegramAPI,
+        TelegramError,
         store_message_index,
     )
+    from shared.crypto import InvalidToken, decrypt_secret
+    from shared.models import TelegramChannel
 
     channel_id_raw = action.get("channel_id")
     if not channel_id_raw:

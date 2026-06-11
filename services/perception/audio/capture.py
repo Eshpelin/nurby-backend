@@ -21,9 +21,7 @@ import asyncio
 import logging
 import threading
 import uuid
-from collections import deque
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
 
 import numpy as np
 

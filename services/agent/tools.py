@@ -31,8 +31,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy import String as SAString
+from sqlalchemy import and_, cast, func, or_, select
 
 from services.agent.access import accessible_camera_ids
 from shared.models import (

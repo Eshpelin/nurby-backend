@@ -32,7 +32,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from shared.app_settings import get_setting
 from shared.database import async_session
@@ -380,7 +380,8 @@ class EnrichmentManager:
     async def _embed(self, text: str):
         try:
             from services.search.embeddings import (
-                generate_embedding, get_embedding_provider,
+                generate_embedding,
+                get_embedding_provider,
             )
             ep = await get_embedding_provider()
             return await generate_embedding(text, ep)
@@ -518,6 +519,7 @@ def _extract_frame(video_path: str, offset_seconds: float):
     try:
         import subprocess
         import tempfile
+
         import cv2
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
             out = tf.name

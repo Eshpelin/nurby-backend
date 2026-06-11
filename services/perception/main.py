@@ -11,8 +11,8 @@ import logging
 
 from services.perception.camera_status_watcher import CameraStatusWatcher
 from services.perception.conversation_finalizer import ConversationFinalizer
-from services.perception.incident_tracker import IncidentFinalizer
 from services.perception.daily_digest import DailyDigestScheduler
+from services.perception.incident_tracker import IncidentFinalizer
 from services.perception.journey_tracker import JourneyFinalizer
 from services.perception.live_detector import LiveDetector
 from services.perception.pipeline import PerceptionPipeline

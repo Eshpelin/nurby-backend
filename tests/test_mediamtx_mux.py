@@ -9,9 +9,6 @@ audio workers depend on.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
-
-import pytest
 
 from services.ingestion.mediamtx_mux import (
     MUX_ELIGIBLE_TYPES,
@@ -20,7 +17,6 @@ from services.ingestion.mediamtx_mux import (
     mux_slug,
 )
 from services.ingestion.stream import StreamWorker
-
 
 CAM_ID = uuid.UUID("11111111-2222-3333-4444-555555555555")
 

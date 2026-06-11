@@ -65,7 +65,7 @@ jobs:
         # duplicate dict keys, syntax errors). The repo carries style debt
         # (E501 long lines, F401 unused imports) that should be paid down
         # before widening this to the full configured rule set.
-        run: ruff check services/ shared/ tests/ scripts/ --select F821,F823,F811,F601,F632
+        run: ruff check services/ shared/ tests/ scripts/ --select F821,F823,F811,F601,F632,F401,I001
 
   frontend-build:
     runs-on: ubuntu-latest

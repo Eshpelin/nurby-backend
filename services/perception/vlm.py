@@ -10,13 +10,13 @@ Supports multiple providers through a unified interface.
     ollama       Ollama local models (moondream, llava, etc.)
 """
 
-import asyncio
 import base64
 import logging
 
 import cv2
 import httpx
 import numpy as np
+from sqlalchemy import select
 
 from services.perception.llm_errors import call_with_retry
 from services.perception.token_budget import (
@@ -26,7 +26,6 @@ from services.perception.token_budget import (
 )
 from shared.database import async_session
 from shared.models import Provider
-from sqlalchemy import select
 
 logger = logging.getLogger("nurby.perception.vlm")
 

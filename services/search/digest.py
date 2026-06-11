@@ -10,11 +10,11 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.models import Observation, Camera, FaceCluster, FaceClusterSample, Person
 from services.search.query import _call_text_llm
+from shared.models import Camera, FaceCluster, FaceClusterSample, Observation, Person
 
 logger = logging.getLogger("nurby.search.digest")
 

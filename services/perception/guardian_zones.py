@@ -78,7 +78,6 @@ async def process(camera, faces) -> list[dict]:
     motion_zones = getattr(camera, "motion_zones", None)
     if not motion_zones or not faces:
         return []
-    from services.guardian.lifecycle import notify_journey_event
 
     emitted: list[dict] = []
     cam_id = str(getattr(camera, "id", ""))

@@ -20,15 +20,15 @@ The switch from mock to real is a one-line change inside
 ``run_fixture`` once ``services.agent.driver`` lands.
 """
 
+from services.agent.eval.mocks import MockDriver, MockLLMClient
+from services.agent.eval.report import format_report
 from services.agent.eval.runner import (
     EvalFixture,
     EvalResult,
-    load_fixture,
     list_fixture_paths,
+    load_fixture,
     run_fixture,
 )
-from services.agent.eval.mocks import MockDriver, MockLLMClient
-from services.agent.eval.report import format_report
 
 __all__ = [
     "EvalFixture",

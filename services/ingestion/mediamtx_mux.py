@@ -37,10 +37,10 @@ from typing import Iterable
 
 import httpx
 
+from services.ingestion.webcam_bridge import bridge_manager as _usb_bridge
 from shared.camera_secrets import unseal
 from shared.config import settings
 from shared.models import Camera
-from services.ingestion.webcam_bridge import bridge_manager as _usb_bridge
 
 logger = logging.getLogger("nurby.ingestion.mediamtx_mux")
 

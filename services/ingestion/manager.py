@@ -12,15 +12,16 @@ import uuid
 import redis.asyncio as aioredis
 from sqlalchemy import select
 
-from shared.camera_secrets import unseal
-from shared.config import settings
-from shared.database import async_session
-from shared.models import Camera
-from services.ingestion.audio_worker import AudioWorker, set_main_loop as set_audio_main_loop
+from services.ingestion.audio_worker import AudioWorker
+from services.ingestion.audio_worker import set_main_loop as set_audio_main_loop
 from services.ingestion.mediamtx_mux import mux_manager, mux_rtsp_url
 from services.ingestion.stream import StreamWorker
 from services.perception.audio.router import AudioPipelineManager
 from services.perception.audio.write_path import write_transcript
+from shared.camera_secrets import unseal
+from shared.config import settings
+from shared.database import async_session
+from shared.models import Camera
 
 logger = logging.getLogger("nurby.ingestion.manager")
 

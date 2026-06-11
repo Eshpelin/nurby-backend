@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 
+from services.perception.incident_tracker import assign_incident
 from shared.database import async_session
 from shared.models import (
     Camera,
@@ -39,7 +40,6 @@ from shared.models import (
     Person,
     Rule,
 )
-from services.perception.incident_tracker import assign_incident
 
 UTC = timezone.utc
 NOW = datetime.now(UTC)

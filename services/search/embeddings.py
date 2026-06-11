@@ -12,10 +12,10 @@ import re
 
 import httpx
 import numpy as np
+from sqlalchemy import select
 
 from shared.database import async_session
 from shared.models import Provider
-from sqlalchemy import select
 
 logger = logging.getLogger("nurby.search.embeddings")
 

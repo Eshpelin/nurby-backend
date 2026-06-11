@@ -32,15 +32,16 @@ try:
 except ImportError:  # pragma: no cover - py<3.9
     ZoneInfo = None  # type: ignore
 
-from shared.database import async_session
-from shared.models import Event, Recording, Rule
+from sqlalchemy import select
+
 from services.events.actions import execute_action
 from services.perception.spatial_events import (
+    _cross_direction,
     _point_in_polygon,
     _segments_cross,
-    _cross_direction,
 )
-from sqlalchemy import select
+from shared.database import async_session
+from shared.models import Event, Recording, Rule
 
 # Redis pubsub channel that backend routes publish to whenever a rule
 # is created, updated, or deleted. The perception process listens and
@@ -213,6 +214,7 @@ class RuleEngine:
             return self._cooldown_redis
         try:
             import redis.asyncio as aioredis
+
             from shared.config import settings
             self._cooldown_redis = aioredis.from_url(
                 settings.redis_url, decode_responses=True
@@ -702,6 +704,7 @@ class RuleEngine:
     async def _invalidation_loop(self) -> None:
         try:
             import redis.asyncio as aioredis
+
             from shared.config import settings
         except Exception:
             logger.warning("redis unavailable; rule reload falls back to %ss timer", self._cache_ttl)

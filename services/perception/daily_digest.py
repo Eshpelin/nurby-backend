@@ -24,12 +24,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from datetime import datetime, time as dtime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.api.ws import broadcast as ws_broadcast
 from services.perception.text_llm import call_text

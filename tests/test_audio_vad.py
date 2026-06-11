@@ -21,7 +21,6 @@ from services.perception.audio.constants import (
 from services.perception.audio.types import PcmChunk
 from services.perception.audio.vad import VadSegmenter
 
-
 CAM = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 

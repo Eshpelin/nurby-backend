@@ -9,7 +9,6 @@ from services.perception.har_context import (
     har_vlm_agreement,
 )
 
-
 # ── HAR -> VLM context ───────────────────────────────────────────────────────
 
 def test_format_context_names_and_actions():

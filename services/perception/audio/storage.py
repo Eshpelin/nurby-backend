@@ -15,7 +15,6 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import datetime
 
 from services.perception.audio.constants import (
     AUDIO_OPUS_BITRATE_KBPS,

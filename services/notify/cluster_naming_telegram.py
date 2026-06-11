@@ -27,6 +27,14 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+from services.notify.telegram import (
+    CALLBACK_DATA_MAX,
+    TelegramError,
+    send_message_guarded,
+    send_photo_guarded,
+    sign_callback,
+    store_message_index,
+)
 from shared.crypto import InvalidToken, decrypt_secret
 from shared.database import async_session
 from shared.models import (
@@ -35,20 +43,6 @@ from shared.models import (
     Person,
     TelegramChannel,
     TelegramDialog,
-)
-
-from services.notify.telegram import (
-    PHOTO_FALLBACK_SENTINEL,
-    TelegramAPI,
-    TelegramError,
-    send_photo_guarded,
-    send_message_guarded,
-    sign_callback,
-    store_message_index,
-    CALLBACK_DATA_MAX,
-    MEDIA_OFF_SENTINEL,
-    DUPLICATE_SUPPRESSED,
-    RATE_LIMITED_DROPPED,
 )
 
 logger = logging.getLogger("nurby.notify.cluster_naming_telegram")

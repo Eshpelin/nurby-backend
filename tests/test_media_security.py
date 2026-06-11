@@ -13,7 +13,6 @@ from fastapi import HTTPException
 from shared.auth import create_access_token, require_query_token
 from shared.paths import escape_like, resolve_inside
 
-
 # ── require_query_token ──────────────────────────────────────────────
 
 

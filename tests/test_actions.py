@@ -7,7 +7,6 @@ import pytest
 from services.perception import actions
 from services.perception import guardian_fall as gf
 
-
 # ── parse_action ──────────────────────────────────────────────────────────────
 
 def test_parse_strict_json():

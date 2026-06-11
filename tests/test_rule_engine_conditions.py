@@ -8,12 +8,8 @@ timezone cases are xfail-marked until the Pass B engine fix lands.
 import asyncio
 import uuid
 from datetime import datetime
-from unittest.mock import MagicMock
-
-import pytest
 
 from tests._engine_helpers import FakeRule, install_engine
-
 
 # ── camera filter ─────────────────────────────────────────────────
 
@@ -188,7 +184,6 @@ def test_time_window_respects_system_timezone(monkeypatch):
     is the previous day (Sunday) at 19:00. A rule restricted to Mondays
     must NOT fire when evaluated as Sunday.
     """
-    from zoneinfo import ZoneInfo
     from datetime import timezone as _tz
 
     fixed_utc = datetime(2025, 1, 6, 3, 0, tzinfo=_tz.utc)

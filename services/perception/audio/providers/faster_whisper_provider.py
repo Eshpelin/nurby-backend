@@ -14,11 +14,9 @@ worker threads can transcribe concurrent segments against the one model.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
-
-import asyncio
-import io
 
 from services.perception.audio.types import SpeechSegment, TranscriptResult
 

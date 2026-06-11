@@ -49,8 +49,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import String as SAString
-from sqlalchemy import and_, cast, select
+from sqlalchemy import select
 
 from services.agent.access import accessible_camera_ids
 from services.agent.budget import check_budget, estimate_cost, record_usage

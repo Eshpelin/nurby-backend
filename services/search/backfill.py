@@ -5,11 +5,11 @@ but no description_embedding yet.
 
 import logging
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 
+from services.search.embeddings import generate_embedding, get_embedding_provider
 from shared.database import async_session
 from shared.models import Observation
-from services.search.embeddings import generate_embedding, get_embedding_provider
 
 logger = logging.getLogger("nurby.search.backfill")
 

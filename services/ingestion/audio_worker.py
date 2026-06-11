@@ -20,11 +20,11 @@ from typing import Optional
 
 import numpy as np
 
+from services.events.engine import RuleEngine
 from shared.app_settings import get_setting
 from shared.config import settings
 from shared.database import async_session
 from shared.models import AudioDetection
-from services.events.engine import RuleEngine
 
 # Shared engine. caches rules, avoids per-event DB reload.
 _rule_engine: Optional["RuleEngine"] = None

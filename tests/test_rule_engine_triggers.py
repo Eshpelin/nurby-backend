@@ -10,8 +10,6 @@ import asyncio
 import time
 import uuid
 
-import pytest
-
 from tests._engine_helpers import FakeRule, install_engine
 
 

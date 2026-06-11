@@ -7,15 +7,13 @@ row appears and the broadcast hits the websocket bus.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
 
 from services.perception.audio.providers.mock_provider import MockProvider
-from services.perception.audio.types import SpeechSegment, TranscriptResult
+from services.perception.audio.types import SpeechSegment
 
 
 @pytest.mark.asyncio

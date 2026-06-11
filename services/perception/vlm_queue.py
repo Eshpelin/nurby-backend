@@ -24,11 +24,11 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 
+from services.perception.vlm import VLMClient
+from services.search.embeddings import generate_embedding, get_embedding_provider
 from shared.config import settings
 from shared.database import async_session
 from shared.models import Observation, Provider
-from services.perception.vlm import VLMClient
-from services.search.embeddings import generate_embedding, get_embedding_provider
 
 THUMBNAIL_DIR = os.path.join(settings.thumbnails_path, "observations")
 

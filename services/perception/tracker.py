@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Iterable
-
 
 IOU_MATCH_THRESHOLD = 0.2  # below this, detections are considered new tracks
 MAX_MISSED = 15             # expire track after N keyframes without a hit

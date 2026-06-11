@@ -9,15 +9,14 @@ against known embeddings stored in pgvector.
 
 import asyncio
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 
 import numpy as np
+from sqlalchemy import select
 
 from shared.database import async_session
 from shared.models import FaceEmbedding, Person
-from sqlalchemy import select
 
 logger = logging.getLogger("nurby.perception.faces")
 
@@ -196,8 +195,10 @@ class FaceRecognizer:
     def _save_face_crop(self, face: dict, frame: np.ndarray, camera_id: str) -> str | None:
         """Crop face from frame and save as thumbnail."""
         try:
-            import cv2
             import os
+
+            import cv2
+
             from shared.config import settings
 
             bbox = face["bbox"]  # [left, top, right, bottom]
@@ -299,8 +300,9 @@ class FaceRecognizer:
     async def _create_cluster(self, embedding: np.ndarray, camera_id: str, thumbnail_path: str | None) -> uuid.UUID | None:
         """Create a new face cluster from a single face detection."""
         try:
-            from shared.models import FaceCluster, FaceClusterSample
             from sqlalchemy import text
+
+            from shared.models import FaceCluster, FaceClusterSample
             async with async_session() as db:
                 # Allocate sequential label number. Sequence guarantees uniqueness
                 # across concurrent inserts.
@@ -341,9 +343,11 @@ class FaceRecognizer:
             return
         try:
             import os
+
             import cv2
-            from shared.models import FaceCluster
+
             from services.perception.vlm import VLMClient, get_active_provider
+            from shared.models import FaceCluster
 
             if not os.path.exists(thumbnail_path):
                 return

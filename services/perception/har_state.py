@@ -20,7 +20,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
-
 DEFAULT_WINDOW = 5          # frames in the smoothing buffer
 DEFAULT_MIN_DWELL = 1.0     # seconds a segment must last to be emitted
 

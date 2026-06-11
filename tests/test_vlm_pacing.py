@@ -8,7 +8,6 @@ from services.perception.vlm_pacing import (
     should_enqueue,
 )
 
-
 # ---- high priority -------------------------------------------------------
 
 def test_high_priority_enqueues_when_backlog_below_ceiling():

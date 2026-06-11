@@ -33,11 +33,11 @@ import uuid
 from datetime import datetime, timezone
 
 import numpy as np
+from sqlalchemy import select
 
 from shared.config import settings
 from shared.database import async_session
-from shared.models import BodyCluster, BodyClusterSample, FaceCluster, Person
-from sqlalchemy import select
+from shared.models import BodyCluster, BodyClusterSample, FaceCluster
 
 logger = logging.getLogger("nurby.perception.reid")
 

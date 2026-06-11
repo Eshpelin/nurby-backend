@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-
 # Rough char-to-token ratio. Whisper output / English prose lands
 # around 3.6-4.2 chars per token in practice. Using 4 keeps us
 # slightly conservative (we estimate fewer tokens than reality), but

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,12 +17,10 @@ import pytest
 
 from services.agent import budget as budget_mod
 from services.agent.budget import (
-    BudgetStatus,
     check_budget,
     estimate_cost,
     record_usage,
 )
-
 
 # ── settings store ───────────────────────────────────────────────────
 

@@ -28,7 +28,7 @@ import jsonschema
 from services.agent import runs as runs_mod
 from services.agent.budget import check_budget, estimate_cost, record_usage
 from services.agent.llm import LLMResponse, LLMToolUse, llm_call
-from services.agent.tools import TOOL_REGISTRY, all_tools_for_provider, get_tool
+from services.agent.tools import all_tools_for_provider, get_tool
 from shared.app_settings import get_setting
 from shared.database import async_session
 from shared.models import AgentRun, Provider, User

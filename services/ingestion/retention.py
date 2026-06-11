@@ -8,9 +8,9 @@ old recordings that exceed time or size limits.
 import asyncio
 import logging
 import os
-
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select, func, and_
+
+from sqlalchemy import and_, func, select
 
 from shared.config import settings
 from shared.database import async_session

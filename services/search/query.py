@@ -11,11 +11,19 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import select, and_, or_, func, cast, String, Float, literal_column
+from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.models import Conversation, Observation, Camera, FaceCluster, Person, Summary, Transcript
-from services.search.embeddings import generate_embedding, get_embedding_provider, EMBEDDING_DIM
+from services.search.embeddings import generate_embedding, get_embedding_provider
+from shared.models import (
+    Camera,
+    Conversation,
+    FaceCluster,
+    Observation,
+    Person,
+    Summary,
+    Transcript,
+)
 
 logger = logging.getLogger("nurby.search.query")
 
@@ -312,7 +320,6 @@ async def answer_question(
 
     Fetches relevant observations, builds context, sends to VLM.
     """
-    import httpx
 
     # Search for relevant observations
     results = await search_observations(db, query=question, limit=20)

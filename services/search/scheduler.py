@@ -15,10 +15,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.search.digest import PERIOD_DELTAS, generate_digest
+from services.search.embeddings import get_embedding_provider
 from shared.database import async_session
 from shared.models import Camera, DigestEntry, Provider
-from services.search.digest import generate_digest, PERIOD_DELTAS
-from services.search.embeddings import get_embedding_provider
 
 logger = logging.getLogger("nurby.search.scheduler")
 

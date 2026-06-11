@@ -17,7 +17,6 @@ import pytest
 from services.agent import summarizer as summ_mod
 from services.agent.summarizer import summarize_window
 
-
 # ── stubs (mirrors tests/test_agent_tools.py) ───────────────────────
 
 

@@ -35,6 +35,13 @@ from typing import Any
 
 from sqlalchemy import select
 
+from services.perception.text_llm import call_text
+from services.perception.token_budget import (
+    resolve_output_cap,
+    trim_sections_to_budget,
+)
+from services.perception.vlm import VLMClient, get_active_provider
+from services.search.embeddings import generate_embedding, get_embedding_provider
 from shared.database import async_session
 from shared.models import (
     Camera,
@@ -43,13 +50,6 @@ from shared.models import (
     Summary,
     Transcript,
 )
-from services.perception.text_llm import call_text
-from services.perception.token_budget import (
-    resolve_output_cap,
-    trim_sections_to_budget,
-)
-from services.perception.vlm import VLMClient, get_active_provider
-from services.search.embeddings import generate_embedding, get_embedding_provider
 
 logger = logging.getLogger("nurby.perception.summarizer")
 

@@ -14,7 +14,6 @@ import threading
 from collections import defaultdict, deque
 from typing import Any
 
-
 _lock = threading.Lock()
 _counters: dict[tuple[str, tuple[tuple[str, str], ...]], int] = defaultdict(int)
 _gauges: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}

@@ -30,6 +30,14 @@ from datetime import datetime, timezone
 import redis.asyncio as aioredis
 from sqlalchemy import select
 
+from services.notify.telegram import (
+    TelegramAPI,
+    TelegramError,
+    get_message_index,
+    send_message_guarded,
+    set_message_reaction,
+    verify_callback,
+)
 from shared.config import settings
 from shared.crypto import InvalidToken, decrypt_secret
 from shared.database import async_session
@@ -43,15 +51,6 @@ from shared.models import (
     TelegramChannel,
     TelegramDialog,
     User,
-)
-
-from services.notify.telegram import (
-    TelegramAPI,
-    TelegramError,
-    get_message_index,
-    send_message_guarded,
-    set_message_reaction,
-    verify_callback,
 )
 
 logger = logging.getLogger("nurby.notify.telegram_poller")
@@ -1029,7 +1028,7 @@ class TelegramPollerManager:
         Returns no markup change because the original photo's buttons
         stay useful (the user may still tap Skip).
         """
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
 
         if not cluster_id_raw or cluster_kind not in ("face", "body"):
             return ("Invalid cluster prompt.", None)
