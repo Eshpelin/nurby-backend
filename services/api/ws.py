@@ -36,12 +36,14 @@ async def broadcast(message: dict):
     """Broadcast a message to all connected WebSocket clients."""
     payload = json.dumps(message)
     dead = set()
-    for ws in _connections:
+    for ws in list(_connections):
         try:
             await ws.send_text(payload)
         except Exception:
             dead.add(ws)
-    _connections -= dead
+    # In-place update. an augmented assignment (-=) would rebind the module
+    # global as a function local and raise UnboundLocalError on every call.
+    _connections.difference_update(dead)
 
 
 async def broadcast_person_actions(camera_id, people: list[dict]):

@@ -125,10 +125,6 @@ DEFAULTS: dict[str, Any] = {
     # Free tier may be served at most one image per this interval per
     # dependant. live_video entitlement lifts the cap.
     "guardian_free_image_interval_seconds": 3600,
-    # Default face-reveal confidence floor. The bound dependant is only
-    # revealed (unblurred) above this. Facility and per-camera overrides may
-    # raise it; a per-link override may only raise it further. Never lowered.
-    "guardian_reveal_min_confidence": 0.90,
     # Safety governor. A single dependant cannot be followed across more than
     # this many cameras. Facility may override. Hitting it is logged.
     "guardian_max_cameras_per_person": 12,
@@ -143,8 +139,10 @@ DEFAULTS: dict[str, Any] = {
     "guardian_image_blur_radius": 12,
     # Dependant face reveal. When a perception face match clears the confidence
     # floor, that one box is left sharp in the otherwise-blurred image. The
-    # floor only ratchets up per facility/camera/link. ref_distance is the
-    # InsightFace L2 "same person" bound used to map confidence to distance.
+    # floor only ratchets up per facility/camera/link (never lowered).
+    # ref_distance is the InsightFace L2 "same person" bound used to map
+    # confidence to distance: floor 0.2 allows matches up to 0.88 L2, i.e.
+    # solid same-person matches only.
     "guardian_reveal_enabled": True,
     "guardian_reveal_min_confidence": 0.2,
     "guardian_reveal_ref_distance": 1.1,

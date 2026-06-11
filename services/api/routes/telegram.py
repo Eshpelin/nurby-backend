@@ -33,7 +33,7 @@ from services.notify.telegram_poller import store_pair_nonce
 from shared.auth import get_current_user
 from shared.config import settings
 from shared.crypto import InvalidToken, decrypt_secret, encrypt_secret
-from shared.database import get_db
+from shared.database import async_session, get_db
 from shared.models import Rule, TelegramChannel, User
 from shared.schemas import (
     TelegramChannelCreate,
