@@ -4,7 +4,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 # ── Camera schemas ──
 
 class CameraCreate(BaseModel):
@@ -467,6 +466,7 @@ def _validate_action_chain(actions):
     previous vlm_call action in the chain.
     """
     import re
+
     from services.events.templates import collect_refs
 
     items = actions if isinstance(actions, list) else [actions] if isinstance(actions, dict) else []

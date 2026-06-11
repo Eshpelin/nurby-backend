@@ -7,7 +7,6 @@ POST /api/daily-digest/run        force-generate on demand
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 

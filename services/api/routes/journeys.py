@@ -123,8 +123,8 @@ async def reinterpret_journey(
     if row is None:
         raise HTTPException(status_code=404, detail="journey not found")
 
-    from shared.models import Provider
     from services.perception.journey_tracker import JourneyFinalizer
+    from shared.models import Provider
 
     finalizer = JourneyFinalizer()
     provider: Provider | None = None

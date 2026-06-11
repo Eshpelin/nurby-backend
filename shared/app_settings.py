@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.database import async_session
 from shared.models import AppSetting
 
-
 DEFAULTS: dict[str, Any] = {
     "nudity_blur": True,  # default-on safety feature
     "nudity_blur_min_score": 0.5,

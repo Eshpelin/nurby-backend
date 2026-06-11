@@ -6,10 +6,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.auth import get_current_user, require_admin
-from shared.database import get_db
-from shared.models import Camera, DigestEntry, Provider, User
-from shared.schemas import DigestEntryResponse
+from services.perception.vlm import get_active_provider as get_active_vlm_provider
+from services.search.backfill import backfill_embeddings
+from services.search.digest import generate_digest
+from services.search.embeddings import get_embedding_provider
 from services.search.query import (
     answer_question,
     search_conversations,
@@ -17,10 +17,10 @@ from services.search.query import (
     search_summaries,
     search_transcripts,
 )
-from services.search.digest import generate_digest
-from services.search.embeddings import get_embedding_provider
-from services.perception.vlm import get_active_provider as get_active_vlm_provider
-from services.search.backfill import backfill_embeddings
+from shared.auth import get_current_user, require_admin
+from shared.database import get_db
+from shared.models import Camera, DigestEntry, Provider, User
+from shared.schemas import DigestEntryResponse
 
 router = APIRouter()
 

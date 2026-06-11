@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.perception.vlm_queue import get_vlm_stats
 from shared.auth import get_current_user, require_admin
 from shared.config import settings
 from shared.database import get_db
@@ -17,7 +18,6 @@ from shared.schemas import (
     SystemSettingsUpdate,
     SystemStatus,
 )
-from services.perception.vlm_queue import get_vlm_stats
 
 router = APIRouter()
 
@@ -370,7 +370,6 @@ async def patch_settings(
 # returns the manual instruction so the surface stays safe by default.
 
 import os
-import time
 
 _GITHUB_REPO = os.environ.get("NURBY_GITHUB_REPO", "Eshpelin/nurby")
 # A path on a shared volume the updater sidecar watches. Writing it asks

@@ -21,14 +21,13 @@ from fastapi import (
     Query,
     WebSocket,
     WebSocketDisconnect,
-    status,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.agent import runs as runs_mod
 from services.agent import ws as agent_ws
-from services.agent.budget import check_budget, estimate_cost
+from services.agent.budget import check_budget
 from services.agent.driver import AgentDriver
 from shared.app_settings import get_setting
 from shared.auth import decode_access_token, get_current_user

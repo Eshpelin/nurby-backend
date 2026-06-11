@@ -8,10 +8,8 @@ date-range window are the only meaningful pivots for now.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
-
-from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -89,8 +87,8 @@ async def run_summary_now(
         raise HTTPException(status_code=404, detail="camera not found")
 
     # Lazy import to avoid pulling perception deps at API import time.
-    from services.perception.summarizer import CameraSummarizer
     from services.api.ws import broadcast as ws_broadcast
+    from services.perception.summarizer import CameraSummarizer
 
     now = datetime.now(timezone.utc)
     started = now - timedelta(minutes=body.window_minutes)

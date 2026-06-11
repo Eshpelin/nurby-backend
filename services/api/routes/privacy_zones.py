@@ -17,10 +17,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.perception.privacy import SUPPORTED_TARGETS
 from shared.auth import get_current_user
 from shared.database import get_db
 from shared.models import PrivacyZone, User
-from services.perception.privacy import SUPPORTED_TARGETS
 
 router = APIRouter()
 

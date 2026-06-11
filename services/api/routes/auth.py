@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import create_access_token, get_current_user, hash_password, verify_password
 from shared.database import get_db
 from shared.models import InviteKey, User, UserCameraAccess
-from shared.schemas import AccountClaim, AdminSetup, TokenResponse, UserCreate, UserLogin, UserResponse
+from shared.schemas import (
+    AccountClaim,
+    AdminSetup,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+)
 
 router = APIRouter()
 

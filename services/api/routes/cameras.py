@@ -25,7 +25,12 @@ from shared.auth import get_current_user, require_admin
 from shared.config import settings
 from shared.database import get_db
 from shared.models import Camera, CameraStatusLog, User
-from shared.schemas import CameraCreate, CameraReorderItem, CameraResponse, CameraStatusLogResponse, CameraUpdate
+from shared.schemas import (
+    CameraCreate,
+    CameraReorderItem,
+    CameraStatusLogResponse,
+    CameraUpdate,
+)
 
 logger = logging.getLogger("nurby.api.cameras")
 

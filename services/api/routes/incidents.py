@@ -141,8 +141,8 @@ async def reinterpret_incident(
     if row is None:
         raise HTTPException(status_code=404, detail="incident not found")
 
-    from shared.models import Camera, Provider
     from services.perception.incident_tracker import IncidentFinalizer
+    from shared.models import Camera, Provider
 
     cam = await db.get(Camera, row.camera_id)
     if cam is None:

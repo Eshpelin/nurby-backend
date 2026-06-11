@@ -25,9 +25,11 @@ from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.notify.telegram import TelegramAPI, TelegramError
+from services.notify.telegram_poller import store_pair_nonce
 from shared.auth import get_current_user
 from shared.config import settings
 from shared.crypto import InvalidToken, decrypt_secret, encrypt_secret
@@ -42,8 +44,6 @@ from shared.schemas import (
     TelegramTestResponse,
     TelegramWebhookInfoResponse,
 )
-from services.notify.telegram import TelegramAPI, TelegramError
-from services.notify.telegram_poller import store_pair_nonce
 
 router = APIRouter()
 logger = logging.getLogger("nurby.api.telegram")
