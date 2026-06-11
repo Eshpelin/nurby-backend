@@ -4,9 +4,19 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3000,
-      "cwd": "frontend"
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3210"
+      ],
+      "port": 3210,
+      "cwd": "frontend",
+      "env": {
+        "NEXT_PUBLIC_API_URL": "http://localhost:8000"
+      },
+      "autoPort": true
     }
   ]
 }
