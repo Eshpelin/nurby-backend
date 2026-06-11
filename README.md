@@ -35,7 +35,7 @@ Every vehicle keyed by its license plate, with a vision-model description of wha
 
 ### Rules: plain-language automation
 
-Card-based triggers, conditions, and a chain of real-world actions. Every rule reads back as a plain sentence so you always know exactly what it does.
+Card-based triggers, conditions, and a chain of real-world actions. Every rule reads back as a plain sentence.
 
 ![Rules page](docs/screenshots/rules.png)
 
@@ -93,7 +93,7 @@ It is a thin permission and view layer on top of everything Nurby already does. 
 
 **What a guardian sees**
 
-- **Presence.** A 10-second check. "Inara is at school, Classroom B, seen 30 seconds ago." Green, amber, or grey. It never invents a location.
+- **Presence.** A 10-second check. "Inara is at school, Classroom B, seen 30 seconds ago." Green, amber, or grey.
 - **Safe arrival and verified pickup.** A push the moment they arrive and the moment they leave. Pickup is checked against an approved-pickup registry of people and vehicles, so you get "picked up by you" or a yellow "left with someone not on the approved list."
 - **A real day timeline.** Arrival, pickup, and zone moments as they happen, grouped by day, with a dedicated pickup-moment card.
 - **Blurred images.** The most recent snapshot, with every face blurred so no one is identifiable. The dependant's own enrolled photo is shown separately as a recognition aid.
@@ -104,7 +104,7 @@ It is a thin permission and view layer on top of everything Nurby already does. 
 - **Blur everyone but the bound person.** Every image served to a guardian is blurred. The system fails safe: it would rather over-blur the target than ever reveal the wrong person.
 - **Default-deny.** A guardian only ever sees the one person they are bound to. Everyone else stays an anonymous, blurred body.
 - **The facility grants, the guardian never self-grants.** Links carry a tier, an expiry, and an instant revoke for custody changes.
-- **Every view is logged** to a facility-visible audit trail. Transparency is the point.
+- **Every view is logged** to a facility-visible audit trail.
 
 **It is free and open source**
 
@@ -155,7 +155,7 @@ This makes a `.env` file from the template. The defaults are fine for trying it 
 bash scripts/fetch-models.sh
 ```
 
-This downloads the detection, face, and license-plate models once (about 430 MB) so the perception service can bake them into its image. They are baked in rather than pulled at runtime so Nurby works offline and starts instantly, and so it runs on locked-down networks where the upstream model hosts are not reachable. Re-running is safe and skips anything already downloaded.
+This downloads the detection, face, and license-plate models once (about 430 MB) so the perception service can bake them into its image. They are baked in rather than pulled at runtime so Nurby works offline and starts instantly, and so it runs on locked-down networks where the upstream model hosts are not reachable. Re-running skips anything already downloaded.
 
 ### Step 5. Start it
 
