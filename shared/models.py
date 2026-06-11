@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -192,7 +193,7 @@ class Recording(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     camera_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -380,10 +381,13 @@ class Vehicle(Base):
 
 class Observation(Base):
     __tablename__ = "observations"
+    __table_args__ = (
+        Index("ix_observations_camera_started", "camera_id", "started_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     camera_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     object_detections: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     person_detections: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -603,7 +607,7 @@ class Event(Base):
     recording_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
-    fired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    fired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     action_status: Mapped[str] = mapped_column(String(16), default="pending")
